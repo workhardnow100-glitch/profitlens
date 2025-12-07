@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+  FOUNDER
+  ACCOUNTANT
+}
+
+enum TxStatus {
+  CLEARED
+  FLAGGED
+  RESOLVED
+}
+
+model User {
+  id                 Int                 @id @default(autoincrement())
+  name               String?
+  email              String              @unique
+  emailVerified      DateTime?
+  image              String?
+  role               Role                @default(USER)
+  accounts           Account[]
+  sessions           Session[]
+  clients            Client[]
+  transactions       Transaction[]
+  manualTransactions ManualTransaction[]
+  auditLogs          AuditLog[]          @relation("UserAuditLogs")
+  subscription       Subscription?
+  reconciliations    Reconciliation[]
+}
+
+model Account {
+  id                Int     @id @default(autoincrement())
+  userId            Int
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Session {
+  id           Int      @id @default(autoincrement())
+  sessionToken String   @unique
+  userId       Int
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Client {
+  id                 Int                 @id @default(autoincrement())
+  name               String
+  email              String              @unique
+  userId             Int
+  user               User                @relation(fields: [userId], references: [id])
+  transactions       Transaction[]
+  manualTransactions ManualTransaction[]
+  statements         Statement[]
+  exportJobs         ExportJob[]
+  reconciliations    Reconciliation[]
+
+  @@index([userId])
+}
+
+model Transaction {
+  id              Int              @id @default(autoincrement())
+  date            DateTime
+  amount          Float
+  category        String
+  description     String
+  clientEmail     String
+  clientName      String
+  clientId        Int?
+  client          Client?          @relation(fields: [clientId], references: [id])
+  userId          Int
+  user            User             @relation(fields: [userId], references: [id])
+  status          TxStatus         @default(CLEARED)
+  reconciliations Reconciliation[]
+
+  @@index([clientId])
+  @@index([userId])
+}
+
+model ManualTransaction {
+  id       Int      @id @default(autoincrement())
+  clientId Int
+  userId   Int
+  amount   Float
+  type     String // "revenue" or "expense"
+  note     String?
+  date     DateTime @default(now())
+  client   Client   @relation(fields: [clientId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@index([clientId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String
+  actorEmail String?
+  route      String?
+  context    Json?
+  createdAt  DateTime @default(now())
+  userId     Int
+  user       User     @relation("UserAuditLogs", fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Nuke {
+  id          Int      @id @default(autoincrement())
+  triggeredAt DateTime @default(now())
+  reason      String?
+}
+
+model Statement {
+  id              String   @id @default(cuid())
+  uploadedAt      DateTime @default(now())
+  totalRevenue    Float
+  totalExpenses   Float
+  amount          Float    @default(0)
+  description     String   @default("")
+  accountNumber   String   @default("")
+  sortCode        String   @default("")
+  transactionType String
+  clientId        Int?
+  client          Client?  @relation(fields: [clientId], references: [id])
+
+  @@index([clientId])
+}
+
+model Subscription {
+  id                   Int       @id @default(autoincrement())
+  userId               Int       @unique
+  user                 User      @relation(fields: [userId], references: [id])
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  status               String    @default("incomplete") // active | past_due | canceled | incomplete | trialing
+  plan                 String?
+  interval             String? // month | year
+  currentPeriodEnd     DateTime?
+  cancelAtPeriodEnd    Boolean   @default(false)
+  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime  @default(now())
+
+  @@index([status])
+}
+
+model ExportJob {
+  id          Int      @id @default(autoincrement())
+  clientId    Int
+  client      Client   @relation(fields: [clientId], references: [id])
+  format      String
+  range       String
+  status      String   @default("building") // ready | building | error
+  downloadUrl String?
+  createdAt   DateTime @default(now())
+
+  @@index([clientId])
+  @@index([status])
+}
+
+model Reconciliation {
+  id            Int          @id @default(autoincrement())
+  createdAt     DateTime     @default(now())
+  status        String
+  notes         String?
+  clientId      Int?
+  client        Client?      @relation(fields: [clientId], references: [id])
+  userId        Int?
+  user          User?        @relation(fields: [userId], references: [id])
+  transactionId Int?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+}

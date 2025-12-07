@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Full-height layout */
+html,
+body,
+#__next {
+  height: 100%;
+}
+
+/* Base styles */
+body {
+  @apply antialiased bg-slate-50 text-slate-800;
+  font-family: var(--font-inter, Inter, sans-serif);
+}
+
+/* Optional: Smooth scroll behavior */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Optional: Link styling */
+a {
+  @apply text-blue-600 hover:underline;
+}
+
+/* Optional: Button reset */
+button {
+  @apply focus:outline-none focus:ring-2 focus:ring-blue-500;
+}
+
