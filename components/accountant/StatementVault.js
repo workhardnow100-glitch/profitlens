@@ -20,7 +20,7 @@ export default function StatementVault() {
       if (error) {
         console.error("Failed to fetch statements:", error.message);
       } else {
-        setStatements(data || []);
+        setStatements(data || [])
       }
       setLoading(false);
     }
