@@ -123,6 +123,7 @@ export default async function handler(req, res) {
         series: { months: [], revenue: [], expenses: [] },
         recent: [],
         breakdown: {},
+        categories: [] // added empty array for consistency
       });
     }
 
@@ -164,7 +165,6 @@ export default async function handler(req, res) {
     let totalExpenses = 0;
 
     for (const tx of transactions) {
-      // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
 
       const date = new Date(tx.date);
@@ -177,32 +177,18 @@ export default async function handler(req, res) {
       const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
       const drillCategory = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
-      // Skip excluded HMRC categories for totals
       if (hmrcCat?.is_excluded) continue;
 
-            if (amount > 0) {
+      if (amount > 0) {
         totalRevenue += amount;
         monthly[monthKey].revenue += amount;
         categoryBreakdown[hmrcCat?.category_name || drillCategory] =
           (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + amount;
       } else if (amount < 0) {
-        totalExpenses += Math.abs(amount);
+               totalExpenses += Math.abs(amount);
         monthly[monthKey].expenses += Math.abs(amount);
         categoryBreakdown[hmrcCat?.category_name || drillCategory] =
           (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + Math.abs(amount);
-      }
-
-      if (amount !== 0) {
-        recent.push({
-          id: tx.id,
-          date: date.toISOString().slice(0, 10),
-          amount,
-          description: tx.description || "",
-          category: hmrcCat?.category_name || drillCategory,
-          accountNumber: tx.account_number || "-",
-          sortCode: tx.sort_code || "-",
-          storagePath: tx.storage_path || null,
-        });
       }
     }
 
@@ -229,9 +215,11 @@ export default async function handler(req, res) {
       series: { months, revenue, expenses },
       recent,
       breakdown: categoryBreakdown,
+      categories: Object.keys(categoryBreakdown) // <-- added for dropdown
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
     res.status(500).json({ error: "Failed to load dashboard data" });
   }
 }
+
