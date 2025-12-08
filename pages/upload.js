@@ -85,7 +85,8 @@ export default function Upload() {
         <h2 className="text-2xl font-bold text-slate-800">Upload Statements</h2>
         <p className="text-slate-600 mt-2">
           Upload your bank statements here to begin analysis. Supported formats include CSV and Excel.
-          Once uploaded, your data will be parsed and tagged automatically.
+          Once uploaded, your data will be parsed and tagged automatically.Either use bulk processing 
+          or uploads, for open banking use bulk processing.
         </p>
 
         <div className="mt-6 space-y-4">

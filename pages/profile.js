@@ -97,7 +97,9 @@ export default function ProfilePage() {
       <div className="p-8" ref={reportRef}>
         <h2 className="text-2xl font-bold text-slate-800">Your Profile</h2>
         <p className="text-slate-600 mt-2">
-          Account details, HMRC categories, and transaction summaries.
+          Account details, HMRC categories, and transaction summaries. Changing categories in the 
+          dropdown menu for each transaction. Changing the categories will ultimatly fill the
+          sole trader table for easy veiwing of income & verious expences. 
         </p>
 
         {/* Account info */}
