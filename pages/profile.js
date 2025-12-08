@@ -198,14 +198,14 @@ export default function ProfilePage() {
             <h4 className="text-md font-semibold mt-6 text-slate-700">Transactions</h4>
             <table className="min-w-full mt-2 text-sm">
               <thead>
-                <tr className="bg-slate-100 text-slate-600 font-semibold">
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-4 py-2 text-left">Description</th>
-                  <th className
-                                    <th className="px-4 py-2 text-left">Category</th>
-                  <th className="px-4 py-2 text-left">Amount</th>
-                </tr>
-              </thead>
+  <tr className="bg-slate-100 text-slate-600 font-semibold">
+    <th className="px-4 py-2 text-left">Date</th>
+    <th className="px-4 py-2 text-left">Description</th>
+    <th className="px-4 py-2 text-left">Category</th>
+    <th className="px-4 py-2 text-left">Amount</th>
+  </tr>
+</thead>
+
               <tbody>
                 {transactions
                   .filter(tx => {
