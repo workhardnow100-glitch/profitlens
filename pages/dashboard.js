@@ -200,10 +200,11 @@ export default function Dashboard() {
     expenses: series.expenses[i],
   }));
 
-  const pieData = Object.entries(breakdown).map(([name, value]) => ({
-    name
-        value: Number(value.toFixed(2)),
-  }));
+const pieData = Object.entries(breakdown).map(([name, value]) => ({
+  name: name,
+  value: Number(value.toFixed(2)),
+}));
+
 
   return (
     <Layout currentPageName="Dashboard">
