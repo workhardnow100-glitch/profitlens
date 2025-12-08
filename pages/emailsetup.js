@@ -50,7 +50,7 @@ export default function EmailSetup() {
   }, []);
 
   const handleTestEmail = () => {
-    alert("Test email sent to statements@profitlens.io. Check ingestion log shortly.");
+    alert("Test email sent to profitlensappp@gmail.com. Check ingestion log shortly.");
   };
 
   const handleRuleChange = (index, field, value) => {
