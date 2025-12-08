@@ -129,8 +129,8 @@ export default async function handler(req, res) {
       "Returned Direct Debit": 0, "Transfer Between Accounts": 0
     };
 
-    // 🚫 Exclude only from income (aligns with Profile)
-    const excludedIncomeCategories = new Set([
+    // ❗ Unified exclusion set: visible in UI, zeroed in totals (income & expenses)
+    const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
       "Internal Transfer",
@@ -161,14 +161,16 @@ export default async function handler(req, res) {
         storagePath: tx.storage_path || null,
       });
 
-      // ✅ Only exclude from revenue totals; keep expenses and breakdown intact
+      // ✅ Apply unified exclusions to totals (not to visibility)
       if (amount > 0) {
-        if (!excludedIncomeCategories.has(category)) {
+        if (!excludedCategories.has(category)) {
           monthly[monthKey].revenue += amount;
         }
       } else if (amount < 0) {
-        monthly[monthKey].expenses += -amount;
-        categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
+        if (!excludedCategories.has(category)) {
+          monthly[monthKey].expenses += -amount;
+          categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
+        }
       }
     }
 
@@ -197,6 +199,7 @@ export default async function handler(req, res) {
       recent,
       breakdown: categoryBreakdown,
       categories: Object.keys(categoryBreakdown), // ✅ full category list for dropdown
+      excludedIncomeCategories: Array.from(excludedCategories), // for frontend drilldown filtering if needed
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
