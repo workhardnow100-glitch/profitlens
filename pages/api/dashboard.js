@@ -3,6 +3,54 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
+// --- Infer drill-down category from banking codes and merchant keywords ---
+function inferCategory(type = "", description = "") {
+  const normalized = type?.trim().toUpperCase() || "";
+
+  // Banking codes
+  if (normalized === "FPO") return "Payment";
+  if (normalized === "TFR") return "Transfer";
+  if (normalized === "CHG") return "Bank Charges";
+  if (normalized === "DEB") return "Debit";
+  if (normalized === "DD") return "Direct Debit";
+  if (normalized === "SO") return "Standing Order";
+  if (normalized === "INT") return "Interest";
+  if (normalized === "FPI") return "Transfer In";
+  if (normalized === "BP") return "Savings";
+  if (normalized === "DEP") return "Bank Charge Waived";
+  if (normalized === "PAY") return "Charges";
+  if (normalized === "FEE") return "Bank Account Fee";
+  if (normalized === "CPT") return "Cash Withdrawal";
+
+  // Merchant/keyword rules
+  const rules = [
+    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
+    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
+    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
+    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
+    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
+    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
+    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Utilities" },
+    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i, category: "Utilities" },
+    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
+    { regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i, category: "Advertising" },
+    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
+    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Health" },
+    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance" },
+    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
+    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
+  ];
+
+  for (const rule of rules) {
+    if (rule.regex.test(description)) {
+      return rule.category;
+    }
+  }
+
+  return "Other";
+}
+// --- End inferCategory ---
+
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
@@ -29,7 +77,6 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
-      // Audit log
       await supabaseAdmin.from("audit").insert([{
         client_id: clientId,
         user: session.user.email,
@@ -38,7 +85,6 @@ export default async function handler(req, res) {
         timestamp: new Date().toISOString(),
       }]);
 
-      console.log("🧨 Deleted transactions for client:", clientId, "count:", count);
       return res.status(200).json({ success: true, deleted: count });
     } catch (err) {
       console.error("❌ DELETE error:", err.message || err);
@@ -72,12 +118,37 @@ export default async function handler(req, res) {
         series: { months: [], revenue: [], expenses: [] },
         recent: [],
         breakdown: {},
+        monthlyBreakdown: {},
       });
     }
 
     const monthly = {};
     const recent = [];
-    const categoryBreakdown = {};
+    const categoryBreakdown = {
+      "Payment": 0,
+      "Transfer": 0,
+      "Bank Charges": 0,
+      "Debit": 0,
+      "Direct Debit": 0,
+      "Standing Order": 0,
+      "Interest": 0,
+      "Groceries": 0,
+      "Food & Drink": 0,
+      "Shopping": 0,
+      "Transport": 0,
+      "Travel": 0,
+      "Fuel": 0,
+      "Utilities": 0,
+      "Subscriptions": 0,
+      "Advertising": 0,
+      "Business & Tax": 0,
+      "Health": 0,
+      "Insurance": 0,
+      "Entertainment": 0,
+      "Fitness": 0,
+      "Other": 0,
+    };
+    const monthlyBreakdown = {};
 
     let totalRevenue = 0;
     let totalExpenses = 0;
@@ -87,23 +158,29 @@ export default async function handler(req, res) {
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const monthKey = date.toISOString().slice(0, 7);
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
+      if (!monthlyBreakdown[monthKey]) monthlyBreakdown[monthKey] = {};
 
-      const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-      const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-      const catName = cat?.category_name || "Uncategorised";
+      const amount = parseFloat(tx.amount || 0);
+      const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+      const drillCategory = inferCategory(tx.type, tx.description);
 
-      // Skip excluded categories (Transfers, Insurance Payout, Disposal of Fixed Asset, etc.)
-      if (cat?.is_excluded) continue;
+      // Skip excluded HMRC categories for revenue/expenses
+      if (hmrcCat?.is_excluded) continue;
 
       if (amount > 0) {
         totalRevenue += amount;
         monthly[monthKey].revenue += amount;
+        categoryBreakdown[drillCategory] = (categoryBreakdown[drillCategory] || 0) + amount;
+        monthlyBreakdown[monthKey][drillCategory] =
+          (monthlyBreakdown[monthKey][drillCategory] || 0) + amount;
       } else if (amount < 0) {
         totalExpenses += Math.abs(amount);
         monthly[monthKey].expenses += Math.abs(amount);
-        categoryBreakdown[catName] = (categoryBreakdown[catName] || 0) + Math.abs(amount);
+                categoryBreakdown[drillCategory] = (categoryBreakdown[drillCategory] || 0) + Math.abs(amount);
+        monthlyBreakdown[monthKey][drillCategory] =
+          (monthlyBreakdown[monthKey][drillCategory] || 0) + Math.abs(amount);
       }
 
       if (amount !== 0) {
@@ -112,7 +189,7 @@ export default async function handler(req, res) {
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          category: catName,
+          category: drillCategory,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
@@ -143,7 +220,8 @@ export default async function handler(req, res) {
         expenses: Object.keys(monthly).sort().map(m => monthly[m].expenses),
       },
       recent,
-      breakdown: categoryBreakdown,
+      breakdown: categoryBreakdown,       // overall drill-down totals
+      monthlyBreakdown                    // per-month drill-down by category
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
