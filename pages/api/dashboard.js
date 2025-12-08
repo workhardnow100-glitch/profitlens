@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// --- Infer drill-down category from banking codes and merchant keywords ---
+// --- Added inferCategory ---
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
 
@@ -77,6 +77,7 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
+      // Audit log
       await supabaseAdmin.from("audit").insert([{
         client_id: clientId,
         user: session.user.email,
@@ -85,6 +86,7 @@ export default async function handler(req, res) {
         timestamp: new Date().toISOString(),
       }]);
 
+      console.log("🧨 Deleted transactions for client:", clientId, "count:", count);
       return res.status(200).json({ success: true, deleted: count });
     } catch (err) {
       console.error("❌ DELETE error:", err.message || err);
@@ -94,19 +96,15 @@ export default async function handler(req, res) {
 
   // --- GET route ---
   try {
-    const { data: transactions, error: txError } = await supabaseAdmin
+    const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
-      .select("id, date, amount, description, hmrc_category_id, account_number, sort_code, storage_path, type, is_reversal")
+      .select(
+        "id, date, amount, description, category, account_number, sort_code, storage_path, type, is_reversal"
+      )
       .eq("client_id", clientId)
       .order("date", { ascending: false });
-    if (txError) throw txError;
 
-    // Fetch global HMRC categories
-    const { data: hmrcCategories, error: catError } = await supabaseAdmin
-      .from("hmrc_categories")
-      .select("id, category_name, business_type, is_global, is_excluded")
-      .eq("is_global", true);
-    if (catError) throw catError;
+    if (error) throw error;
 
     if (!transactions?.length) {
       return res.status(200).json({
@@ -118,12 +116,13 @@ export default async function handler(req, res) {
         series: { months: [], revenue: [], expenses: [] },
         recent: [],
         breakdown: {},
-        monthlyBreakdown: {},
       });
     }
 
     const monthly = {};
     const recent = [];
+
+    // Pre-initialize categories so all appear in breakdown even if 0
     const categoryBreakdown = {
       "Payment": 0,
       "Transfer": 0,
@@ -147,40 +146,31 @@ export default async function handler(req, res) {
       "Entertainment": 0,
       "Fitness": 0,
       "Other": 0,
+      // --- Added inline to align with Profile ---
+      "Staff costs": 0,
+      "Client Income": 0,
+      "Insurance Payout": 0,
+      "Disposal of Fixed Asset": 0,
     };
-    const monthlyBreakdown = {};
-
-    let totalRevenue = 0;
-    let totalExpenses = 0;
 
     for (const tx of transactions) {
+      // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
+
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const monthKey = date.toISOString().slice(0, 7);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
-      if (!monthlyBreakdown[monthKey]) monthlyBreakdown[monthKey] = {};
 
-      const amount = parseFloat(tx.amount || 0);
-      const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-      const drillCategory = inferCategory(tx.type, tx.description);
-
-      // Skip excluded HMRC categories for revenue/expenses
-      if (hmrcCat?.is_excluded) continue;
+      const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
+      const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
       if (amount > 0) {
-        totalRevenue += amount;
         monthly[monthKey].revenue += amount;
-        categoryBreakdown[drillCategory] = (categoryBreakdown[drillCategory] || 0) + amount;
-        monthlyBreakdown[monthKey][drillCategory] =
-          (monthlyBreakdown[monthKey][drillCategory] || 0) + amount;
       } else if (amount < 0) {
-        totalExpenses += Math.abs(amount);
-        monthly[monthKey].expenses += Math.abs(amount);
-                categoryBreakdown[drillCategory] = (categoryBreakdown[drillCategory] || 0) + Math.abs(amount);
-        monthlyBreakdown[monthKey][drillCategory] =
-          (monthlyBreakdown[monthKey][drillCategory] || 0) + Math.abs(amount);
+        monthly[monthKey].expenses += -amount;
+        categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
       }
 
       if (amount !== 0) {
@@ -189,7 +179,7 @@ export default async function handler(req, res) {
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          category: drillCategory,
+          category,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
@@ -197,6 +187,11 @@ export default async function handler(req, res) {
       }
     }
 
+        const months = Object.keys(monthly).sort();
+    const revenue = months.map((m) => monthly[m].revenue);
+    const expenses = months.map((m) => monthly[m].expenses);
+    const totalRevenue = revenue.reduce((a, b) => a + b, 0);
+    const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
 
     // Audit log
@@ -214,14 +209,9 @@ export default async function handler(req, res) {
         { label: "Total Expenses", value: totalExpenses.toFixed(2) },
         { label: "Net Profit", value: netProfit.toFixed(2) },
       ],
-      series: {
-        months: Object.keys(monthly).sort(),
-        revenue: Object.keys(monthly).sort().map(m => monthly[m].revenue),
-        expenses: Object.keys(monthly).sort().map(m => monthly[m].expenses),
-      },
+      series: { months, revenue, expenses },
       recent,
-      breakdown: categoryBreakdown,       // overall drill-down totals
-      monthlyBreakdown                    // per-month drill-down by category
+      breakdown: categoryBreakdown,
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
