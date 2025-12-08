@@ -177,10 +177,10 @@ export default async function handler(req, res) {
       const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
       const drillCategory = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
-            // Skip excluded HMRC categories for totals
+      // Skip excluded HMRC categories for totals
       if (hmrcCat?.is_excluded) continue;
 
-      if (amount > 0) {
+            if (amount > 0) {
         totalRevenue += amount;
         monthly[monthKey].revenue += amount;
         categoryBreakdown[hmrcCat?.category_name || drillCategory] =
@@ -209,8 +209,6 @@ export default async function handler(req, res) {
     const months = Object.keys(monthly).sort();
     const revenue = months.map((m) => monthly[m].revenue);
     const expenses = months.map((m) => monthly[m].expenses);
-    const totalRevenue = revenue.reduce((a, b) => a + b, 0);
-    const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
 
     // Audit log
