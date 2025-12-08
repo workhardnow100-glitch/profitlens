@@ -141,20 +141,18 @@ export default function Reports() {
     );
   }, [reports, selectedCategory]);
 
-  // ✅ Time series chart
+  // ✅ Time series chart (updated to always show data)
   const timeSeriesOptions = useMemo(() => {
     if (!filteredReports.length) return null;
 
     const labels = filteredReports.map((r) => r.label);
+
+    // Include all categories for this chart (ignore excludedCategories)
     const income = filteredReports.map((r) =>
-      (r.categories || [])
-        .filter((c) => !excludedCategories.has(c.name))
-        .reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0)
+      (r.categories || []).reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0)
     );
     const expenses = filteredReports.map((r) =>
-      (r.categories || [])
-        .filter((c) => !excludedCategories.has(c.name))
-        .reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0)
+      (r.categories || []).reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0)
     );
     const net = income.map((inc, i) => inc - expenses[i]);
 
@@ -265,7 +263,7 @@ export default function Reports() {
     };
   }, [transactions]);
 
-    // ✅ Sunburst
+  // ✅ Sunburst
   const sunburstOptions = useMemo(() => {
     if (!transactions.length) return null;
 
@@ -315,7 +313,13 @@ export default function Reports() {
     filteredReports.forEach((r, i) => {
       catList.forEach((cat, j) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
-        data.push([i, j, entry && !excludedCategories.has(entry.name) ? Number(entry.amount || 0) : 0]);
+        data.push([
+          i,
+          j,
+          entry && !excludedCategories.has(entry.name)
+            ? Number(entry.amount || 0)
+            : 0,
+        ]);
       });
     });
 
@@ -387,6 +391,7 @@ export default function Reports() {
             <HighchartsReact highcharts={hc} options={timeSeriesOptions} />
           )}
         </div>
+
         {/* Stacked + Waterfall */}
         <div className="mt-8 grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="bg-white p-4 rounded-lg shadow-sm min-h-[280px]">
