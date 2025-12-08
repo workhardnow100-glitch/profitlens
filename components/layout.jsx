@@ -127,7 +127,7 @@ export default function Layout({ children }) {
                 <div className="px-4 py-3 space-y-3">
                   <div className="flex items-center gap-3 text-sm">
                     <DollarSign className="w-4 h-4 text-emerald-500" />
-                    <span className="text-slate-600">Year Profit</span>
+                    <span className="text-slate-600">Yearly Total </span>
                     <span className="ml-auto font-bold text-emerald-600">
                       £{stats.revenue}
                     </span>
