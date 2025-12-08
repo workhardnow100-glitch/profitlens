@@ -191,7 +191,6 @@ function computeDateWindow(period, customFrom, customTo) {
       break;
     }
     default: {
-      // No period filter: open range
       from = null;
       to = null;
     }
@@ -200,7 +199,6 @@ function computeDateWindow(period, customFrom, customTo) {
   return { from, to };
 }
 
-// Apply date window to an array of transactions
 function filterByDateWindow(transactions, from, to) {
   if (!from && !to) return transactions;
 
@@ -213,23 +211,34 @@ function filterByDateWindow(transactions, from, to) {
   });
 }
 
-// Compute summary for a list of transactions
+// ✅ Unified computeSummary with exclusions
 function computeSummary(transactions) {
   let income = 0;
   let expenses = 0;
   const categories = {};
 
+  const excludedCategories = new Set([
+    "Asset Disposal",
+    "Insurance Payout",
+    "Internal Transfer",
+    "Returned Direct Debit",
+    "Transfer Between Accounts",
+  ]);
+
   transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
-    const isIncome = amount >= 0;
     const category = tx.category || "Uncategorised";
 
-    if (isIncome) {
-      income += amount;
-    } else {
-      const out = Math.abs(amount);
-      expenses += out;
-      categories[category] = (categories[category] || 0) + out;
+    if (amount > 0) {
+      if (!excludedCategories.has(category)) {
+        income += amount;
+      }
+    } else if (amount < 0) {
+      if (!excludedCategories.has(category)) {
+        const out = Math.abs(amount);
+        expenses += out;
+        categories[category] = (categories[category] || 0) + out;
+      }
     }
   });
 
@@ -259,11 +268,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
-  const {
-    period = "month",
-    from: fromParam,
-    to: toParam,
-  } = req.query;
+  const { period = "month", from: fromParam, to: toParam } = req.query;
 
   try {
     const { data, error } = await supabaseAdmin
@@ -277,7 +282,6 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    // Enrich with categories and revenue flag
     const enriched = (data || []).map((tx) => {
       const category =
         tx.category?.trim() || inferCategory(tx.type, tx.description);
@@ -285,23 +289,20 @@ export default async function handler(req, res) {
       return {
         ...tx,
         category,
-        isRevenue: !(tx.amount > 0 && (tx.is_reversal ?? false)),
       };
     });
 
-    // Compute date window for this request
     const customFrom = fromParam ? new Date(fromParam) : null;
     const customTo = toParam ? new Date(toParam) : null;
-
     const { from, to } = computeDateWindow(period, customFrom, customTo);
 
     const filtered = filterByDateWindow(enriched, from, to);
     const summary = computeSummary(filtered);
 
     return res.status(200).json({
-      transactions: enriched,          // all for the client
-      filtered,                        // filtered for this period
-      summary,                         // income, expenses, net, categories
+      transactions: enriched,
+      filtered,
+      summary,
       meta: {
         period,
         from: from ? from.toISOString() : null,
