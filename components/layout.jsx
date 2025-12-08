@@ -121,7 +121,7 @@ export default function Layout({ children }) {
 
             <SidebarGroup>
               <SidebarGroupLabel className="text-xs font-medium text-slate-500 uppercase tracking-wider px-3 py-3">
-                Quick Stats
+                StQuick ats
               </SidebarGroupLabel>
               <SidebarGroupContent>
                 <div className="px-4 py-3 space-y-3">

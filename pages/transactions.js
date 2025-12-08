@@ -211,6 +211,7 @@ export default function Transactions() {
       "Internal Transfer",
       "Returned Direct Debit",
       "Transfer Between Accounts",
+      "Refund",
     ]);
 
     filtered.forEach((tx) => {
@@ -436,7 +437,7 @@ export default function Transactions() {
 
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="border rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-slate-800">Top income payers</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Top income</h3>
             <ul className="mt-2 space-y-2">
               {topIncomePayers.length === 0 && (
                 <li className="text-slate-500">No income in this period</li>
@@ -452,7 +453,7 @@ export default function Transactions() {
             </ul>
           </div>
           <div className="border rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-slate-800">Top expense merchants</h3>
+            <h3 className="text-lg font-semibold text-slate-800">Top expense</h3>
             <ul className="mt-2 space-y-2">
               {topExpenseMerchants.length === 0 && (
                 <li className="text-slate-500">No expenses in this period</li>
