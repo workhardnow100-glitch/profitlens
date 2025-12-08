@@ -113,6 +113,15 @@ export default function Reports() {
     fetchTx();
   }, [selectedClient, status]);
 
+  // ✅ Exclusion set
+  const excludedCategories = new Set([
+    "Asset Disposal",
+    "Insurance Payout",
+    "Internal Transfer",
+    "Returned Direct Debit",
+    "Transfer Between Accounts",
+  ]);
+
   // ✅ Available categories
   const availableCategories = useMemo(() => {
     const set = new Set();
@@ -137,9 +146,17 @@ export default function Reports() {
     if (!filteredReports.length) return null;
 
     const labels = filteredReports.map((r) => r.label);
-    const income = filteredReports.map((r) => Number(r.revenue || 0));
-    const expenses = filteredReports.map((r) => Number(r.expenses || 0));
-    const net = filteredReports.map((r) => Number(r.net || 0));
+    const income = filteredReports.map((r) =>
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0)
+    );
+    const expenses = filteredReports.map((r) =>
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0)
+    );
+    const net = income.map((inc, i) => inc - expenses[i]);
 
     return {
       chart: { type: "spline", height: 320 },
@@ -164,14 +181,18 @@ export default function Reports() {
 
     const categorySet = new Set();
     filteredReports.forEach((r) =>
-      (r.categories || []).forEach((c) => categorySet.add(c.name))
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .forEach((c) => categorySet.add(c.name))
     );
     const catList = Array.from(categorySet);
 
     const series = catList.map((cat) => {
       const data = filteredReports.map((r) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
-        return entry ? Number(entry.amount || 0) : 0;
+        return entry && !excludedCategories.has(entry.name)
+          ? Number(entry.amount || 0)
+          : 0;
       });
       return { name: cat, data };
     });
@@ -196,11 +217,13 @@ export default function Reports() {
 
     const income = Number(latest.revenue || 0);
 
-    const expenseItems = (latest.categories || []).map((c) => ({
-      name: c.name,
-      y: -Number(c.amount || 0),
-      color: "#ef4444",
-    }));
+    const expenseItems = (latest.categories || [])
+      .filter((c) => !excludedCategories.has(c.name))
+      .map((c) => ({
+        name: c.name,
+        y: -Number(c.amount || 0),
+        color: "#ef4444",
+      }));
 
     const totalExpenses = -expenseItems.reduce(
       (sum, c) => sum + Math.abs(c.y),
@@ -226,11 +249,13 @@ export default function Reports() {
   const sankeyOptions = useMemo(() => {
     if (!transactions.length) return null;
 
-    const links = transactions.map((tx) => ({
-      from: "Income",
-      to: tx.category,
-      weight: Math.abs(Number(tx.amount || 0)),
-    }));
+    const links = transactions
+      .filter((tx) => !excludedCategories.has(tx.category))
+      .map((tx) => ({
+        from: "Income",
+        to: tx.category,
+        weight: Math.abs(Number(tx.amount || 0)),
+      }));
 
     return {
       chart: { height: 320 },
@@ -240,18 +265,20 @@ export default function Reports() {
     };
   }, [transactions]);
 
-  // ✅ Sunburst
+    // ✅ Sunburst
   const sunburstOptions = useMemo(() => {
     if (!transactions.length) return null;
 
     const data = [];
     const catTotals = {};
 
-    transactions.forEach((tx) => {
-      const cat = tx.category;
-      const amt = Math.abs(Number(tx.amount || 0));
-      catTotals[cat] = (catTotals[cat] || 0) + amt;
-    });
+    transactions
+      .filter((tx) => !excludedCategories.has(tx.category))
+      .forEach((tx) => {
+        const cat = tx.category;
+        const amt = Math.abs(Number(tx.amount || 0));
+        catTotals[cat] = (catTotals[cat] || 0) + amt;
+      });
 
     Object.entries(catTotals).forEach(([cat, amt]) => {
       data.push({ id: cat, parent: "root", name: cat, value: amt });
@@ -278,7 +305,9 @@ export default function Reports() {
     const categories = filteredReports.map((r) => r.label);
     const catSet = new Set();
     filteredReports.forEach((r) =>
-      (r.categories || []).forEach((c) => catSet.add(c.name))
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .forEach((c) => catSet.add(c.name))
     );
     const catList = Array.from(catSet);
 
@@ -286,7 +315,7 @@ export default function Reports() {
     filteredReports.forEach((r, i) => {
       catList.forEach((cat, j) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
-        data.push([i, j, entry ? Number(entry.amount || 0) : 0]);
+        data.push([i, j, entry && !excludedCategories.has(entry.name) ? Number(entry.amount || 0) : 0]);
       });
     });
 
@@ -358,7 +387,6 @@ export default function Reports() {
             <HighchartsReact highcharts={hc} options={timeSeriesOptions} />
           )}
         </div>
-
         {/* Stacked + Waterfall */}
         <div className="mt-8 grid grid-cols-1 xl:grid-cols-2 gap-6">
           <div className="bg-white p-4 rounded-lg shadow-sm min-h-[280px]">
