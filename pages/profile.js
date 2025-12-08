@@ -41,7 +41,7 @@ export default function ProfilePage() {
         setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
 
-        // Build totals per business type based on categories
+        // Build totals per business type
         const totals = { sole_trader: {}, limited_company: {} };
         json.hmrcCategories.forEach(cat => {
           totals[cat.business_type][cat.category_name] = 0;
@@ -54,7 +54,7 @@ export default function ProfilePage() {
         });
         setTotalsByType(totals);
 
-        // ✅ Use liabilities calculated by the API instead of local sums
+        // ✅ Use liabilities calculated by the API
         setSoleTraderTotal(json.summary?.liabilities?.sole_trader || 0);
         setCompanyTotal(json.summary?.liabilities?.limited_company || 0);
 
@@ -117,29 +117,17 @@ export default function ProfilePage() {
         <div className="bg-white shadow-sm rounded p-4 mt-6">
           <h3 className="text-lg font-semibold text-slate-700">Account details</h3>
           <div className="mt-2 text-slate-700">
-            <p>
-              <span className="font-medium">Account number:</span>{" "}
-              {account?.account_number || "—"}
-            </p>
-            <p>
-              <span className="font-medium">Sort code:</span>{" "}
-              {account?.sort_code || "—"}
-            </p>
+            <p><span className="font-medium">Account number:</span> {account?.account_number || "—"}</p>
+            <p><span className="font-medium">Sort code:</span> {account?.sort_code || "—"}</p>
           </div>
         </div>
 
         {/* Export buttons */}
         <div className="flex gap-4 mt-6">
-          <button
-            onClick={handlePrint}
-            className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
-          >
+          <button onClick={handlePrint} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition">
             Download PDF
           </button>
-          <button
-            onClick={handleExportCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
-          >
+          <button onClick={handleExportCSV} className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition">
             Export CSV
           </button>
         </div>
@@ -180,6 +168,7 @@ export default function ProfilePage() {
             <p className="text-slate-600 mt-1">
               Total Owed: £{(type === "sole_trader" ? soleTraderTotal : companyTotal).toFixed(2)}
             </p>
+
             {/* Category cards */}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {hmrcCategories
@@ -198,16 +187,16 @@ export default function ProfilePage() {
             <h4 className="text-md font-semibold mt-6 text-slate-700">Transactions</h4>
             <table className="min-w-full mt-2 text-sm">
               <thead>
-  <tr className="bg-slate-100 text-slate-600 font-semibold">
-    <th className="px-4 py-2 text-left">Date</th>
-    <th className="px-4 py-2 text-left">Description</th>
-    <th className="px-4 py-2 text-left">Category</th>
-    <th className="px-4 py-2 text-left">Amount</th>
-  </tr>
-</thead>
+                <tr className="bg-slate-100 text-slate-600 font-semibold">
+                  <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Description</th>
+                  <th className="px-4 py-2 text-left">Category</th>
+                  <th className="px-4 py-2 text-left">Amount</th>
+                </tr>
+              </thead>
 
               <tbody>
-                {transactions
+                                {transactions
                   .filter(tx => {
                     const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
                     return cat?.business_type === type;
@@ -218,7 +207,37 @@ export default function ProfilePage() {
                       <tr key={tx.id} className="border-t">
                         <td className="px-4 py-2">{tx.date}</td>
                         <td className="px-4 py-2">{tx.description}</td>
-                        <td className="px-4 py-2">{cat?.category_name || "Uncategorised"}</td>
+                        <td className="px-4 py-2">
+                          <select
+                            value={cat?.id || ""}
+                            onChange={async (e) => {
+                              const newCategoryId = e.target.value;
+                              try {
+                                await fetch("/api/profile", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    transactionId: tx.id,
+                                    newCategoryId,
+                                  }),
+                                });
+                                router.reload();
+                              } catch (err) {
+                                console.error("Failed to update category", err);
+                              }
+                            }}
+                            className="border rounded px-2 py-1 text-sm"
+                          >
+                            <option value="">Uncategorised</option>
+                            {hmrcCategories
+                              .filter(c => c.business_type === type)
+                              .map(option => (
+                                <option key={option.id} value={option.id}>
+                                  {option.category_name}
+                                </option>
+                              ))}
+                          </select>
+                        </td>
                         <td className="px-4 py-2">£{Number(tx.amount).toFixed(2)}</td>
                       </tr>
                     );
@@ -249,3 +268,4 @@ export default function ProfilePage() {
     </Layout>
   );
 }
+
