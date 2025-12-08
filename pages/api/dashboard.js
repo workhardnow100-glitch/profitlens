@@ -99,19 +99,12 @@ export default async function handler(req, res) {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, amount, description, hmrc_category_id, category, account_number, sort_code, storage_path, type, is_reversal"
+        "id, date, amount, description, category, account_number, sort_code, storage_path, type, is_reversal"
       )
       .eq("client_id", clientId)
       .order("date", { ascending: false });
 
     if (error) throw error;
-
-    // Fetch global HMRC categories
-    const { data: hmrcCategories, error: catError } = await supabaseAdmin
-      .from("hmrc_categories")
-      .select("id, category_name, is_excluded")
-      .eq("is_global", true);
-    if (catError) throw catError;
 
     if (!transactions?.length) {
       return res.status(200).json({
@@ -123,7 +116,6 @@ export default async function handler(req, res) {
         series: { months: [], revenue: [], expenses: [] },
         recent: [],
         breakdown: {},
-        categories: [] // added empty array for consistency
       });
     }
 
@@ -154,17 +146,10 @@ export default async function handler(req, res) {
       "Entertainment": 0,
       "Fitness": 0,
       "Other": 0,
-      // --- Added inline to align with Profile ---
-      "Staff costs": 0,
-      "Client Income": 0,
-      "Insurance Payout": 0,
-      "Disposal of Fixed Asset": 0,
     };
 
-    let totalRevenue = 0;
-    let totalExpenses = 0;
-
     for (const tx of transactions) {
+      // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
 
       const date = new Date(tx.date);
@@ -174,27 +159,34 @@ export default async function handler(req, res) {
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-      const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-      const drillCategory = tx.category?.trim() || inferCategory(tx.type, tx.description);
-
-      if (hmrcCat?.is_excluded) continue;
+      const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
       if (amount > 0) {
-        totalRevenue += amount;
         monthly[monthKey].revenue += amount;
-        categoryBreakdown[hmrcCat?.category_name || drillCategory] =
-          (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + amount;
       } else if (amount < 0) {
-               totalExpenses += Math.abs(amount);
-        monthly[monthKey].expenses += Math.abs(amount);
-        categoryBreakdown[hmrcCat?.category_name || drillCategory] =
-          (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + Math.abs(amount);
+        monthly[monthKey].expenses += -amount;
+        categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
+      }
+
+      if (amount !== 0) {
+        recent.push({
+          id: tx.id,
+          date: date.toISOString().slice(0, 10),
+          amount,
+          description: tx.description || "",
+          category,
+          accountNumber: tx.account_number || "-",
+          sortCode: tx.sort_code || "-",
+          storagePath: tx.storage_path || null,
+        });
       }
     }
 
     const months = Object.keys(monthly).sort();
     const revenue = months.map((m) => monthly[m].revenue);
     const expenses = months.map((m) => monthly[m].expenses);
+    const totalRevenue = revenue.reduce((a, b) => a + b, 0);
+    const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
 
     // Audit log
@@ -215,11 +207,9 @@ export default async function handler(req, res) {
       series: { months, revenue, expenses },
       recent,
       breakdown: categoryBreakdown,
-      categories: Object.keys(categoryBreakdown) // <-- added for dropdown
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
     res.status(500).json({ error: "Failed to load dashboard data" });
   }
 }
-
