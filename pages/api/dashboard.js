@@ -161,7 +161,7 @@ export default async function handler(req, res) {
         storagePath: tx.storage_path || null,
       });
 
-      // ✅ Apply unified exclusions to totals (not to visibility)
+            // ✅ Apply unified exclusions to totals (not to visibility)
       if (amount > 0) {
         if (!excludedCategories.has(category)) {
           monthly[monthKey].revenue += amount;
