@@ -1,9 +1,14 @@
 // pages/upload.js
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { useRouter } from "next/router";
 import Layout from "../components/layout";
 import { getSession } from "next-auth/react";
+import dynamic from "next/dynamic";
+
+const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
+  ssr: false,
+});
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -79,13 +84,69 @@ export default function Upload() {
     }
   };
 
+  // ✅ Exclusion set
+  const excludedCategories = new Set([
+    "Asset Disposal",
+    "Insurance Payout",
+    "Internal Transfer",
+    "Returned Direct Debit",
+    "Transfer Between Accounts",
+  ]);
+
+  // ✅ Drilldown chart options
+  const drilldownOptions = useMemo(() => {
+    if (!data?.categories?.length) return null;
+
+    // Top-level series: totals per category
+    const seriesData = data.categories
+      .filter((c) => !excludedCategories.has(c.name))
+      .map((c) => ({
+        name: c.name,
+        y: Number(c.amount || 0),
+        drilldown: c.name,
+      }));
+
+    // Drilldown series: transactions per category
+    const drilldownSeries = (data.transactions || [])
+      .filter((tx) => !excludedCategories.has(tx.category))
+      .reduce((acc, tx) => {
+        if (!acc[tx.category]) acc[tx.category] = [];
+        acc[tx.category].push([tx.description, Number(tx.amount || 0)]);
+        return acc;
+      }, {});
+
+    const drilldownData = Object.entries(drilldownSeries).map(([cat, txs]) => ({
+      name: cat,
+      id: cat,
+      data: txs,
+    }));
+
+    return {
+      chart: { type: "column", height: 400 },
+      title: { text: "Income & Expenses by Category (Drilldown)" },
+      xAxis: { type: "category" },
+      yAxis: { title: { text: "Amount (£)" } },
+      legend: { enabled: false },
+      plotOptions: {
+        series: {
+          borderWidth: 0,
+          dataLabels: { enabled: true, format: "£{point.y:.2f}" },
+        },
+      },
+      tooltip: { pointFormat: "£{point.y:.2f}" },
+      series: [{ name: "Categories", colorByPoint: true, data: seriesData }],
+      drilldown: { series: drilldownData },
+      credits: { enabled: false },
+    };
+  }, [data]);
+
   return (
     <Layout currentPageName="Upload">
       <div className="p-8">
         <h2 className="text-2xl font-bold text-slate-800">Upload Statements</h2>
         <p className="text-slate-600 mt-2">
           Upload your bank statements here to begin analysis. Supported formats include CSV and Excel.
-          Once uploaded, your data will be parsed and tagged automatically.Either use bulk processing 
+          Once uploaded, your data will be parsed and tagged automatically. Either use bulk processing 
           or uploads, for open banking use bulk processing.
         </p>
 
@@ -132,27 +193,16 @@ export default function Upload() {
             </div>
           )}
 
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white shadow rounded p-4 text-center">
-              <h3 className="text-sm font-medium text-slate-500">Year Profit</h3>
-              <p className="text-xl font-bold text-slate-800 mt-2">
-                {error ? "—" : data?.yearProfit}
-              </p>
-            </div>
-
-            <div className="bg-white shadow rounded p-4 text-center">
-              <h3 className="text-sm font-medium text-slate-500">Monthly Revenue</h3>
-              <p className="text-xl font-bold text-slate-800 mt-2">
-                {error ? "—" : data?.monthlyRevenue}
-              </p>
-            </div>
-
-            <div className="bg-white shadow rounded p-4 text-center">
-              <h3 className="text-sm font-medium text-slate-500">Monthly Expenses</h3>
-              <p className="text-xl font-bold text-slate-800 mt-2">
-                {error ? "—" : data?.monthlyExpenses}
-              </p>
-            </div>
+          {/* ✅ Drilldown Chart */}
+          <div className="mt-8 bg-white p-4 rounded-lg shadow-sm">
+            <h3 className="text-lg font-semibold text-slate-700 mb-2">
+              Income & Expenses Drilldown
+            </h3>
+            {!drilldownOptions ? (
+              <p className="text-slate-500">No data available</p>
+            ) : (
+              <HighchartsReact highcharts={require("highcharts")} options={drilldownOptions} />
+            )}
           </div>
         </div>
       </div>

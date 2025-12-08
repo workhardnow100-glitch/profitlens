@@ -1,3 +1,4 @@
+// components/layout.js
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
@@ -9,7 +10,6 @@ import {
   Upload,
   Receipt,
   TrendingUp,
-  DollarSign,
   FileText,
   Mail,
   Settings,
@@ -45,28 +45,6 @@ const navigationItems = [
 export default function Layout({ children }) {
   const router = useRouter();
   const { user } = useUser();
-  const [stats, setStats] = useState({ revenue: 0, transactions: 0 });
-
-  useEffect(() => {
-    async function fetchStats() {
-      try {
-        const res = await fetch("/api/clients/stats");
-        if (res.ok) {
-          const data = await res.json();
-          setStats({
-            revenue: data.revenue ?? 0,
-            transactions: data.monthlyProfit?.reduce(
-              (acc, m) => acc + (m.profit !== undefined ? 1 : 0),
-              0
-            ),
-          });
-        }
-      } catch (err) {
-        console.warn("Stats fetch failed:", err.message);
-      }
-    }
-    fetchStats();
-  }, []);
 
   return (
     <SidebarProvider>
@@ -116,30 +94,6 @@ export default function Layout({ children }) {
                     );
                   })}
                 </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-xs font-medium text-slate-500 uppercase tracking-wider px-3 py-3">
-                StQuick ats
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <div className="px-4 py-3 space-y-3">
-                  <div className="flex items-center gap-3 text-sm">
-                    <DollarSign className="w-4 h-4 text-emerald-500" />
-                    <span className="text-slate-600">Yearly Total </span>
-                    <span className="ml-auto font-bold text-emerald-600">
-                      £{stats.revenue}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 text-sm">
-                    <Receipt className="w-4 h-4 text-blue-500" />
-                    <span className="text-slate-600">Transactions</span>
-                    <span className="ml-auto font-semibold">
-                      {stats.transactions}
-                    </span>
-                  </div>
-                </div>
               </SidebarGroupContent>
             </SidebarGroup>
           </SidebarContent>
