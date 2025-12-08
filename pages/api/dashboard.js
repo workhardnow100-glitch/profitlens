@@ -144,7 +144,13 @@ export default async function handler(req, res) {
       "Insurance": 0,
       "Entertainment": 0,
       "Fitness": 0,
-      "Other": 0,
+      "Other": 0,  
+      "Asset Disposal": 0,
+      "Insurance Payout": 0,
+      "Internal Transfer": 0,
+      "Returned Direct Debit": 0,
+      "Transfer Between Accounts": 0,
+      "Disposal of Fixed Asset": 0,
     };
 
     // 🚫 Excluded categories (same as Profile)
