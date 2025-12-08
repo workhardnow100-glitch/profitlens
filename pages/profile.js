@@ -52,14 +52,11 @@ export default function ProfilePage() {
             totals[cat.business_type][cat.category_name] += tx.amount;
           }
         });
-
         setTotalsByType(totals);
 
-        // Sum total owed per type
-        const soleTotal = Object.values(totals.sole_trader).reduce((a,b) => a+b,0);
-        const companyTotal = Object.values(totals.limited_company).reduce((a,b) => a+b,0);
-        setSoleTraderTotal(soleTotal);
-        setCompanyTotal(companyTotal);
+        // ✅ Use liabilities calculated by the API instead of local sums
+        setSoleTraderTotal(json.summary?.liabilities?.sole_trader || 0);
+        setCompanyTotal(json.summary?.liabilities?.limited_company || 0);
 
         setByMonth(json.byMonth || {});
       } catch (err) {
@@ -183,8 +180,7 @@ export default function ProfilePage() {
             <p className="text-slate-600 mt-1">
               Total Owed: £{(type === "sole_trader" ? soleTraderTotal : companyTotal).toFixed(2)}
             </p>
-
-            {/* Category cards (show all categories even if zero) */}
+            {/* Category cards */}
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {hmrcCategories
                 .filter(c => c.business_type === type)
@@ -205,7 +201,8 @@ export default function ProfilePage() {
                 <tr className="bg-slate-100 text-slate-600 font-semibold">
                   <th className="px-4 py-2 text-left">Date</th>
                   <th className="px-4 py-2 text-left">Description</th>
-                  <th className="px-4 py-2 text-left">Category</th>
+                  <th className
+                                    <th className="px-4 py-2 text-left">Category</th>
                   <th className="px-4 py-2 text-left">Amount</th>
                 </tr>
               </thead>

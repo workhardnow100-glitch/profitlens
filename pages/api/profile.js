@@ -53,12 +53,23 @@ export default async function handler(req, res) {
       const businessType = cat?.business_type || "sole_trader";
 
       // Add to the correct category total
-      totalsByType[businessType][catName] = (totalsByType[businessType][catName] || 0) + Number(tx.amount || 0);
+      totalsByType[businessType][catName] =
+        (totalsByType[businessType][catName] || 0) + Number(tx.amount || 0);
 
       // Update summary
       if (tx.amount > 0) totalIncome += tx.amount;
       else totalExpenses += Math.abs(tx.amount);
     });
+
+    const netProfit = totalIncome - totalExpenses;
+
+    // Tax rates (adjust as needed)
+    const soleTraderTaxRate = 0.20;       // 20% income tax
+    const limitedCompanyTaxRate = 0.19;   // 19% corporation tax
+
+    // Calculate liabilities
+    const soleTraderOwed = netProfit > 0 ? netProfit * soleTraderTaxRate : 0;
+    const limitedCompanyOwed = netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
 
     // Group transactions by month
     const byMonth = {};
@@ -73,7 +84,15 @@ export default async function handler(req, res) {
       transactions,
       hmrcCategories,
       account: account || null,
-      summary: { totalIncome, totalExpenses, netProfit: totalIncome - totalExpenses },
+      summary: {
+        totalIncome,
+        totalExpenses,
+        netProfit,
+        liabilities: {
+          sole_trader: soleTraderOwed,
+          limited_company: limitedCompanyOwed,
+        },
+      },
       totalsByType,
       byMonth,
     });
