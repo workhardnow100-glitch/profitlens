@@ -34,7 +34,6 @@ const COLORS = [
 // ⬇️ Enhanced Inference Logic
 function inferCategory(description = "") {
   const desc = description.toLowerCase();
-
   if (desc.includes("salary") || desc.includes("payroll")) return "Salary";
   if (desc.includes("hmrc") || desc.includes("tax")) return "Tax Payment";
   if (desc.includes("jaja") || desc.includes("credit")) return "Credit Card Payment";
@@ -66,7 +65,6 @@ function inferCategory(description = "") {
   if (desc.includes("standing order")) return "Standing Order";
   if (desc.includes("direct debit")) return "Direct Debit";
   if (desc.includes("transfer")) return "Transfer Between Accounts";
-
   return "Uncategorised";
 }
 
@@ -79,8 +77,8 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [signedUrls, setSignedUrls] = useState({});
   const [breakdown, setBreakdown] = useState({});
-  const [categories, setCategories] = useState([]);        
-  const [selectedCategory, setSelectedCategory] = useState(""); 
+  const [categories, setCategories] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -109,7 +107,7 @@ export default function Dashboard() {
         setSeries(data.series || { months: [], revenue: [], expenses: [] });
         setRecent(data.recent || []);
         setBreakdown(data.breakdown || {});
-        setCategories(data.categories || []);   
+        setCategories(data.categories || []);
 
         const urls = {};
         for (const r of data.recent || []) {
@@ -151,7 +149,50 @@ export default function Dashboard() {
     });
   }, []);
 
-  // chartOptions unchanged...
+  // ✅ Restored chartOptions
+  const chartOptions = useMemo(() => {
+    if (!hcReady || !Highcharts) return null;
+    return {
+      chart: { type: "pie", options3d: { enabled: true, alpha: 45, beta: 0 } },
+      title: { text: "Income vs Expenses (3D Doughnut)" },
+      plotOptions: {
+        pie: {
+          innerSize: 100,
+          depth: 45,
+          dataLabels: { enabled: true, format: "{point.name}: £{point.y:.2f}" },
+        },
+      },
+      series: [
+        {
+          name: "Total",
+          data: [
+            { name: "Income", y: series.revenue.reduce((a, b) => a + b, 0), drilldown: "Income" },
+            { name: "Expenses", y: series.expenses.reduce((a, b) => a + b, 0), drilldown: "Expenses" },
+          ],
+        },
+      ],
+      drilldown: {
+        series: [
+          {
+            id: "Income",
+            name: "Income by Category",
+            colorByPoint: true,
+            data: Object.entries(
+              recent.filter((tx) => tx.amount > 0).reduce((acc, tx) => {
+                const cat = inferCategory(tx.description);
+                acc[cat] = (acc[cat] || 0) + tx.amount;
+                return acc;
+              }, {})
+            ).map(([cat, total]) => ({ name: cat, y: total, drilldown: cat })),
+          },
+          {
+            id: "Expenses",
+            data: Object.entries(breakdown).map(([name, value]) => [name, value]),
+          },
+        ],
+      },
+    };
+  }, [hcReady, Highcharts, series, breakdown, recent]);
 
   const chartData = series.months.map((month, i) => ({
     month,
@@ -168,22 +209,6 @@ export default function Dashboard() {
     <Layout currentPageName="Dashboard">
       <div className="p-6">
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-slate-600 mt-2">
-          Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this is your cockpit.
-        </p>
-
-        {error && <p className="text-red-600 mt-4">Error: {error}</p>}
-        {loading && <p className="text-slate-500 mt-4">Loading...</p>}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-          {stats.map((s) => (
-            <div key={s.label} className="rounded-lg border bg-white/70 p-4">
-              <div className="text-slate-500">{s.label}</div>
-              <div className="text-2xl font-bold">£{s.value}</div>
-            </div>
-          ))}
-        </div>
-
         <div className="mt-10 mb-8">
           {hcReady && Highcharts && chartOptions ? (
             <HighchartsReact highcharts={Highcharts} options={chartOptions} />
@@ -198,8 +223,11 @@ export default function Dashboard() {
             <div className="bg-white/70 p-4 rounded-lg border">
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
-                  
-                                      <Line type="monotone" dataKey="revenue" stroke="#4ade80" name="Revenue" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="revenue" stroke="#4ade80" name="Revenue" />
                   <Line type="monotone" dataKey="expenses" stroke="#f87171" name="Expenses" />
                 </LineChart>
               </ResponsiveContainer>
@@ -210,7 +238,7 @@ export default function Dashboard() {
         <div className="mt-10">
           <h2 className="text-lg font-semibold mb-2">Expense Breakdown by Category</h2>
 
-          {/* 🔽 Dropdown menu added */}
+          {/* 🔽 Dropdown menu */}
           {categories.length > 0 && (
             <div className="mb-4">
               <label className="mr-2 text-slate-600">Filter by Category:</label>
