@@ -34,6 +34,7 @@ const COLORS = [
 // ⬇️ Enhanced Inference Logic
 function inferCategory(description = "") {
   const desc = description.toLowerCase();
+
   if (desc.includes("salary") || desc.includes("payroll")) return "Salary";
   if (desc.includes("hmrc") || desc.includes("tax")) return "Tax Payment";
   if (desc.includes("jaja") || desc.includes("credit")) return "Credit Card Payment";
@@ -65,6 +66,7 @@ function inferCategory(description = "") {
   if (desc.includes("standing order")) return "Standing Order";
   if (desc.includes("direct debit")) return "Direct Debit";
   if (desc.includes("transfer")) return "Transfer Between Accounts";
+
   return "Uncategorised";
 }
 
@@ -77,7 +79,6 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [signedUrls, setSignedUrls] = useState({});
   const [breakdown, setBreakdown] = useState({});
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -106,7 +107,6 @@ export default function Dashboard() {
         setSeries(data.series || { months: [], revenue: [], expenses: [] });
         setRecent(data.recent || []);
         setBreakdown(data.breakdown || {});
-        setCategories(data.categories || []);
 
         const urls = {};
         for (const r of data.recent || []) {
@@ -148,10 +148,15 @@ export default function Dashboard() {
     });
   }, []);
 
+  // ✅ UPDATED DRILLDOWN HERE
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
+
     return {
-      chart: { type: "pie", options3d: { enabled: true, alpha: 45, beta: 0 } },
+      chart: {
+        type: "pie",
+        options3d: { enabled: true, alpha: 45, beta: 0 },
+      },
       title: { text: "Income vs Expenses (3D Doughnut)" },
       plotOptions: {
         pie: {
@@ -171,28 +176,55 @@ export default function Dashboard() {
       ],
       drilldown: {
         series: [
+          // 📊 Level 1: Income grouped by category
           {
             id: "Income",
             name: "Income by Category",
             colorByPoint: true,
             data: Object.entries(
-              recent.filter((tx) => tx.amount > 0).reduce((acc, tx) => {
+              recent
+                .filter((tx) => tx.amount > 0)
+                .reduce((acc, tx) => {
+                  const cat = inferCategory(tx.description);
+                  acc[cat] = (acc[cat] || 0) + tx.amount;
+                  return acc;
+                }, {})
+            ).map(([cat, total]) => ({
+              name: cat,
+              y: total,
+              drilldown: cat,
+            })),
+          },
+
+          // 📜 Level 2: All income transactions inside each category
+          ...Object.entries(
+            recent
+              .filter((tx) => tx.amount > 0)
+              .reduce((acc, tx) => {
                 const cat = inferCategory(tx.description);
-                acc[cat] = (acc[cat] || 0) + tx.amount;
+                if (!acc[cat]) acc[cat] = [];
+                acc[cat].push([
+                  `${tx.description || "Unknown"} (${new Date(tx.date).toLocaleDateString()})`,
+                  tx.amount,
+                ]);
                 return acc;
               }, {})
-            ).map(([cat, total]) => ({ name: cat, y: total, drilldown: cat })),
-          },
+          ).map(([cat, transactions]) => ({
+            id: cat,
+            name: `${cat} Transactions`,
+            colorByPoint: true,
+            data: transactions,
+          })),
+
+          // 💸 Expenses drilldown (unchanged)
           {
             id: "Expenses",
-            name: "Expenses by Category",
-            colorByPoint: true,
             data: Object.entries(breakdown).map(([name, value]) => [name, value]),
           },
         ],
       },
     };
-  }, [hcReady, Highcharts, series, breakdown, recent]);
+  }, [hcReady, Highcharts, series, stats, breakdown, recent]);
 
   const chartData = series.months.map((month, i) => ({
     month,
@@ -200,11 +232,10 @@ export default function Dashboard() {
     expenses: series.expenses[i],
   }));
 
-const pieData = Object.entries(breakdown).map(([name, value]) => ({
-  name: name,
-  value: Number(value.toFixed(2)),
-}));
-
+  const pieData = Object.entries(breakdown).map(([name, value]) => ({
+    name,
+    value: Number(value.toFixed(2)),
+  }));
 
   return (
     <Layout currentPageName="Dashboard">
@@ -252,6 +283,37 @@ const pieData = Object.entries(breakdown).map(([name, value]) => ({
           </div>
         )}
 
+        <div className="mt-10">
+          <h2 className="text-lg font-semibold mb-2">Expense Breakdown by Category</h2>
+          <div className="bg-white/70 p-4 rounded-lg border">
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="50%"
+                    outerRadius={100}
+                    label
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="text-slate-500">
+                No category data available yet. Try uploading a statement with expenses.
+              </p>
+            )}
+          </div>
+        </div>
+
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-2">Recent Uploads</h2>
           <ul className="space-y-4">
@@ -262,27 +324,10 @@ const pieData = Object.entries(breakdown).map(([name, value]) => ({
                     <div className="font-semibold">{r.description || r.filename}</div>
                     <div className="text-sm text-slate-500">{r.date}</div>
                     <div className="text-sm">£{r.amount}</div>
-
-                    {/* 🔽 Dropdown for category */}
-                    <div className="text-sm text-slate-600 mt-1">
-                      <label className="mr-2">Category:</label>
-                      <select
-                        value={r.category || inferCategory(r.description)}
-                        onChange={(e) => {
-                          // TODO: call API to update category for this transaction
-                          console.log("Update category", r.id, e.target.value);
-                        }}
-                        className="border rounded px-2 py-1"
-                      >
-                        {categories.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="text-sm text-slate-600">
+                      {r.category || inferCategory(r.description)}
                     </div>
                   </div>
-
                   {r.storagePath && signedUrls[r.storagePath] && (
                     <a
                       href={signedUrls[r.storagePath]}
