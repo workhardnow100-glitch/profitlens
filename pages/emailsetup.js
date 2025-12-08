@@ -92,7 +92,7 @@ export default function EmailSetup() {
             <div>
               <label className="block text-sm text-slate-600 mb-1">Forwarding Address</label>
               <div className="flex items-center justify-between border p-2 rounded-lg bg-slate-50">
-                <span className="text-slate-800 font-mono">statements@profitlens.io</span>
+                <span className="text-slate-800 font-mono">profitlensappp@gmail.com</span>
                 <span className={`text-sm font-semibold ${statusColor[status]}`}>
                   {status === "connected" ? "Connected" : status === "pending" ? "Pending" : "Failed"}
                 </span>
