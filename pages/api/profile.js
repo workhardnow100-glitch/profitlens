@@ -33,6 +33,44 @@ export default async function handler(req, res) {
       .single();
     if (accError && accError.code !== "PGRST116") throw accError;
 
+    // ✅ Define allowable expense categories for Sole Trader and Limited Company
+    const allowableExpenses = {
+      sole_trader: [
+        "Office, property, and equipment",
+        "Travel",
+        "Staff costs",
+        "Marketing and subscriptions",
+        "Legal and financial costs",
+        "Mobile & Internet",
+        "Fuel",
+        "Advertising",
+        "Insurance",
+        "Training & development",
+        "Subscriptions & memberships",
+        "Bank Fees",
+        "Professional fees",
+        "Charitable donations",
+        "Bad debts",
+        "Capital allowances"
+      ],
+      limited_company: [
+        "Office costs",
+        "Travel and subsistence",
+        "Staff salaries and wages",
+        "Employer NICs and pensions",
+        "Professional fees",
+        "Marketing & advertising",
+        "Insurance",
+        "Training & development",
+        "Subscriptions & memberships",
+        "Bank charges & interest",
+        "IT & software",
+        "Charitable donations",
+        "Bad debts",
+        "Capital allowances"
+      ]
+    };
+
     // Prepare totals for each business type
     const totalsByType = {
       sole_trader: {},
@@ -56,9 +94,15 @@ export default async function handler(req, res) {
       totalsByType[businessType][catName] =
         (totalsByType[businessType][catName] || 0) + Number(tx.amount || 0);
 
-      // Update summary
-      if (tx.amount > 0) totalIncome += tx.amount;
-      else totalExpenses += Math.abs(tx.amount);
+      // ✅ Update summary with filtering
+      if (tx.amount > 0) {
+        totalIncome += tx.amount;
+      } else {
+        // Only count as expense if category is allowable for that business type
+        if (allowableExpenses[businessType]?.includes(catName)) {
+          totalExpenses += Math.abs(tx.amount);
+        }
+      }
     });
 
     const netProfit = totalIncome - totalExpenses;
@@ -77,7 +121,14 @@ export default async function handler(req, res) {
       const month = new Date(tx.date).toISOString().slice(0, 7); // YYYY-MM
       if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0 };
       if (tx.amount > 0) byMonth[month].income += tx.amount;
-      else byMonth[month].expenses += Math.abs(tx.amount);
+      else {
+        const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+        const catName = cat?.category_name || "";
+        const businessType = cat?.business_type || "sole_trader";
+        if (allowableExpenses[businessType]?.includes(catName)) {
+          byMonth[month].expenses += Math.abs(tx.amount);
+        }
+      }
     });
 
     return res.status(200).json({
