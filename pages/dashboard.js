@@ -78,7 +78,6 @@ export default function Dashboard() {
   const [signedUrls, setSignedUrls] = useState({});
   const [breakdown, setBreakdown] = useState({});
   const [categories, setCategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -149,7 +148,6 @@ export default function Dashboard() {
     });
   }, []);
 
-  // ✅ Restored chartOptions
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     return {
@@ -187,6 +185,8 @@ export default function Dashboard() {
           },
           {
             id: "Expenses",
+            name: "Expenses by Category",
+            colorByPoint: true,
             data: Object.entries(breakdown).map(([name, value]) => [name, value]),
           },
         ],
@@ -201,14 +201,30 @@ export default function Dashboard() {
   }));
 
   const pieData = Object.entries(breakdown).map(([name, value]) => ({
-    name,
-    value: Number(value.toFixed(2)),
+    name
+        value: Number(value.toFixed(2)),
   }));
 
   return (
     <Layout currentPageName="Dashboard">
       <div className="p-6">
         <h1 className="text-2xl font-bold">Dashboard</h1>
+        <p className="text-slate-600 mt-2">
+          Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this is your cockpit.
+        </p>
+
+        {error && <p className="text-red-600 mt-4">Error: {error}</p>}
+        {loading && <p className="text-slate-500 mt-4">Loading...</p>}
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+          {stats.map((s) => (
+            <div key={s.label} className="rounded-lg border bg-white/70 p-4">
+              <div className="text-slate-500">{s.label}</div>
+              <div className="text-2xl font-bold">£{s.value}</div>
+            </div>
+          ))}
+        </div>
+
         <div className="mt-10 mb-8">
           {hcReady && Highcharts && chartOptions ? (
             <HighchartsReact highcharts={Highcharts} options={chartOptions} />
@@ -235,63 +251,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div className="mt-10">
-          <h2 className="text-lg font-semibold mb-2">Expense Breakdown by Category</h2>
-
-          {/* 🔽 Dropdown menu */}
-          {categories.length > 0 && (
-            <div className="mb-4">
-              <label className="mr-2 text-slate-600">Filter by Category:</label>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="border rounded px-2 py-1"
-              >
-                <option value="">All Categories</option>
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div className="bg-white/70 p-4 rounded-lg border">
-            {pieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={
-                      selectedCategory
-                        ? pieData.filter((p) => p.name === selectedCategory)
-                        : pieData
-                    }
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={100}
-                    label
-                  >
-                    {(selectedCategory ? pieData.filter((p) => p.name === selectedCategory) : pieData).map(
-                      (entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      )
-                    )}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="text-slate-500">
-                No category data available yet. Try uploading a statement with expenses.
-              </p>
-            )}
-          </div>
-        </div>
-
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-2">Recent Uploads</h2>
           <ul className="space-y-4">
@@ -302,10 +261,27 @@ export default function Dashboard() {
                     <div className="font-semibold">{r.description || r.filename}</div>
                     <div className="text-sm text-slate-500">{r.date}</div>
                     <div className="text-sm">£{r.amount}</div>
-                    <div className="text-sm text-slate-600">
-                      {r.category || inferCategory(r.description)}
+
+                    {/* 🔽 Dropdown for category */}
+                    <div className="text-sm text-slate-600 mt-1">
+                      <label className="mr-2">Category:</label>
+                      <select
+                        value={r.category || inferCategory(r.description)}
+                        onChange={(e) => {
+                          // TODO: call API to update category for this transaction
+                          console.log("Update category", r.id, e.target.value);
+                        }}
+                        className="border rounded px-2 py-1"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
+
                   {r.storagePath && signedUrls[r.storagePath] && (
                     <a
                       href={signedUrls[r.storagePath]}
