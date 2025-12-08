@@ -189,7 +189,26 @@ export default function Dashboard() {
                     <td className="p-2 border">{r.description||r.filename}</td>
                     <td className="p-2 border">£{r.amount}</td>
                     <td className="p-2 border">
-                      <select value={r.category} onChange={e=>console.log("Update category",r.id,e.target.value)} className="border rounded px-2 py-1">
+                      <select
+                        value={r.category}
+                        onChange={async (e) => {
+                          const newCategory = e.target.value;
+                          try {
+                            const res = await fetch("/api/dashboard", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ id: r.id, category: newCategory }),
+                            });
+                            if (!res.ok) throw new Error("Failed to update category");
+                            setRecent(prev =>
+                              prev.map(tx => tx.id === r.id ? { ...tx, category: newCategory } : tx)
+                            );
+                          } catch (err) {
+                            alert(err.message || "Failed to update category");
+                          }
+                        }}
+                        className="border rounded px-2 py-1"
+                      >
                         {categories.map(cat=>(
                           <option key={cat} value={cat}>{cat}</option>
                         ))}

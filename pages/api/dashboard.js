@@ -56,6 +56,35 @@ export default async function handler(req, res) {
   const clientId = session.user.clientId;
   if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
 
+  // PATCH: update transaction category in-place
+  if (req.method === "PATCH") {
+    try {
+      const { id, category } = req.body || {};
+      if (!id || !category) return res.status(400).json({ error: "Missing id or category" });
+
+      const { error: updateErr } = await supabaseAdmin
+        .from("transactions")
+        .update({ category })
+        .eq("id", id)
+        .eq("client_id", clientId);
+
+      if (updateErr) throw updateErr;
+
+      await supabaseAdmin.from("audit").insert([{
+        client_id: clientId,
+        user: session.user.email,
+        action: "UPDATE_CATEGORY",
+        details: `Updated transaction ${id} category to ${category}`,
+        timestamp: new Date().toISOString(),
+      }]);
+
+      return res.status(200).json({ success: true });
+    } catch (err) {
+      console.error("PATCH error:", err.message || err);
+      return res.status(500).json({ error: "Failed to update category" });
+    }
+  }
+
   if (req.method === "DELETE") {
     try {
       const { count, error } = await supabaseAdmin
@@ -100,9 +129,13 @@ export default async function handler(req, res) {
       "Returned Direct Debit": 0, "Transfer Between Accounts": 0
     };
 
-    const excludedCategories = new Set([
-      "Asset Disposal", "Insurance Payout", "Internal Transfer", "Repayment", "Overdraft",
-      "Returned Direct Debit", "Standing Order", "Direct Debit", "Transfer Between Accounts",
+    // 🚫 Exclude only from income (aligns with Profile)
+    const excludedIncomeCategories = new Set([
+      "Asset Disposal",
+      "Insurance Payout",
+      "Internal Transfer",
+      "Returned Direct Debit",
+      "Transfer Between Accounts",
     ]);
 
     for (const tx of transactions) {
@@ -116,7 +149,7 @@ export default async function handler(req, res) {
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
       const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
-      // Always add to recent for table
+      // Always include in recent for table
       recent.push({
         id: tx.id,
         date: date.toISOString().slice(0, 10),
@@ -128,10 +161,12 @@ export default async function handler(req, res) {
         storagePath: tx.storage_path || null,
       });
 
-      if (excludedCategories.has(category)) continue;
-
-      if (amount > 0) monthly[monthKey].revenue += amount;
-      else if (amount < 0) {
+      // ✅ Only exclude from revenue totals; keep expenses and breakdown intact
+      if (amount > 0) {
+        if (!excludedIncomeCategories.has(category)) {
+          monthly[monthKey].revenue += amount;
+        }
+      } else if (amount < 0) {
         monthly[monthKey].expenses += -amount;
         categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
       }
