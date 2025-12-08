@@ -1,4 +1,3 @@
-// pages/profile.js
 import React, { useEffect, useState, useRef } from "react";
 import Layout from "../components/layout";
 import { useSession } from "next-auth/react";
@@ -17,7 +16,7 @@ export default function ProfilePage() {
   const [account, setAccount] = useState(null);
   const [totalsByType, setTotalsByType] = useState({ sole_trader: {}, limited_company: {} });
   const [soleTraderTotal, setSoleTraderTotal] = useState(0);
-  const [companyTotal, setCompanyTotal] = useState(0);
+  const [companyTotal] = useState(0); // still fetched but not used
   const [byMonth, setByMonth] = useState({});
   const [summary, setSummary] = useState({ totalIncome: 0, totalExpenses: 0, netProfit: 0 });
 
@@ -43,7 +42,6 @@ export default function ProfilePage() {
         setAccount(json.account || null);
         setTotalsByType(json.totalsByType || { sole_trader: {}, limited_company: {} });
         setSoleTraderTotal(json.summary?.liabilities?.sole_trader || 0);
-        setCompanyTotal(json.summary?.liabilities?.limited_company || 0);
         setByMonth(json.byMonth || {});
         setSummary(json.summary || { totalIncome: 0, totalExpenses: 0, netProfit: 0 });
       } catch (err) {
@@ -97,9 +95,7 @@ export default function ProfilePage() {
       <div className="p-8" ref={reportRef}>
         <h2 className="text-2xl font-bold text-slate-800">Your Profile</h2>
         <p className="text-slate-600 mt-2">
-          Account details, HMRC categories, and transaction summaries. Changing categories in the 
-          dropdown menu for each transaction. Changing the categories will ultimatly fill the
-          sole trader table for easy veiwing of income & verious expences. 
+          Account details, HMRC categories, and transaction summaries.
         </p>
 
         {/* Account info */}
@@ -148,93 +144,90 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* HMRC Cards */}
-        {["sole_trader", "limited_company"].map(type => (
-          <div key={type} className="bg-white p-4 rounded-lg shadow-sm mt-8">
-            <h3 className="text-lg font-semibold text-slate-700">
-              HMRC – {type === "sole_trader" ? "Sole Trader" : "Limited Company"}
-            </h3>
-            <p className="text-slate-600 mt-1">
-              Total Owed: £{(type === "sole_trader" ? soleTraderTotal : companyTotal).toFixed(2)}
-            </p>
+        {/* ONLY SOLE TRADER HMRC BLOCK */}
+        <div className="bg-white p-4 rounded-lg shadow-sm mt-8">
+          <h3 className="text-lg font-semibold text-slate-700">
+            HMRC – Sole Trader
+          </h3>
+          <p className="text-slate-600 mt-1">
+            Total Owed: £{soleTraderTotal.toFixed(2)}
+          </p>
 
-            {/* Category cards */}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {hmrcCategories
-                .filter(c => c.business_type === type)
-                .map(cat => (
-                  <div key={cat.id} className="border border-slate-200 rounded p-3">
-                    <p className="text-sm text-slate-600">{cat.category_name}</p>
-                    <p className="text-slate-800 font-semibold">
-                      £{(totalsByType[type][cat.category_name] || 0).toFixed(2)}
-                    </p>
-                  </div>
-                ))}
-            </div>
-
-            {/* Transaction table */}
-            <h4 className="text-md font-semibold mt-6 text-slate-700">Transactions</h4>
-            <table className="min-w-full mt-2 text-sm">
-              <thead>
-                <tr className="bg-slate-100 text-slate-600 font-semibold">
-                  <th className="px-4 py-2 text-left">Date</th>
-                  <th className="px-4 py-2 text-left">Description</th>
-                  <th className="px-4 py-2 text-left">Category</th>
-                  <th className="px-4 py-2 text-left">Amount</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {transactions
-                  .filter(tx => {
-                    const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-                    return cat?.business_type === type;
-                  })
-                  .map(tx => {
-                    const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-                                        return (
-                      <tr key={tx.id} className="border-t">
-                        <td className="px-4 py-2">{tx.date}</td>
-                        <td className="px-4 py-2">{tx.description}</td>
-                        <td className="px-4 py-2">
-                          <select
-                            value={cat?.id || ""}
-                            onChange={async (e) => {
-                              const newCategoryId = e.target.value;
-                              try {
-                                await fetch("/api/profile", {
-                                  method: "POST",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    transactionId: tx.id,
-                                    newCategoryId,
-                                  }),
-                                });
-                                router.reload();
-                              } catch (err) {
-                                console.error("Failed to update category", err);
-                              }
-                            }}
-                            className="border rounded px-2 py-1 text-sm"
-                          >
-                            <option value="">Uncategorised</option>
-                            {hmrcCategories
-                              .filter(c => c.business_type === type)
-                              .map(option => (
-                                <option key={option.id} value={option.id}>
-                                  {option.category_name}
-                                </option>
-                              ))}
-                          </select>
-                        </td>
-                        <td className="px-4 py-2">£{Number(tx.amount).toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
+          {/* Category cards */}
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {hmrcCategories
+              .filter(c => c.business_type === "sole_trader")
+              .map(cat => (
+                <div key={cat.id} className="border border-slate-200 rounded p-3">
+                  <p className="text-sm text-slate-600">{cat.category_name}</p>
+                  <p className="text-slate-800 font-semibold">
+                    £{(totalsByType.sole_trader[cat.category_name] || 0).toFixed(2)}
+                  </p>
+                </div>
+              ))}
           </div>
-        ))}
+
+          {/* Transaction table */}
+          <h4 className="text-md font-semibold mt-6 text-slate-700">Transactions</h4>
+          <table className="min-w-full mt-2 text-sm">
+            <thead>
+              <tr className="bg-slate-100 text-slate-600 font-semibold">
+                <th className="px-4 py-2 text-left">Date</th>
+                <th className="px-4 py-2 text-left">Description</th>
+                <th className="px-4 py-2 text-left">Category</th>
+                <th className="px-4 py-2 text-left">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transactions
+                .filter(tx => {
+                  const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+                  return cat?.business_type === "sole_trader";
+                })
+                .map(tx => {
+                  const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+                  return (
+                    <tr key={tx.id} className="border-t">
+                      <td className="px-4 py-2">{tx.date}</td>
+                      <td className="px-4 py-2">{tx.description}</td>
+                      <td className="px-4 py-2">
+                        <select
+                          value={cat?.id || ""}
+                          onChange={async (e) => {
+                            const newCategoryId = e.target.value;
+                            try {
+                              await fetch("/api/profile", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  transactionId: tx.id,
+                                  newCategoryId,
+                                }),
+                              });
+                              router.reload();
+                            } catch (err) {
+                              console.error("Failed to update category", err);
+                            }
+                          }}
+                          className="border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="">Uncategorised</option>
+                          {hmrcCategories
+                            .filter(c => c.business_type === "sole_trader")
+                            .map(option => (
+                              <option key={option.id} value={option.id}>
+                                {option.category_name}
+                              </option>
+                            ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">£{Number(tx.amount).toFixed(2)}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
 
         {/* Monthly breakdown */}
         <div className="bg-white p-4 rounded-lg shadow-sm mt-8">
@@ -257,4 +250,3 @@ export default function ProfilePage() {
     </Layout>
   );
 }
-
