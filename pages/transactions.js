@@ -92,8 +92,6 @@ export default function Transactions() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // period can be:
-  // "week" | "month" | "quarter" | "year" | "last7" | "last30" | "last90" | "thisTimeLastYear" | "custom"
   const [period, setPeriod] = useState("month");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -146,7 +144,6 @@ export default function Transactions() {
 
   const { data, error } = useSWR("/api/transactions", fetcher);
 
-  // 🔥 Centralised period filtering
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
@@ -158,19 +155,16 @@ export default function Transactions() {
       const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
       if (period === "week") {
-        // This calendar week (Mon–Sun or Sun–Sat; here using last 7 days)
         const weekAgo = new Date(today);
         weekAgo.setDate(today.getDate() - 7);
         return d >= weekAgo && d <= today;
       }
-
       if (period === "month") {
         return (
           d.getMonth() === today.getMonth() &&
           d.getFullYear() === today.getFullYear()
         );
       }
-
       if (period === "quarter") {
         const currentQuarter = Math.floor(today.getMonth() / 3);
         return (
@@ -178,24 +172,20 @@ export default function Transactions() {
           d.getFullYear() === today.getFullYear()
         );
       }
-
       if (period === "year") {
         return d.getFullYear() === today.getFullYear();
       }
-
       if (period === "last7") {
         const start = new Date(today);
         start.setDate(today.getDate() - 6);
         return d >= start && d <= today;
       }
-
       if (period === "last30") {
         const start = new Date(today);
         start.setDate(today.getDate() - 29);
         return d >= start && d <= today;
       }
-
-      if (period === "last90") {
+            if (period === "last90") {
         const start = new Date(today);
         start.setDate(today.getDate() - 89);
         return d >= start && d <= today;
@@ -203,7 +193,6 @@ export default function Transactions() {
 
       if (period === "thisTimeLastYear") {
         const lastYear = today.getFullYear() - 1;
-        // Same month and day range: last 30 days but shifted one year back
         const end = new Date(lastYear, today.getMonth(), today.getDate());
         const start = new Date(end);
         start.setDate(end.getDate() - 29);
@@ -212,7 +201,7 @@ export default function Transactions() {
       }
 
       if (period === "custom") {
-        if (!customFrom && !customTo) return true; // nothing selected yet, show all
+        if (!customFrom && !customTo) return true;
         let from = customFrom ? new Date(customFrom) : null;
         let to = customTo ? new Date(customTo) : null;
 
@@ -225,7 +214,6 @@ export default function Transactions() {
         return true;
       }
 
-      // Fallback: no period filter
       return true;
     });
   }, [data, period, customFrom, customTo]);
@@ -248,6 +236,15 @@ export default function Transactions() {
     const incomeByPayer = {};
     const expenseByMerchant = {};
 
+    // ✅ Unified exclusion set
+    const excludedCategories = new Set([
+      "Asset Disposal",
+      "Insurance Payout",
+      "Internal Transfer",
+      "Returned Direct Debit",
+      "Transfer Between Accounts",
+    ]);
+
     filtered.forEach((tx) => {
       const amount = parseFloat(tx.amount) || 0;
       const category =
@@ -256,19 +253,23 @@ export default function Transactions() {
         (tx.description && tx.description.trim()) || "Unknown";
 
       if (isIncome(amount)) {
-        incomeSum += amount;
-        incomeByPayer[merchant] = (incomeByPayer[merchant] || 0) + amount;
-      } else {
-        const out = Math.abs(amount);
-        expenseSum += out;
-        categoryExpenses[category] = (categoryExpenses[category] || 0) + out;
+        if (!excludedCategories.has(category)) {
+          incomeSum += amount;
+          incomeByPayer[merchant] = (incomeByPayer[merchant] || 0) + amount;
+        }
+      } else if (amount < 0) {
+        if (!excludedCategories.has(category)) {
+          const out = Math.abs(amount);
+          expenseSum += out;
+          categoryExpenses[category] = (categoryExpenses[category] || 0) + out;
 
-        if (!merchantsByCategory[category]) merchantsByCategory[category] = {};
-        merchantsByCategory[category][merchant] =
-          (merchantsByCategory[category][merchant] || 0) + out;
+          if (!merchantsByCategory[category]) merchantsByCategory[category] = {};
+          merchantsByCategory[category][merchant] =
+            (merchantsByCategory[category][merchant] || 0) + out;
 
-        expenseByMerchant[merchant] =
-          (expenseByMerchant[merchant] || 0) + out;
+          expenseByMerchant[merchant] =
+            (expenseByMerchant[merchant] || 0) + out;
+        }
       }
     });
 
@@ -306,6 +307,7 @@ export default function Transactions() {
     };
   }, [filtered]);
 
+  // chartOptions, periodButtons, and JSX rendering follow exactly as in your original file
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     if (!filtered.length) return "NO_DATA";
@@ -439,9 +441,7 @@ export default function Transactions() {
         {period === "custom" && (
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <div>
-              <label className="block text-xs text-slate-500 mb-1">
-                From
-              </label>
+              <label className="block text-xs text-slate-500 mb-1">From</label>
               <input
                 type="date"
                 value={customFrom || ""}
@@ -450,9 +450,7 @@ export default function Transactions() {
               />
             </div>
             <div>
-              <label className="block text-xs text-slate-500 mb-1">
-                To
-              </label>
+              <label className="block text-xs text-slate-500 mb-1">To</label>
               <input
                 type="date"
                 value={customTo || ""}
@@ -470,9 +468,7 @@ export default function Transactions() {
           {hcReady && Highcharts && chartOptions && chartOptions !== "NO_DATA" ? (
             <HighchartsReact highcharts={Highcharts} options={chartOptions} />
           ) : hcReady && Highcharts && chartOptions === "NO_DATA" ? (
-            <div className="text-slate-500">
-              No chartable data for this period.
-            </div>
+            <div className="text-slate-500">No chartable data for this period.</div>
           ) : (
             <div className="text-slate-500">Preparing chart...</div>
           )}
@@ -480,9 +476,7 @@ export default function Transactions() {
 
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="border rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-slate-800">
-              Top income payers
-            </h3>
+            <h3 className="text-lg font-semibold text-slate-800">Top income payers</h3>
             <ul className="mt-2 space-y-2">
               {topIncomePayers.length === 0 && (
                 <li className="text-slate-500">No income in this period</li>
@@ -498,9 +492,7 @@ export default function Transactions() {
             </ul>
           </div>
           <div className="border rounded-lg p-4">
-            <h3 className="text-lg font-semibold text-slate-800">
-              Top expense merchants
-            </h3>
+            <h3 className="text-lg font-semibold text-slate-800">Top expense merchants</h3>
             <ul className="mt-2 space-y-2">
               {topExpenseMerchants.length === 0 && (
                 <li className="text-slate-500">No expenses in this period</li>
@@ -548,8 +540,7 @@ export default function Transactions() {
                     No transactions in this period.
                   </td>
                 </tr>
-              )}
-              {filtered.map((tx) => (
+                              {filtered.map((tx) => (
                 <tr key={tx.id} className="border-t">
                   <td className="px-4 py-2">
                     {safeDate(tx.date)?.toLocaleDateString() ?? "—"}
@@ -576,3 +567,4 @@ export default function Transactions() {
     </Layout>
   );
 }
+
