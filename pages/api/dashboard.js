@@ -3,54 +3,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// --- Added inferCategory ---
-function inferCategory(type = "", description = "") {
-  const normalized = type?.trim().toUpperCase() || "";
-
-  // Banking codes
-  if (normalized === "FPO") return "Payment";
-  if (normalized === "TFR") return "Transfer";
-  if (normalized === "CHG") return "Bank Charges";
-  if (normalized === "DEB") return "Debit";
-  if (normalized === "DD") return "Direct Debit";
-  if (normalized === "SO") return "Standing Order";
-  if (normalized === "INT") return "Interest";
-  if (normalized === "FPI") return "Transfer In";
-  if (normalized === "BP") return "Savings";
-  if (normalized === "DEP") return "Bank Charge Waived";
-  if (normalized === "PAY") return "Charges";
-  if (normalized === "FEE") return "Bank Account Fee";
-  if (normalized === "CPT") return "Cash Withdrawal";
-
-  // Merchant/keyword rules
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Utilities" },
-    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i, category: "Utilities" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i, category: "Advertising" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
-    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Health" },
-    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance" },
-    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
-    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
-  ];
-
-  for (const rule of rules) {
-    if (rule.regex.test(description)) {
-      return rule.category;
-    }
-  }
-
-  return "Other";
-}
-// --- End inferCategory ---
-
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
@@ -96,15 +48,19 @@ export default async function handler(req, res) {
 
   // --- GET route ---
   try {
-    const { data: transactions, error } = await supabaseAdmin
+    const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select(
-        "id, date, amount, description, category, account_number, sort_code, storage_path, type, is_reversal"
-      )
+      .select("id, date, amount, description, hmrc_category_id, account_number, sort_code, storage_path, type, is_reversal")
       .eq("client_id", clientId)
       .order("date", { ascending: false });
+    if (txError) throw txError;
 
-    if (error) throw error;
+    // Fetch global HMRC categories
+    const { data: hmrcCategories, error: catError } = await supabaseAdmin
+      .from("hmrc_categories")
+      .select("id, category_name, business_type, is_global, is_excluded")
+      .eq("is_global", true);
+    if (catError) throw catError;
 
     if (!transactions?.length) {
       return res.status(200).json({
@@ -121,37 +77,13 @@ export default async function handler(req, res) {
 
     const monthly = {};
     const recent = [];
+    const categoryBreakdown = {};
 
-    // Pre-initialize categories so all appear in breakdown even if 0
-    const categoryBreakdown = {
-      "Payment": 0,
-      "Transfer": 0,
-      "Bank Charges": 0,
-      "Debit": 0,
-      "Direct Debit": 0,
-      "Standing Order": 0,
-      "Interest": 0,
-      "Groceries": 0,
-      "Food & Drink": 0,
-      "Shopping": 0,
-      "Transport": 0,
-      "Travel": 0,
-      "Fuel": 0,
-      "Utilities": 0,
-      "Subscriptions": 0,
-      "Advertising": 0,
-      "Business & Tax": 0,
-      "Health": 0,
-      "Insurance": 0,
-      "Entertainment": 0,
-      "Fitness": 0,
-      "Other": 0,
-    };
+    let totalRevenue = 0;
+    let totalExpenses = 0;
 
     for (const tx of transactions) {
-      // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
-
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
@@ -159,13 +91,19 @@ export default async function handler(req, res) {
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-      const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
+      const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+      const catName = cat?.category_name || "Uncategorised";
+
+      // Skip excluded categories (Transfers, Insurance Payout, Disposal of Fixed Asset, etc.)
+      if (cat?.is_excluded) continue;
 
       if (amount > 0) {
+        totalRevenue += amount;
         monthly[monthKey].revenue += amount;
       } else if (amount < 0) {
-        monthly[monthKey].expenses += -amount;
-        categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
+        totalExpenses += Math.abs(amount);
+        monthly[monthKey].expenses += Math.abs(amount);
+        categoryBreakdown[catName] = (categoryBreakdown[catName] || 0) + Math.abs(amount);
       }
 
       if (amount !== 0) {
@@ -174,7 +112,7 @@ export default async function handler(req, res) {
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          category,
+          category: catName,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
@@ -182,11 +120,6 @@ export default async function handler(req, res) {
       }
     }
 
-    const months = Object.keys(monthly).sort();
-    const revenue = months.map((m) => monthly[m].revenue);
-    const expenses = months.map((m) => monthly[m].expenses);
-    const totalRevenue = revenue.reduce((a, b) => a + b, 0);
-    const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
 
     // Audit log
@@ -204,7 +137,11 @@ export default async function handler(req, res) {
         { label: "Total Expenses", value: totalExpenses.toFixed(2) },
         { label: "Net Profit", value: netProfit.toFixed(2) },
       ],
-      series: { months, revenue, expenses },
+      series: {
+        months: Object.keys(monthly).sort(),
+        revenue: Object.keys(monthly).sort().map(m => monthly[m].revenue),
+        expenses: Object.keys(monthly).sort().map(m => monthly[m].expenses),
+      },
       recent,
       breakdown: categoryBreakdown,
     });
