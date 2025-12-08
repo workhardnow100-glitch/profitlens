@@ -79,6 +79,7 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [signedUrls, setSignedUrls] = useState({});
   const [breakdown, setBreakdown] = useState({});
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -107,6 +108,7 @@ export default function Dashboard() {
         setSeries(data.series || { months: [], revenue: [], expenses: [] });
         setRecent(data.recent || []);
         setBreakdown(data.breakdown || {});
+        setCategories(data.categories || []);
 
         const urls = {};
         for (const r of data.recent || []) {
@@ -148,7 +150,6 @@ export default function Dashboard() {
     });
   }, []);
 
-  // ✅ UPDATED DRILLDOWN HERE
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
 
@@ -176,7 +177,6 @@ export default function Dashboard() {
       ],
       drilldown: {
         series: [
-          // 📊 Level 1: Income grouped by category
           {
             id: "Income",
             name: "Income by Category",
@@ -195,8 +195,6 @@ export default function Dashboard() {
               drilldown: cat,
             })),
           },
-
-          // 📜 Level 2: All income transactions inside each category
           ...Object.entries(
             recent
               .filter((tx) => tx.amount > 0)
@@ -212,11 +210,9 @@ export default function Dashboard() {
           ).map(([cat, transactions]) => ({
             id: cat,
             name: `${cat} Transactions`,
-            colorByPoint: true,
-            data: transactions,
           })),
 
-          // 💸 Expenses drilldown (unchanged)
+          // 💸 Expenses drilldown
           {
             id: "Expenses",
             data: Object.entries(breakdown).map(([name, value]) => [name, value]),
@@ -314,34 +310,59 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* ✅ Updated Recent Uploads into a table with Category dropdown */}
         <div className="mt-8">
-          <h2 className="text-lg font-semibold mb-2">Recent Uploads</h2>
-          <ul className="space-y-4">
-            {recent.map((r) => (
-              <li key={r.id} className="border rounded p-4 bg-white/70">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <div className="font-semibold">{r.description || r.filename}</div>
-                    <div className="text-sm text-slate-500">{r.date}</div>
-                    <div className="text-sm">£{r.amount}</div>
-                    <div className="text-sm text-slate-600">
-                      {r.category || inferCategory(r.description)}
-                    </div>
-                  </div>
-                  {r.storagePath && signedUrls[r.storagePath] && (
-                    <a
-                      href={signedUrls[r.storagePath]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 underline"
-                    >
-                      View
-                    </a>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <h2 className="text-lg font-semibold mb-2">Statements</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border rounded bg-white/70">
+              <thead>
+                <tr className="bg-slate-100 text-left">
+                  <th className="p-2 border">Date</th>
+                  <th className="p-2 border">Description</th>
+                  <th className="p-2 border">Amount</th>
+                  <th className="p-2 border">Category</th>
+                  <th className="p-2 border">File</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((r) => (
+                  <tr key={r.id}>
+                    <td className="p-2 border">{r.date}</td>
+                    <td className="p-2 border">{r.description || r.filename}</td>
+                    <td className="p-2 border">£{r.amount}</td>
+                    <td className="p-2 border">
+                      <select
+                        value={r.category || inferCategory(r.description)}
+                        onChange={(e) => {
+                          // TODO: call API to update category for this transaction
+                          console.log("Update category", r.id, e.target.value);
+                        }}
+                        className="border rounded px-2 py-1"
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="p-2 border">
+                      {r.storagePath && signedUrls[r.storagePath] && (
+                        <a
+                          href={signedUrls[r.storagePath]}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 underline"
+                        >
+                          View
+                        </a>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <button
             onClick={nuke}

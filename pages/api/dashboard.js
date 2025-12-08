@@ -1,4 +1,3 @@
-// pages/api/dashboard.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -148,6 +147,19 @@ export default async function handler(req, res) {
       "Other": 0,
     };
 
+    // 🚫 Excluded categories (same as Profile)
+    const excludedCategories = new Set([
+      "Asset Disposal",
+      "Insurance Payout",
+      "Internal Transfer",
+      "Repayment",
+      "Overdraft",
+      "Returned Direct Debit",
+      "Standing Order",
+      "Direct Debit",
+      "Transfer Between Accounts",
+    ]);
+
     for (const tx of transactions) {
       // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
@@ -161,13 +173,29 @@ export default async function handler(req, res) {
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
       const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
-      if (amount > 0) {
+      // ✅ Skip excluded categories from totals
+      if (excludedCategories.has(category)) {
+        recent.push({
+          id: tx.id,
+          date: date.toISOString().slice(0, 10),
+          amount,
+          description: tx.description || "",
+          category,
+          accountNumber: tx.account_number || "-",
+          sortCode: tx.sort_code || "-",
+          storagePath: tx.storage_path || null,
+        });
+        continue;
+      }
+
+            if (amount > 0) {
         monthly[monthKey].revenue += amount;
       } else if (amount < 0) {
         monthly[monthKey].expenses += -amount;
         categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
       }
 
+      // Always include in recent list for table display
       if (amount !== 0) {
         recent.push({
           id: tx.id,
@@ -207,6 +235,7 @@ export default async function handler(req, res) {
       series: { months, revenue, expenses },
       recent,
       breakdown: categoryBreakdown,
+      categories: Object.keys(categoryBreakdown), // ✅ expose categories for dropdown
     });
   } catch (err) {
     console.error("Dashboard API error:", err.message || err);
