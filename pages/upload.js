@@ -1,14 +1,9 @@
 // pages/upload.js
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { useRouter } from "next/router";
 import Layout from "../components/layout";
 import { getSession } from "next-auth/react";
-import dynamic from "next/dynamic";
-
-const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
-  ssr: false,
-});
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -19,7 +14,7 @@ export default function Upload() {
   const [sessionUser, setSessionUser] = useState(null);
   const [uploadSummary, setUploadSummary] = useState(null);
 
-  // ✅ Pull data from reports API
+  // ✅ still fetch stats if needed for other parts
   const { data, error } = useSWR("/api/reports", fetcher);
   const router = useRouter();
 
@@ -86,68 +81,6 @@ export default function Upload() {
     }
   };
 
-  // ✅ Exclusion set
-  const excludedCategories = new Set([
-    "Asset Disposal",
-    "Insurance Payout",
-    "Internal Transfer",
-    "Returned Direct Debit",
-    "Transfer Between Accounts",
-  ]);
-
-  // ✅ Drilldown chart options using reports data
-  const drilldownOptions = useMemo(() => {
-    if (!Array.isArray(data) || data.length === 0) return null;
-
-    const categoryTotals = {};
-    const transactionMap = {};
-
-    data.forEach((report) => {
-      (report.categories || []).forEach((c) => {
-        if (!excludedCategories.has(c.name)) {
-          categoryTotals[c.name] = (categoryTotals[c.name] || 0) + Number(c.amount || 0);
-        }
-      });
-
-      (report.transactions || []).forEach((tx) => {
-        if (!excludedCategories.has(tx.category)) {
-          if (!transactionMap[tx.category]) transactionMap[tx.category] = [];
-          transactionMap[tx.category].push([tx.description, Number(tx.amount || 0)]);
-        }
-      });
-    });
-
-    const seriesData = Object.entries(categoryTotals).map(([cat, amt]) => ({
-      name: cat,
-      y: amt,
-      drilldown: cat,
-    }));
-
-    const drilldownData = Object.entries(transactionMap).map(([cat, txs]) => ({
-      name: cat,
-      id: cat,
-      data: txs,
-    }));
-
-    return {
-      chart: { type: "column", height: 400 },
-      title: { text: "Income & Expenses by Category (Drilldown)" },
-      xAxis: { type: "category" },
-      yAxis: { title: { text: "Amount (£)" } },
-      legend: { enabled: false },
-      plotOptions: {
-        series: {
-          borderWidth: 0,
-          dataLabels: { enabled: true, format: "£{point.y:.2f}" },
-        },
-      },
-      tooltip: { pointFormat: "£{point.y:.2f}" },
-      series: [{ name: "Categories", colorByPoint: true, data: seriesData }],
-      drilldown: { series: drilldownData },
-      credits: { enabled: false },
-    };
-  }, [data]);
-
   return (
     <Layout currentPageName="Upload">
       <div className="p-8">
@@ -200,18 +133,6 @@ export default function Upload() {
               </ul>
             </div>
           )}
-
-          {/* ✅ Drilldown Chart */}
-          <div className="mt-8 bg-white p-4 rounded-lg shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-700 mb-2">
-              Income & Expenses Drilldown
-            </h3>
-            {!drilldownOptions ? (
-              <p className="text-slate-500">No data available</p>
-            ) : (
-              <HighchartsReact highcharts={require("highcharts")} options={drilldownOptions} />
-            )}
-          </div>
         </div>
       </div>
     </Layout>
