@@ -1,3 +1,4 @@
+// File: pages/dashboard.jsx
 import React, { useEffect, useState, useMemo } from "react";
 import Layout from "../components/layout.jsx";
 import {
@@ -30,45 +31,6 @@ const COLORS = [
   "#14b8a6",
   "#f43f5e",
 ];
-
-// ⬇️ Enhanced Inference Logic
-function inferCategory(description = "") {
-  const desc = description.toLowerCase();
-
-  if (desc.includes("salary") || desc.includes("payroll")) return "Salary";
-  if (desc.includes("hmrc") || desc.includes("tax")) return "Tax Payment";
-  if (desc.includes("jaja") || desc.includes("credit")) return "Credit Card Payment";
-  if (desc.includes("tesco") || desc.includes("sainsbury") || desc.includes("aldi")) return "Groceries";
-  if (desc.includes("uber") || desc.includes("trainline") || desc.includes("tfl")) return "Transport";
-  if (desc.includes("spotify") || desc.includes("netflix") || desc.includes("prime")) return "Subscriptions";
-  if (desc.includes("notemachine") || desc.includes("atm")) return "Cash Withdrawal";
-  if (desc.includes("ig.com") || desc.includes("trading") || desc.includes("etoro")) return "Investment Purchase";
-  if (desc.includes("easyjet") || desc.includes("ryanair") || desc.includes("jet2")) return "Travel";
-  if (desc.includes("sheehy")) return "Family";
-  if (desc.includes("drafty") || desc.includes("loan")) return "Loan Received";
-  if (desc.includes("bingo") || desc.includes("casino") || desc.includes("bet")) return "Gambling";
-  if (desc.includes("savethechange")) return "Savings Deposit";
-  if (desc.includes("returned dd") || desc.includes("rddp")) return "Returned Direct Debit";
-  if (desc.includes("nhs") || desc.includes("clinic") || desc.includes("dentist")) return "Healthcare";
-  if (desc.includes("school") || desc.includes("tuition")) return "Education";
-  if (desc.includes("childcare") || desc.includes("nursery")) return "Childcare";
-  if (desc.includes("council") || desc.includes("local authority")) return "Council Tax";
-  if (desc.includes("insurance")) return "Insurance Premium";
-  if (desc.includes("rent")) return "Rent";
-  if (desc.includes("mortgage")) return "Mortgage";
-  if (desc.includes("utilities") || desc.includes("gas") || desc.includes("electric")) return "Utilities";
-  if (desc.includes("mobile") || desc.includes("vodafone") || desc.includes("o2")) return "Mobile & Internet";
-  if (desc.includes("restaurant") || desc.includes("takeaway") || desc.includes("just eat")) return "Dining & Takeaway";
-  if (desc.includes("amazon") || desc.includes("argos") || desc.includes("shopping")) return "Shopping";
-  if (desc.includes("charity") || desc.includes("donation")) return "Charity";
-  if (desc.includes("gift")) return "Gift";
-  if (desc.includes("overdraft")) return "Overdraft Repayment";
-  if (desc.includes("standing order")) return "Standing Order";
-  if (desc.includes("direct debit")) return "Direct Debit";
-  if (desc.includes("transfer")) return "Transfer Between Accounts";
-
-  return "Uncategorised";
-}
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -113,11 +75,17 @@ export default function Dashboard() {
         const urls = {};
         for (const r of data.recent || []) {
           if (r.storagePath) {
-            const signedRes = await fetch(
-              `/api/signed-url?path=${encodeURIComponent(r.storagePath)}`
-            );
-            const signed = await signedRes.json();
-            if (signed?.url) urls[r.storagePath] = signed.url;
+            try {
+              const signedRes = await fetch(
+                `/api/signed-url?path=${encodeURIComponent(r.storagePath)}`
+              );
+              if (!signedRes.ok) continue;
+              const signed = await signedRes.json();
+              if (signed?.url) urls[r.storagePath] = signed.url;
+            } catch (e) {
+              // ignore per-file failures
+              console.warn("Failed to fetch signed url for", r.storagePath, e);
+            }
           }
         }
         setSignedUrls(urls);
@@ -185,7 +153,7 @@ export default function Dashboard() {
               recent
                 .filter((tx) => tx.amount > 0)
                 .reduce((acc, tx) => {
-                  const cat = inferCategory(tx.description);
+                  const cat = tx.category || "Unknown";
                   acc[cat] = (acc[cat] || 0) + tx.amount;
                   return acc;
                 }, {})
@@ -195,11 +163,12 @@ export default function Dashboard() {
               drilldown: cat,
             })),
           },
+          // map categories to empty drilldown entries (Highcharts expects id/name pairs for drilldown)
           ...Object.entries(
             recent
               .filter((tx) => tx.amount > 0)
               .reduce((acc, tx) => {
-                const cat = inferCategory(tx.description);
+                const cat = tx.category || "Unknown";
                 if (!acc[cat]) acc[cat] = [];
                 acc[cat].push([
                   `${tx.description || "Unknown"} (${new Date(tx.date).toLocaleDateString()})`,
@@ -210,9 +179,10 @@ export default function Dashboard() {
           ).map(([cat, transactions]) => ({
             id: cat,
             name: `${cat} Transactions`,
+            data: transactions,
           })),
 
-          // 💸 Expenses drilldown
+          // Expenses drilldown
           {
             id: "Expenses",
             data: Object.entries(breakdown).map(([name, value]) => [name, value]),
@@ -220,7 +190,7 @@ export default function Dashboard() {
         ],
       },
     };
-  }, [hcReady, Highcharts, series, stats, breakdown, recent]);
+  }, [hcReady, Highcharts, series, breakdown, recent]);
 
   const chartData = series.months.map((month, i) => ({
     month,
@@ -228,10 +198,37 @@ export default function Dashboard() {
     expenses: series.expenses[i],
   }));
 
-  const pieData = Object.entries(breakdown).map(([name, value]) => ({
-    name,
-    value: Number(value.toFixed(2)),
-  }));
+  const pieData = Object.entries(breakdown)
+    .filter(([_, v]) => Number(v) > 0)
+    .map(([name, value]) => ({
+      name,
+      value: Number(Number(value).toFixed(2)),
+    }));
+
+  async function updateCategory(txId, newCategory) {
+    // optimistic update locally
+    const oldRecent = [...recent];
+    setRecent((r) => r.map((t) => (t.id === txId ? { ...t, category: newCategory } : t)));
+
+    try {
+      const res = await fetch("/api/update-category", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: txId, category: newCategory }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Failed to update category");
+
+      // Re-fetch dashboard breakdown & stats to ensure charts reflect server truth
+      const d = await (await fetch("/api/dashboard")).json();
+      setBreakdown(d.breakdown || {});
+      setStats(d.stats || []);
+      setSeries(d.series || { months: [], revenue: [], expenses: [] });
+    } catch (err) {
+      alert(err.message || "Failed to update category");
+      setRecent(oldRecent); // rollback
+    }
+  }
 
   return (
     <Layout currentPageName="Dashboard">
@@ -310,7 +307,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ✅ Updated Recent Uploads into a table with Category dropdown */}
         <div className="mt-8">
           <h2 className="text-lg font-semibold mb-2">Statements</h2>
           <div className="overflow-x-auto">
@@ -332,11 +328,8 @@ export default function Dashboard() {
                     <td className="p-2 border">£{r.amount}</td>
                     <td className="p-2 border">
                       <select
-                        value={r.category || inferCategory(r.description)}
-                        onChange={(e) => {
-                          // TODO: call API to update category for this transaction
-                          console.log("Update category", r.id, e.target.value);
-                        }}
+                        value={r.category || "Unknown"}
+                        onChange={(e) => updateCategory(r.id, e.target.value)}
                         className="border rounded px-2 py-1"
                       >
                         {categories.map((cat) => (
