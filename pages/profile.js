@@ -19,6 +19,7 @@ export default function ProfilePage() {
   const [soleTraderTotal, setSoleTraderTotal] = useState(0);
   const [companyTotal, setCompanyTotal] = useState(0);
   const [byMonth, setByMonth] = useState({});
+  const [summary, setSummary] = useState({ totalIncome: 0, totalExpenses: 0, netProfit: 0 });
 
   const reportRef = useRef();
 
@@ -40,25 +41,11 @@ export default function ProfilePage() {
         setTransactions(json.transactions || []);
         setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
-
-        // Build totals per business type
-        const totals = { sole_trader: {}, limited_company: {} };
-        json.hmrcCategories.forEach(cat => {
-          totals[cat.business_type][cat.category_name] = 0;
-        });
-        json.transactions.forEach(tx => {
-          const cat = json.hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-          if (cat) {
-            totals[cat.business_type][cat.category_name] += tx.amount;
-          }
-        });
-        setTotalsByType(totals);
-
-        // ✅ Use liabilities calculated by the API
+        setTotalsByType(json.totalsByType || { sole_trader: {}, limited_company: {} });
         setSoleTraderTotal(json.summary?.liabilities?.sole_trader || 0);
         setCompanyTotal(json.summary?.liabilities?.limited_company || 0);
-
         setByMonth(json.byMonth || {});
+        setSummary(json.summary || { totalIncome: 0, totalExpenses: 0, netProfit: 0 });
       } catch (err) {
         setError(err.message || "Failed to load profile");
       } finally {
@@ -141,19 +128,19 @@ export default function ProfilePage() {
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Total Income</p>
               <p className="text-slate-800 font-semibold">
-                £{Number(transactions.filter(t => t.amount > 0).reduce((a,b) => a + b.amount,0)).toFixed(2)}
+                £{Number(summary.totalIncome).toFixed(2)}
               </p>
             </div>
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Total Expenses</p>
               <p className="text-slate-800 font-semibold">
-                £{Number(transactions.filter(t => t.amount < 0).reduce((a,b) => a + Math.abs(b.amount),0)).toFixed(2)}
+                £{Number(summary.totalExpenses).toFixed(2)}
               </p>
             </div>
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Net Profit</p>
               <p className="text-slate-800 font-semibold">
-                £{(transactions.reduce((a,b) => a + b.amount,0)).toFixed(2)}
+                £{Number(summary.netProfit).toFixed(2)}
               </p>
             </div>
           </div>
@@ -196,14 +183,14 @@ export default function ProfilePage() {
               </thead>
 
               <tbody>
-                                {transactions
+                {transactions
                   .filter(tx => {
                     const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
                     return cat?.business_type === type;
                   })
                   .map(tx => {
                     const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-                    return (
+                                        return (
                       <tr key={tx.id} className="border-t">
                         <td className="px-4 py-2">{tx.date}</td>
                         <td className="px-4 py-2">{tx.description}</td>
