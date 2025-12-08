@@ -198,7 +198,7 @@ export default function Dashboard() {
             <div className="bg-white/70 p-4 rounded-lg border">
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={chartData}>
-                  <
+                  
                                       <Line type="monotone" dataKey="revenue" stroke="#4ade80" name="Revenue" />
                   <Line type="monotone" dataKey="expenses" stroke="#f87171" name="Expenses" />
                 </LineChart>
