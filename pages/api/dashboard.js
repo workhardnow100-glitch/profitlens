@@ -99,12 +99,19 @@ export default async function handler(req, res) {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, amount, description, category, account_number, sort_code, storage_path, type, is_reversal"
+        "id, date, amount, description, hmrc_category_id, category, account_number, sort_code, storage_path, type, is_reversal"
       )
       .eq("client_id", clientId)
       .order("date", { ascending: false });
 
     if (error) throw error;
+
+    // Fetch global HMRC categories
+    const { data: hmrcCategories, error: catError } = await supabaseAdmin
+      .from("hmrc_categories")
+      .select("id, category_name, is_excluded")
+      .eq("is_global", true);
+    if (catError) throw catError;
 
     if (!transactions?.length) {
       return res.status(200).json({
@@ -153,6 +160,9 @@ export default async function handler(req, res) {
       "Disposal of Fixed Asset": 0,
     };
 
+    let totalRevenue = 0;
+    let totalExpenses = 0;
+
     for (const tx of transactions) {
       // ✅ Skip reversals entirely
       if (tx.is_reversal) continue;
@@ -164,13 +174,22 @@ export default async function handler(req, res) {
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-      const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
+      const hmrcCat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+      const drillCategory = tx.category?.trim() || inferCategory(tx.type, tx.description);
+
+            // Skip excluded HMRC categories for totals
+      if (hmrcCat?.is_excluded) continue;
 
       if (amount > 0) {
+        totalRevenue += amount;
         monthly[monthKey].revenue += amount;
+        categoryBreakdown[hmrcCat?.category_name || drillCategory] =
+          (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + amount;
       } else if (amount < 0) {
-        monthly[monthKey].expenses += -amount;
-        categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
+        totalExpenses += Math.abs(amount);
+        monthly[monthKey].expenses += Math.abs(amount);
+        categoryBreakdown[hmrcCat?.category_name || drillCategory] =
+          (categoryBreakdown[hmrcCat?.category_name || drillCategory] || 0) + Math.abs(amount);
       }
 
       if (amount !== 0) {
@@ -179,7 +198,7 @@ export default async function handler(req, res) {
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          category,
+          category: hmrcCat?.category_name || drillCategory,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
@@ -187,7 +206,7 @@ export default async function handler(req, res) {
       }
     }
 
-        const months = Object.keys(monthly).sort();
+    const months = Object.keys(monthly).sort();
     const revenue = months.map((m) => monthly[m].revenue);
     const expenses = months.map((m) => monthly[m].expenses);
     const totalRevenue = revenue.reduce((a, b) => a + b, 0);
