@@ -82,9 +82,7 @@ function safeDate(value) {
 }
 
 // ⬇️ Highcharts (client-only)
-const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
-  ssr: false,
-});
+const HighchartsReact = dynamic(() => import("highcharts-react-official"), { ssr: false });
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -103,9 +101,7 @@ export default function Transactions() {
     if (status === "loading") return;
     if (session?.user) {
       const isAdmin = session.user.role === "admin";
-      const isSubscribed = ["basic", "pro"].includes(
-        session.user.subscriptionStatus
-      );
+      const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
       if (!(isAdmin || isSubscribed)) {
         router.replace("/upgrade");
       }
@@ -133,13 +129,9 @@ export default function Transactions() {
             setHcReady(true);
           }
         })
-        .catch((err) =>
-          console.error("Failed to load Highcharts modules:", err)
-        );
+        .catch((err) => console.error("Failed to load Highcharts modules:", err));
     });
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const { data, error } = useSWR("/api/transactions", fetcher);
@@ -160,60 +152,43 @@ export default function Transactions() {
         return d >= weekAgo && d <= today;
       }
       if (period === "month") {
-        return (
-          d.getMonth() === today.getMonth() &&
-          d.getFullYear() === today.getFullYear()
-        );
+        return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
       }
       if (period === "quarter") {
         const currentQuarter = Math.floor(today.getMonth() / 3);
-        return (
-          Math.floor(d.getMonth() / 3) === currentQuarter &&
-          d.getFullYear() === today.getFullYear()
-        );
+        return Math.floor(d.getMonth() / 3) === currentQuarter && d.getFullYear() === today.getFullYear();
       }
-      if (period === "year") {
-        return d.getFullYear() === today.getFullYear();
-      }
+      if (period === "year") return d.getFullYear() === today.getFullYear();
+
       if (period === "last7") {
-        const start = new Date(today);
-        start.setDate(today.getDate() - 6);
+        const start = new Date(today); start.setDate(today.getDate() - 6);
         return d >= start && d <= today;
       }
       if (period === "last30") {
-        const start = new Date(today);
-        start.setDate(today.getDate() - 29);
+        const start = new Date(today); start.setDate(today.getDate() - 29);
         return d >= start && d <= today;
       }
-            if (period === "last90") {
-        const start = new Date(today);
-        start.setDate(today.getDate() - 89);
+      if (period === "last90") {
+        const start = new Date(today); start.setDate(today.getDate() - 89);
         return d >= start && d <= today;
       }
-
       if (period === "thisTimeLastYear") {
         const lastYear = today.getFullYear() - 1;
         const end = new Date(lastYear, today.getMonth(), today.getDate());
-        const start = new Date(end);
-        start.setDate(end.getDate() - 29);
+        const start = new Date(end); start.setDate(end.getDate() - 29);
         const dLastYear = new Date(d.getFullYear(), d.getMonth(), d.getDate());
         return dLastYear >= start && dLastYear <= end;
       }
-
       if (period === "custom") {
-        if (!customFrom && !customTo) return true;
         let from = customFrom ? new Date(customFrom) : null;
         let to = customTo ? new Date(customTo) : null;
-
         if (from) from = new Date(from.getFullYear(), from.getMonth(), from.getDate());
         if (to) to = new Date(to.getFullYear(), to.getMonth(), to.getDate());
-
         if (from && to) return d >= from && d <= to;
         if (from && !to) return d >= from;
         if (!from && to) return d <= to;
         return true;
       }
-
       return true;
     });
   }, [data, period, customFrom, customTo]);
@@ -227,16 +202,9 @@ export default function Transactions() {
     topExpenseMerchants,
   } = useMemo(() => {
     const isIncome = (amt) => Number(amt) >= 0;
+    let incomeSum = 0, expenseSum = 0;
+    const categoryExpenses = {}, merchantsByCategory = {}, incomeByPayer = {}, expenseByMerchant = {};
 
-    let incomeSum = 0;
-    let expenseSum = 0;
-
-    const categoryExpenses = {};
-    const merchantsByCategory = {};
-    const incomeByPayer = {};
-    const expenseByMerchant = {};
-
-    // ✅ Unified exclusion set
     const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
@@ -247,10 +215,8 @@ export default function Transactions() {
 
     filtered.forEach((tx) => {
       const amount = parseFloat(tx.amount) || 0;
-      const category =
-        (tx.category && tx.category.trim()) || inferCategory(tx.description);
-      const merchant =
-        (tx.description && tx.description.trim()) || "Unknown";
+      const category = (tx.category && tx.category.trim()) || inferCategory(tx.description);
+      const merchant = (tx.description && tx.description.trim()) || "Unknown";
 
       if (isIncome(amount)) {
         if (!excludedCategories.has(category)) {
@@ -283,9 +249,7 @@ export default function Transactions() {
       })
     );
 
-    const categoryEntries = Object.entries(categoryExpenses).sort(
-      (a, b) => b[1] - a[1]
-    );
+    const categoryEntries = Object.entries(categoryExpenses).sort((a, b) => b[1] - a[1]);
 
     const topIncome = Object.entries(incomeByPayer)
       .sort((a, b) => b[1] - a[1])
@@ -307,17 +271,13 @@ export default function Transactions() {
     };
   }, [filtered]);
 
-  // chartOptions, periodButtons, and JSX rendering follow exactly as in your original file
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     if (!filtered.length) return "NO_DATA";
 
     const numberFormat = (val, decimals = 2) => {
-      try {
-        return Highcharts.numberFormat(val, decimals);
-      } catch {
-        return Number(val).toFixed(decimals);
-      }
+      try { return Highcharts.numberFormat(val, decimals); } 
+      catch { return Number(val).toFixed(decimals); }
     };
 
     const labelMap = {
@@ -522,44 +482,46 @@ export default function Transactions() {
             <tbody>
               {error && (
                 <tr>
-                  <td colSpan="4" className="px-4 py-2 text-red-500">
+                  <td colSpan={4} className="px-4 py-2 text-red-500">
                     Failed to load transactions
                   </td>
                 </tr>
               )}
               {!data && !error && (
                 <tr>
-                  <td colSpan="4" className="px-4 py-2 text-slate-500">
+                  <td colSpan={4} className="px-4 py-2 text-slate-500">
                     Loading transactions...
                   </td>
                 </tr>
               )}
               {data && filtered.length === 0 && !error && (
                 <tr>
-                  <td colSpan="4" className="px-4 py-2 text-slate-500">
+                  <td colSpan={4} className="px-4 py-2 text-slate-500">
                     No transactions in this period.
                   </td>
                 </tr>
-                              {filtered.map((tx) => (
-                <tr key={tx.id} className="border-t">
-                  <td className="px-4 py-2">
-                    {safeDate(tx.date)?.toLocaleDateString() ?? "—"}
-                  </td>
-                  <td className="px-4 py-2">{tx.description}</td>
-                  <td
-                    className={`px-4 py-2 font-medium ${
-                      tx.amount >= 0 ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {tx.amount >= 0
-                      ? `+£${tx.amount.toFixed(2)}`
-                      : `−£${Math.abs(tx.amount).toFixed(2)}`}
-                  </td>
-                  <td className="px-4 py-2">
-                    {tx.category || inferCategory(tx.description)}
-                  </td>
-                </tr>
-              ))}
+              )}
+              {data && filtered.length > 0 &&
+                filtered.map((tx) => (
+                  <tr key={tx.id} className="border-t">
+                    <td className="px-4 py-2">
+                      {safeDate(tx.date)?.toLocaleDateString() ?? "—"}
+                    </td>
+                    <td className="px-4 py-2">{tx.description}</td>
+                    <td
+                      className={`px-4 py-2 font-medium ${
+                        tx.amount >= 0 ? "text-green-600" : "text-red-600"
+                      }`}
+                    >
+                      {tx.amount >= 0
+                        ? `+£${tx.amount.toFixed(2)}`
+                        : `−£${Math.abs(tx.amount).toFixed(2)}`}
+                    </td>
+                    <td className="px-4 py-2">
+                      {tx.category || inferCategory(tx.description)}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
@@ -567,4 +529,3 @@ export default function Transactions() {
     </Layout>
   );
 }
-
