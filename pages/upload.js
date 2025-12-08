@@ -18,7 +18,9 @@ export default function Upload() {
   const [errorMsg, setErrorMsg] = useState(null);
   const [sessionUser, setSessionUser] = useState(null);
   const [uploadSummary, setUploadSummary] = useState(null);
-  const { data, error } = useSWR("/api/stats", fetcher);
+
+  // ✅ Pull data from reports API
+  const { data, error } = useSWR("/api/reports", fetcher);
   const router = useRouter();
 
   // 🔑 Load session and enforce access
@@ -73,7 +75,7 @@ export default function Upload() {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || result.message || "Upload failed");
 
-      mutate("/api/stats");
+      mutate("/api/reports"); // ✅ revalidate reports data
       setUploadSummary(result);
       alert(result.message || "Upload complete");
       router.push("/dashboard");
@@ -93,29 +95,35 @@ export default function Upload() {
     "Transfer Between Accounts",
   ]);
 
-  // ✅ Drilldown chart options
+  // ✅ Drilldown chart options using reports data
   const drilldownOptions = useMemo(() => {
-    if (!data?.categories?.length) return null;
+    if (!Array.isArray(data) || data.length === 0) return null;
 
-    // Top-level series: totals per category
-    const seriesData = data.categories
-      .filter((c) => !excludedCategories.has(c.name))
-      .map((c) => ({
-        name: c.name,
-        y: Number(c.amount || 0),
-        drilldown: c.name,
-      }));
+    const categoryTotals = {};
+    const transactionMap = {};
 
-    // Drilldown series: transactions per category
-    const drilldownSeries = (data.transactions || [])
-      .filter((tx) => !excludedCategories.has(tx.category))
-      .reduce((acc, tx) => {
-        if (!acc[tx.category]) acc[tx.category] = [];
-        acc[tx.category].push([tx.description, Number(tx.amount || 0)]);
-        return acc;
-      }, {});
+    data.forEach((report) => {
+      (report.categories || []).forEach((c) => {
+        if (!excludedCategories.has(c.name)) {
+          categoryTotals[c.name] = (categoryTotals[c.name] || 0) + Number(c.amount || 0);
+        }
+      });
 
-    const drilldownData = Object.entries(drilldownSeries).map(([cat, txs]) => ({
+      (report.transactions || []).forEach((tx) => {
+        if (!excludedCategories.has(tx.category)) {
+          if (!transactionMap[tx.category]) transactionMap[tx.category] = [];
+          transactionMap[tx.category].push([tx.description, Number(tx.amount || 0)]);
+        }
+      });
+    });
+
+    const seriesData = Object.entries(categoryTotals).map(([cat, amt]) => ({
+      name: cat,
+      y: amt,
+      drilldown: cat,
+    }));
+
+    const drilldownData = Object.entries(transactionMap).map(([cat, txs]) => ({
       name: cat,
       id: cat,
       data: txs,
