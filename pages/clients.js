@@ -91,7 +91,8 @@ export default function Clients() {
         </div>
 
         <p className="text-slate-600">
-          Type in client data, visualize profits, export to CSV—no bank statements involved.
+          Type in client data, visualize profits, export to CSV—no bank statements involved. This is a static page
+          fill in the boxes for easy calculations from each client, ready for download. No saved data! 
         </p>
 
         {/* Add Client Form */}
