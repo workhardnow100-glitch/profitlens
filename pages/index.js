@@ -1,3 +1,4 @@
+// pages/index.js
 import Head from "next/head";
 import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
@@ -12,6 +13,7 @@ export default function Home() {
     status: "",
   });
 
+  // Fetch trial status on load
   useEffect(() => {
     fetch("/api/trial-status")
       .then((res) => res.json())
@@ -46,8 +48,15 @@ export default function Home() {
   };
 
   const startTrial = async () => {
-    await fetch("/api/start-trial", { method: "POST" });
-    window.location.reload();
+    const res = await fetch("/api/start-trial", { method: "POST" });
+    const data = await res.json();
+    if (data.success) {
+      setTrialInfo({
+        trialActive: true,
+        trialEndsAt: data.trialEndsAt,
+        status: data.status,
+      });
+    }
   };
 
   return (
@@ -143,7 +152,7 @@ export default function Home() {
             </div>
           )}
 
-          {/* Trial Signup Button (for new/expired users) */}
+          {/* Trial Signup Button */}
           {!trialInfo.trialActive && (
             <button
               onClick={startTrial}
@@ -222,7 +231,7 @@ export default function Home() {
                 ✅ Profit & Loss Account
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
-                ✅ Forcasted Projections
+                ✅ Forecasted Projections
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
                 ✅ PDF & CSV Downloading
