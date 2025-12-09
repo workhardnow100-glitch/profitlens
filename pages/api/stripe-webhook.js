@@ -33,12 +33,26 @@ export default async function handler(req, res) {
   try {
     switch (event.type) {
       case "checkout.session.completed": {
-        const session = event.data.object;
-        const email = session.customer_email;
+        // Retrieve full session with line items
+        const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
+          expand: ["line_items"],
+        });
 
+        const email = session.customer_email;
         if (!email) {
           console.warn("⚠️ No customer_email found in session");
           return res.status(400).json({ error: "Missing email" });
+        }
+
+        // ✅ Determine plan
+        let plan;
+        if (session.metadata?.plan) {
+          plan = session.metadata.plan; // from /api/checkout.js
+        } else {
+          const priceId = session.line_items.data[0].price.id;
+          if (priceId === process.env.STRIPE_BASIC_PRICE_ID) plan = "basic";
+          else if (priceId === process.env.STRIPE_PRO_PRICE_ID) plan = "pro";
+          else plan = "basic"; // fallback
         }
 
         // ✅ Check if user exists in app_users
@@ -71,7 +85,7 @@ export default async function handler(req, res) {
             .insert([{
               email,
               role: "client",
-              subscription_status: "basic", // or "pro" depending on plan
+              subscription_status: plan,
               client_id: clientId,
             }])
             .select("id")
@@ -86,7 +100,7 @@ export default async function handler(req, res) {
 
           await supabaseAdmin.from("subscriptions").insert([{
             user_id: userId,
-            status: "basic", // or "pro"
+            status: plan,
             stripe_customer_id: session.customer,
             stripe_subscription_id: session.subscription,
           }]);
@@ -101,7 +115,7 @@ export default async function handler(req, res) {
             `,
           });
 
-          console.log(`🚀 New user created and welcomed: ${email}`);
+          console.log(`🚀 New ${plan} user created and welcomed: ${email}`);
         } else {
           userId = existingUser.id;
           clientId = existingUser.client_id;
@@ -110,7 +124,7 @@ export default async function handler(req, res) {
             .from("subscriptions")
             .upsert([{
               user_id: userId,
-              status: "basic", // or "pro"
+              status: plan,
               stripe_customer_id: session.customer,
               stripe_subscription_id: session.subscription,
             }], { onConflict: ["user_id"] });
@@ -118,10 +132,10 @@ export default async function handler(req, res) {
           // ✅ Sync subscription status to app_users
           await supabaseAdmin
             .from("app_users")
-            .update({ subscription_status: "basic" }) // or "pro"
+            .update({ subscription_status: plan })
             .eq("id", userId);
 
-          console.log(`🔒 Subscription activated for existing user: ${email}`);
+          console.log(`🔒 Subscription updated to ${plan} for existing user: ${email}`);
         }
 
         // Optional: audit log
@@ -129,7 +143,7 @@ export default async function handler(req, res) {
           client_id: clientId,
           user: email,
           action: "STRIPE_CHECKOUT_COMPLETED",
-          details: `Subscription ${session.subscription} activated`,
+          details: `Subscription ${session.subscription} activated (${plan})`,
           timestamp: new Date().toISOString(),
         }]);
 
