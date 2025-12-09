@@ -60,8 +60,36 @@ export default function Forecasts() {
 
         if (!res.ok) throw new Error(json.error || "Failed to fetch forecast");
 
-        setForecast(json.forecast || []);
+        const excludedCategories = new Set([
+          "Asset Disposal",
+          "Insurance Payout",
+          "Internal Transfer",
+          "Returned Direct Debit",
+          "Transfer Between Accounts",
+        ]);
+
+        // Apply filtering to categories inside forecast response
+        const months = json.series?.months || [];
+
+        const revenue = (json.series?.categories || [])
+          .filter((c) => !excludedCategories.has(c.name))
+          .reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0);
+
+        const expenses = (json.series?.categories || [])
+          .filter((c) => !excludedCategories.has(c.name))
+          .reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0);
+
+        const net = revenue - expenses;
+
+        // Keep the raw series for historical charting
         setSeries(json.series || { months: [], revenue: [], expenses: [], net: [] });
+
+        // Totals for cards
+        setForecast([
+          { title: "Revenue Projection", value: revenue },
+          { title: "Expense Forecast", value: expenses },
+          { title: "Net Profit Forecast", value: net },
+        ]);
       } catch (err) {
         setError(err.message);
       }
@@ -72,15 +100,9 @@ export default function Forecasts() {
     }
   }, [session]);
 
-  const revenueProjection = forecast[0]?.value
-    ? parseFloat(forecast[0].value.replace("£", "")) || 0
-    : 0;
-
-  const expenseProjection = forecast[1]?.value
-    ? parseFloat(forecast[1].value.replace("£", "")) || 0
-    : 0;
-
-  const netProfit = revenueProjection - expenseProjection;
+  const revenueProjection = forecast[0]?.value || 0;
+  const expenseProjection = forecast[1]?.value || 0;
+  const netProfit = forecast[2]?.value || 0;
 
   // Simulation trends (heuristic projections)
   const revenueTrend = useMemo(() => {
