@@ -1,8 +1,12 @@
-import { getServerSession } from "next-auth";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./auth/[...nextauth]"; // adjust path if your NextAuth file is elsewhere
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import type { NextApiRequest, NextApiResponse } from "next";
 
-export default async function handler(req, res) {
-  const session = await getServerSession(req, res);
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // getServerSession now requires (req, res, authOptions)
+  const session = await getServerSession(req, res, authOptions);
+
   if (!session?.user?.id) {
     return res.status(401).json({ trialActive: false });
   }
@@ -21,7 +25,7 @@ export default async function handler(req, res) {
   const trialActive =
     sub.status === "active" || (sub.trial_end && new Date(sub.trial_end) > now);
 
-  res.status(200).json({
+  return res.status(200).json({
     trialActive,
     trialEndsAt: sub.trial_end,
     status: sub.status,
