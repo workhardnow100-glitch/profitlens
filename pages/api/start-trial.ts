@@ -24,14 +24,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       email = guestEmail.trim().toLowerCase();
       userId = randomUUID(); // ✅ pure UUID
 
-      // Insert stub user to satisfy FK constraint
-      const { error: userInsertError } = await supabaseAdmin.from("users").insert({
-        id: userId,
+      // 1️⃣ Create stub client row
+      const clientId = randomUUID();
+      const { error: clientError } = await supabaseAdmin.from("clients").insert({
+        id: clientId,
+        name: `Trial Client for ${email}`,
+        owner_id: userId,
         email,
         created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      if (clientError) {
+        console.error("Supabase client insert error:", clientError.message);
+        return res.status(500).json({ error: clientError.message });
+      }
+
+      // 2️⃣ Insert stub app_user row referencing that client
+      const { error: userInsertError } = await supabaseAdmin.from("app_users").insert({
+        id: userId,
+        email,
+        role: "user",
+        subscription_status: "basic", // satisfies CHECK constraint
+        default_client_id: clientId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
       if (userInsertError) {
-        console.error("Supabase user insert error:", userInsertError.message);
+        console.error("Supabase app_users insert error:", userInsertError.message);
         return res.status(500).json({ error: userInsertError.message });
       }
     }
@@ -82,7 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Audit log
     await supabaseAdmin.from("audit").insert([
       {
-        client_id: session?.user?.clientId ?? "guest-client",
+        client_id: session?.user?.clientId ?? null,
         actor_email: email,
         action: "TRIAL_STARTED",
         details: `Trial started until ${trialEnd.toISOString()}`,
