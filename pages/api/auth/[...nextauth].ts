@@ -201,6 +201,16 @@ export const authOptions: NextAuthOptions = {
       console.log("🔍 Session enrichment:", session.user);
       return session;
     },
+
+    // ✅ Force redirect to /dashboard after login
+    async redirect({ url, baseUrl }) {
+      // If callbackUrl is provided and relative, respect it
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      // If same origin, respect it
+      if (new URL(url).origin === baseUrl) return url;
+      // Otherwise always send to dashboard
+      return `${baseUrl}/dashboard`;
+    },
   },
 
   // ✅ Redirect users to /dashboard after login
