@@ -46,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         role: "user",
         subscription_status: "trialing", // ✅ mark as trialing
         default_client_id: clientId,
-        client_id: clientId, // ✅ populate client_id too
+        client_id: clientId, // ✅ explicitly set so adapter check passes
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
