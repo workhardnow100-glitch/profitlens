@@ -44,8 +44,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         id: userId,
         email,
         role: "user",
-        subscription_status: "basic", // satisfies CHECK constraint
+        subscription_status: "trialing", // ✅ mark as trialing
         default_client_id: clientId,
+        client_id: clientId, // ✅ populate client_id too
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
