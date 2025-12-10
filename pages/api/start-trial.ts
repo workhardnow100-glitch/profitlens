@@ -22,7 +22,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: "Email required to start trial" });
       }
       email = guestEmail.trim().toLowerCase();
-      userId = randomUUID(); // ✅ pure UUID, no prefix
+      userId = randomUUID(); // ✅ pure UUID
+
+      // Insert stub user to satisfy FK constraint
+      const { error: userInsertError } = await supabaseAdmin.from("users").insert({
+        id: userId,
+        email,
+        created_at: new Date().toISOString(),
+      });
+      if (userInsertError) {
+        console.error("Supabase user insert error:", userInsertError.message);
+        return res.status(500).json({ error: userInsertError.message });
+      }
     }
 
     // Check existing subscription
