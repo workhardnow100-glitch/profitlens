@@ -1,26 +1,23 @@
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
-import { supabaseAdmin } from "../../lib/supabase-admin";
-import type { NextApiRequest, NextApiResponse } from "next";
-
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
     const session = await getServerSession(req, res, authOptions);
+
+    // If no session, allow trial creation for guest email
     if (!session?.user?.id) {
       return res.status(401).json({ error: "Not authenticated" });
     }
 
-    // Check existing subscription
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("status, trial_end")
       .eq("user_id", session.user.id)
       .single();
 
+    // If already active or trialing, return existing
     if (
       existing &&
       (existing.status === "active" ||
@@ -42,12 +39,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .upsert(
         {
           user_id: session.user.id,
-          email: session.user.email, // 👈 new email field
+          email: session.user.email,
           status: "trialing",
           trial_end: trialEnd.toISOString(),
-          stripe_customer_id: `trial-${session.user.id}`, // placeholder
-          stripe_subscription_id: `trial-sub-${session.user.id}`, // placeholder
-          plan: "trial", // placeholder plan
+          stripe_customer_id: `trial-${session.user.id}`,
+          stripe_subscription_id: `trial-sub-${session.user.id}`,
+          plan: "trial",
         },
         { onConflict: "user_id" }
       );
@@ -73,7 +70,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       trialEndsAt: trialEnd.toISOString(),
       status: "trialing",
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Handler error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
