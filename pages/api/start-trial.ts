@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import type { NextApiRequest, NextApiResponse } from "next";
+import crypto from "crypto";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -11,14 +12,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const session = await getServerSession(req, res, authOptions);
 
-    if (!session?.user?.id) {
-      return res.status(401).json({ error: "Not authenticated" });
+    let userId = session?.user?.id;
+    let email = session?.user?.email;
+
+    // If no session, allow guest trial creation by email
+    if (!userId) {
+      const { guestEmail } = req.body;
+      if (!guestEmail) {
+        return res.status(400).json({ error: "Email required to start trial" });
+      }
+      email = guestEmail.trim().toLowerCase();
+      userId = `guest-${crypto.randomUUID()}`;
     }
 
+    // Check existing subscription
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("status, trial_end")
-      .eq("user_id", session.user.id)
+      .eq("user_id", userId)
       .single();
 
     if (
@@ -41,12 +52,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .from("subscriptions")
       .upsert(
         {
-          user_id: session.user.id,
-          email: session.user.email,
+          user_id: userId,
+          email,
           status: "trialing",
           trial_end: trialEnd.toISOString(),
-          stripe_customer_id: `trial-${session.user.id}`,
-          stripe_subscription_id: `trial-sub-${session.user.id}`,
+          stripe_customer_id: `trial-${userId}`,
+          stripe_subscription_id: `trial-sub-${userId}`,
           plan: "trial",
         },
         { onConflict: "user_id" }
@@ -60,8 +71,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Audit log
     await supabaseAdmin.from("audit").insert([
       {
-        client_id: session.user.clientId ?? "unknown-client",
-        actor_email: session.user.email,
+        client_id: session?.user?.clientId ?? "guest-client",
+        actor_email: email,
         action: "TRIAL_STARTED",
         details: `Trial started until ${trialEnd.toISOString()}`,
       },
