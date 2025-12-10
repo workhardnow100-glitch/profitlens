@@ -27,15 +27,20 @@ export default function Upload() {
         return;
       }
 
-      const { role, subscriptionStatus, clientId, email, id } = session.user;
+useEffect(() => {
+  if (status === "loading") return;
+  if (session?.user) {
+    const isAdmin = session.user.role === "admin";
+    // ✅ include trialing in allowed statuses
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
+    }
+  } else {
+    router.replace("/login");
+  }
+}, [session, status, router]);
 
-      const isAdmin = role === "admin";
-      const isSubscribed = ["basic", "pro"].includes(subscriptionStatus);
-
-      if (!(isAdmin || isSubscribed)) {
-        router.replace("/upgrade");
-        return;
-      }
 
       setSessionUser({ id, email, clientId, role, subscriptionStatus });
     };
