@@ -94,6 +94,29 @@ PatchedAdapter.createVerificationToken = async (token) => {
   return inserted;
 };
 
+// ✅ Consume verification token and mark user as verified
+PatchedAdapter.useVerificationToken = async (token) => {
+  const { data: consumed, error } = await supabaseAdmin
+    .from("verification_tokens")
+    .delete()
+    .eq("token", token.token)
+    .select()
+    .single();
+
+  if (error || !consumed) {
+    console.error("Failed to consume verification token:", error);
+    return null;
+  }
+
+  // Mark user as verified
+  await supabaseAdmin
+    .from("app_users")
+    .update({ email_verified: new Date().toISOString() })
+    .eq("email", consumed.identifier);
+
+  return consumed;
+};
+
 export const authOptions: NextAuthOptions = {
   providers: [
     EmailProvider({
@@ -159,14 +182,12 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
-      // Always enrich token on first login
       if (user) {
         token.sub = String(user.id);
         token.email = user.email;
         token.role = (user as any).role ?? "USER";
       }
 
-      // Always refresh from DB to keep clientId and subscriptionStatus current
       if (token.email) {
         const { data: dbUser } = await supabaseAdmin
           .from("app_users")
@@ -182,7 +203,7 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
-      return token; // ✅ always return
+      return token;
     },
 
     async session({ session, token }) {
@@ -194,7 +215,7 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
       console.log("🔍 Session enrichment:", session.user);
-      return session; // ✅ always return
+      return session;
     },
 
     async redirect({ url, baseUrl }) {
