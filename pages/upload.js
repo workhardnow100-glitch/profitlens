@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { useRouter } from "next/router";
 import Layout from "../components/layout";
-import { getSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -14,39 +14,34 @@ export default function Upload() {
   const [sessionUser, setSessionUser] = useState(null);
   const [uploadSummary, setUploadSummary] = useState(null);
 
-  // ✅ still fetch stats if needed for other parts
   const { data, error } = useSWR("/api/reports", fetcher);
   const router = useRouter();
+  const { data: session, status } = useSession();
 
-  // 🔑 Load session and enforce access
+  // 🔑 Enforce access
   useEffect(() => {
-    const loadSession = async () => {
-      const session = await getSession();
-      if (!session?.user) {
-        router.replace("/login");
-        return;
+    if (status === "loading") return;
+    if (session?.user) {
+      const isAdmin = session.user.role === "admin";
+      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+        session.user.subscriptionStatus
+      );
+      if (!(isAdmin || isSubscribedOrTrial)) {
+        router.replace("/upgrade");
+      } else {
+        // set local sessionUser state for uploads
+        setSessionUser({
+          id: session.user.id,
+          email: session.user.email,
+          clientId: session.user.clientId,
+          role: session.user.role,
+          subscriptionStatus: session.user.subscriptionStatus,
+        });
       }
-
-useEffect(() => {
-  if (status === "loading") return;
-  if (session?.user) {
-    const isAdmin = session.user.role === "admin";
-    // ✅ include trialing in allowed statuses
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
+    } else {
+      router.replace("/login");
     }
-  } else {
-    router.replace("/login");
-  }
-}, [session, status, router]);
-
-
-      setSessionUser({ id, email, clientId, role, subscriptionStatus });
-    };
-
-    loadSession();
-  }, [router]);
+  }, [session, status, router]);
 
   const handleUpload = async () => {
     if (!files.length || !sessionUser) {
@@ -61,7 +56,6 @@ useEffect(() => {
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));
 
-    // Pass identifiers so API can scope correctly
     formData.append("userId", sessionUser.id);
     formData.append("clientId", sessionUser.clientId);
     formData.append("email", sessionUser.email);
@@ -75,7 +69,7 @@ useEffect(() => {
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || result.message || "Upload failed");
 
-      mutate("/api/reports"); // ✅ revalidate reports data
+      mutate("/api/reports");
       setUploadSummary(result);
       alert(result.message || "Upload complete");
       router.push("/dashboard");
@@ -92,8 +86,7 @@ useEffect(() => {
         <h2 className="text-2xl font-bold text-slate-800">Upload Statements</h2>
         <p className="text-slate-600 mt-2">
           Upload your bank statements here to begin analysis. Supported formats include CSV and Excel.
-          Once uploaded, your data will be parsed and tagged automatically. Either use bulk processing 
-          or uploads, for open banking use bulk processing.
+          Once uploaded, your data will be parsed and tagged automatically.
         </p>
 
         <div className="mt-6 space-y-4">
