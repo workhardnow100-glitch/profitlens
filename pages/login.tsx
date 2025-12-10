@@ -6,25 +6,27 @@ import { useState } from "react";
 export default function Login() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState(null);
+  const [message, setMessage] = useState("");
 
   async function onSubmit(e) {
     e.preventDefault();
     setError(null);
+    setMessage("");
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
 
+      // ✅ Let NextAuth handle redirect automatically
       const res = await signIn("email", {
-        redirect: false,
         email: normalizedEmail,
         callbackUrl: "/dashboard",
+        redirect: true, // allow NextAuth to redirect after magic link
       });
 
       if (res?.error) {
         setError(res.error);
       } else {
-        // ✅ Session enrichment will run in NextAuth callbacks
-        window.location.href = "/dashboard";
+        setMessage("Magic link sent! Check your email to continue.");
       }
     } catch (err) {
       setError("Unexpected error during sign-in");
@@ -61,6 +63,7 @@ export default function Login() {
           </button>
 
           {error && <p className="mt-3 text-red-400 text-sm">{error}</p>}
+          {message && <p className="mt-3 text-green-400 text-sm">{message}</p>}
         </form>
       </main>
     </>
