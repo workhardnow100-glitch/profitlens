@@ -81,9 +81,12 @@ export default async function handler(req, res) {
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const isFounder = session.user.role === "admin";
-    const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
-    if (!(isFounder || isSubscribed)) return res.status(403).json({ error: "Upgrade required" });
+const isFounder = session.user.role === "admin";
+const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+
+if (!(isFounder || isSubscribedOrTrial)) {
+  return res.status(403).json({ error: "Upgrade required" });
+}
 
     const clientId = session.user.clientId;
     if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
