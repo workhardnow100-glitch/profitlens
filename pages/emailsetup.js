@@ -23,21 +23,25 @@ export default function EmailSetup() {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
 
-  // 🔑 Access check
-  useEffect(() => {
-    if (authStatus === "loading") return;
+// 🔑 Access check
+useEffect(() => {
+  if (authStatus === "loading") return;
 
-    if (session?.user) {
-      const isAdmin = session.user.role === "admin";
-      const isPro = session.user.subscriptionStatus === "pro";
+  if (session?.user) {
+    const isAdmin = session.user.role === "admin";
+    // ✅ include basic and trialing in allowed statuses
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
 
-      if (!(isAdmin || isPro)) {
-        router.replace("/upgrade");
-      }
-    } else {
-      router.replace("/login");
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
     }
-  }, [session, authStatus, router]);
+  } else {
+    router.replace("/login");
+  }
+}, [session, authStatus, router]);
+
 
   useEffect(() => {
     // Simulated connection + ingestion log

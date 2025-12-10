@@ -36,24 +36,26 @@ export default function Reports() {
     });
   }, []);
 
-  // ✅ Access control
-  useEffect(() => {
-    if (status === "loading") return;
+// ✅ Access control
+useEffect(() => {
+  if (status === "loading") return;
 
-    if (!session?.user) {
-      router.replace("/login");
-      return;
-    }
+  if (!session?.user) {
+    router.replace("/login");
+    return;
+  }
 
-    const isAdmin = session.user.role === "admin";
-    const isSubscribed = ["basic", "pro"].includes(
-      session.user.subscriptionStatus
-    );
+  const isAdmin = session.user.role === "admin";
+  // ✅ include trialing in allowed statuses
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
 
-    if (!(isAdmin || isSubscribed)) {
-      router.replace("/upgrade");
-    }
-  }, [session, status, router]);
+  if (!(isAdmin || isSubscribedOrTrial)) {
+    router.replace("/upgrade");
+  }
+}, [session, status, router]);
+
 
   const handlePrint = useReactToPrint({
     content: () => reportRef.current,

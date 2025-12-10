@@ -36,21 +36,25 @@ export default function Forecasts() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // 🔑 Access check
-  useEffect(() => {
-    if (status === "loading") return;
+// 🔑 Access check
+useEffect(() => {
+  if (status === "loading") return;
 
-    if (session?.user) {
-      const isAdmin = session.user.role === "admin";
-      const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+  if (session?.user) {
+    const isAdmin = session.user.role === "admin";
+    // ✅ include trialing in allowed statuses
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
 
-      if (!(isAdmin || isSubscribed)) {
-        router.replace("/upgrade");
-      }
-    } else {
-      router.replace("/login");
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
     }
-  }, [session, status, router]);
+  } else {
+    router.replace("/login");
+  }
+}, [session, status, router]);
+
 
   useEffect(() => {
     const fetchForecastData = async () => {

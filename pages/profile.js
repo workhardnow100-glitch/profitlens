@@ -22,12 +22,25 @@ export default function ProfilePage() {
 
   const reportRef = useRef();
 
-  useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) {
-      router.replace("/login");
-      return;
-    }
+ useEffect(() => {
+  if (status === "loading") return;
+
+  if (!session?.user) {
+    router.replace("/login");
+    return;
+  }
+
+  const isAdmin = session.user.role === "admin";
+  // ✅ include trialing in allowed statuses
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isAdmin || isSubscribedOrTrial)) {
+    router.replace("/upgrade");
+  }
+}, [session, status, router]);
+
 
     const fetchProfile = async () => {
       setLoading(true);
