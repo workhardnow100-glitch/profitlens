@@ -1,4 +1,9 @@
-export default async function handler(req, res) {
+import { getServerSession } from "next-auth";
+import { authOptions } from "./auth/[...nextauth]";
+import { supabaseAdmin } from "../../lib/supabase-admin";
+import type { NextApiRequest, NextApiResponse } from "next";
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -6,7 +11,6 @@ export default async function handler(req, res) {
   try {
     const session = await getServerSession(req, res, authOptions);
 
-    // If no session, allow trial creation for guest email
     if (!session?.user?.id) {
       return res.status(401).json({ error: "Not authenticated" });
     }
@@ -17,7 +21,6 @@ export default async function handler(req, res) {
       .eq("user_id", session.user.id)
       .single();
 
-    // If already active or trialing, return existing
     if (
       existing &&
       (existing.status === "active" ||
@@ -70,7 +73,7 @@ export default async function handler(req, res) {
       trialEndsAt: trialEnd.toISOString(),
       status: "trialing",
     });
-  } catch (err) {
+  } catch (err: any) {
     console.error("Handler error:", err);
     return res.status(500).json({ error: "Internal server error" });
   }
