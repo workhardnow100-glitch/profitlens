@@ -1,3 +1,4 @@
+// pages/api/dashboard.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -50,13 +51,12 @@ export default async function handler(req, res) {
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
   const isFounder = session.user.role === "admin";
-  const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
-  if (!(isFounder || isSubscribed)) return res.status(403).json({ error: "Upgrade required" });
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+  if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
 
   const clientId = session.user.clientId;
   if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
 
-  // PATCH: update transaction category in-place
   if (req.method === "PATCH") {
     try {
       const { id, category } = req.body || {};
@@ -80,7 +80,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true });
     } catch (err) {
-      console.error("PATCH error:", err.message || err);
+      console.error("PATCH error:", err?.message || err);
       return res.status(500).json({ error: "Failed to update category" });
     }
   }
@@ -103,7 +103,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true, deleted: count });
     } catch (err) {
-      console.error("DELETE error:", err.message || err);
+      console.error("DELETE error:", err?.message || err);
       return res.status(500).json({ error: "Failed to delete transactions" });
     }
   }
@@ -119,17 +119,15 @@ export default async function handler(req, res) {
     const monthly = {};
     const recent = [];
 
-    // ✅ All possible categories included (for dropdown)
     const categoryBreakdown = {
-      "Payment": 0, "Transfer": 0, "Bank Charges": 0, "Debit": 0, "Direct Debit": 0,
-      "Standing Order": 0, "Interest": 0, "Groceries": 0, "Food & Drink": 0, "Shopping": 0,
-      "Transport": 0, "Travel": 0, "Fuel": 0, "Utilities": 0, "Subscriptions": 0, "Advertising": 0,
-      "Business & Tax": 0, "Health": 0, "Insurance": 0, "Entertainment": 0, "Fitness": 0,
-      "Other": 0, "Asset Disposal": 0, "Insurance Payout": 0, "Internal Transfer": 0,
-      "Returned Direct Debit": 0, "Transfer Between Accounts": 0
+      Payment: 0, Transfer: 0, "Bank Charges": 0, Debit: 0, "Direct Debit": 0,
+      "Standing Order": 0, Interest: 0, Groceries: 0, "Food & Drink": 0, Shopping: 0,
+      Transport: 0, Travel: 0, Fuel: 0, Utilities: 0, Subscriptions: 0, Advertising: 0,
+      "Business & Tax": 0, Health: 0, Insurance: 0, Entertainment: 0, Fitness: 0,
+      Other: 0, "Asset Disposal": 0, "Insurance Payout": 0, "Internal Transfer": 0,
+      "Returned Direct Debit": 0, "Transfer Between Accounts": 0,
     };
 
-    // ❗ Unified exclusion set: visible in UI, zeroed in totals (income & expenses)
     const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
@@ -138,18 +136,18 @@ export default async function handler(req, res) {
       "Transfer Between Accounts",
     ]);
 
-    for (const tx of transactions) {
+    for (const tx of transactions ?? []) {
       if (tx.is_reversal) continue;
 
       const date = new Date(tx.date);
-      if (isNaN(date)) continue;
+      if (isNaN(date.getTime())) continue;
+
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
       const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
 
-      // Always include in recent for table
       recent.push({
         id: tx.id,
         date: date.toISOString().slice(0, 10),
@@ -161,7 +159,6 @@ export default async function handler(req, res) {
         storagePath: tx.storage_path || null,
       });
 
-            // ✅ Apply unified exclusions to totals (not to visibility)
       if (amount > 0) {
         if (!excludedCategories.has(category)) {
           monthly[monthKey].revenue += amount;
@@ -175,8 +172,8 @@ export default async function handler(req, res) {
     }
 
     const months = Object.keys(monthly).sort();
-    const revenue = months.map(m => monthly[m].revenue);
-    const expenses = months.map(m => monthly[m].expenses);
+    const revenue = months.map((m) => monthly[m].revenue);
+    const expenses = months.map((m) => monthly[m].expenses);
     const totalRevenue = revenue.reduce((a, b) => a + b, 0);
     const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
@@ -185,7 +182,7 @@ export default async function handler(req, res) {
       client_id: clientId,
       user: session.user.email,
       action: "FETCH_DASHBOARD",
-      details: `Returned ${transactions.length} transactions`,
+      details: `Returned ${transactions?.length ?? 0} transactions`,
       timestamp: new Date().toISOString(),
     }]);
 
@@ -198,11 +195,11 @@ export default async function handler(req, res) {
       series: { months, revenue, expenses },
       recent,
       breakdown: categoryBreakdown,
-      categories: Object.keys(categoryBreakdown), // ✅ full category list for dropdown
-      excludedIncomeCategories: Array.from(excludedCategories), // for frontend drilldown filtering if needed
+      categories: Object.keys(categoryBreakdown),
+      excludedIncomeCategories: Array.from(excludedCategories),
     });
   } catch (err) {
-    console.error("Dashboard API error:", err.message || err);
+    console.error("Dashboard API error:", err?.message || err);
     return res.status(500).json({ error: "Failed to load dashboard data" });
   }
 }
