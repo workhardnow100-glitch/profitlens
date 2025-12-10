@@ -131,7 +131,7 @@ export default function BulkProcessing() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white p-8">
+    <div className="min-h-screen bg-slate-900 text-white p-8 flex flex-col">
       <h1 className="text-2xl font-bold mb-4">Bulk Statement Upload</h1>
 
       <input
@@ -142,7 +142,7 @@ export default function BulkProcessing() {
         className="mb-4"
       />
 
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-4 mb-8">
         <button
           onClick={handleUpload}
           disabled={uploading}
@@ -165,6 +165,15 @@ export default function BulkProcessing() {
         >
           {refreshing ? "Refreshing..." : "Refresh Bank Data"}
         </button>
+      </div>
+
+      {/* Banner at the bottom */}
+      <div className="mt-auto flex justify-center">
+        <img
+          src="/banner.png"
+          alt="Powered by ProfitLens, Supabase & AWS"
+          className="h-12"
+        />
       </div>
     </div>
   );
