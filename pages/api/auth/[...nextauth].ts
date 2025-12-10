@@ -61,7 +61,6 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  // ✅ Allow trialing users as well
   const isActive = ["basic", "pro", "trialing"].includes(user.subscription_status);
   if (!user.client_id || !isActive) {
     await supabaseAdmin.from("audit").insert([{
@@ -160,34 +159,30 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
-      if (user?.email && !token.email) {
-        token.email = user.email;
+      // Always enrich token on first login
+      if (user) {
         token.sub = String(user.id);
+        token.email = user.email;
         token.role = (user as any).role ?? "USER";
       }
 
-      const email = token.email?.toLowerCase().trim();
-      if (!email) return token;
+      // Always refresh from DB to keep clientId and subscriptionStatus current
+      if (token.email) {
+        const { data: dbUser } = await supabaseAdmin
+          .from("app_users")
+          .select("id, role, client_id, subscription_status")
+          .eq("email", token.email.toLowerCase().trim())
+          .single();
 
-      const { data: dbUser, error } = await supabaseAdmin
-        .from("app_users")
-        .select("id, role, client_id, subscription_status")
-        .eq("email", email)
-        .single();
-
-      if (error || !dbUser) {
-        token.role = "USER";
-        token.clientId = "unknown-client";
-        token.subscriptionStatus = "incomplete";
-        return token;
+        if (dbUser) {
+          token.sub = dbUser.id;
+          token.role = dbUser.role ?? "USER";
+          token.clientId = dbUser.client_id ?? "unknown-client";
+          token.subscriptionStatus = dbUser.subscription_status ?? "incomplete";
+        }
       }
 
-      token.sub = dbUser.id;
-      token.role = dbUser.role ?? "USER";
-      token.clientId = dbUser.client_id ?? "unknown-client";
-      token.subscriptionStatus = dbUser.subscription_status ?? "incomplete";
-
-      return token;
+      return token; // ✅ always return
     },
 
     async session({ session, token }) {
@@ -199,25 +194,20 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
       console.log("🔍 Session enrichment:", session.user);
-      return session;
+      return session; // ✅ always return
     },
 
-    // ✅ Force redirect to /dashboard after login
     async redirect({ url, baseUrl }) {
-      // If callbackUrl is provided and relative, respect it
       if (url.startsWith("/")) return `${baseUrl}${url}`;
-      // If same origin, respect it
       if (new URL(url).origin === baseUrl) return url;
-      // Otherwise always send to dashboard
       return `${baseUrl}/dashboard`;
     },
   },
 
-  // ✅ Redirect users to /dashboard after login
   pages: {
     signIn: "/login",
-    verifyRequest: "/login", // optional: reuse login page for verification
-    newUser: "/dashboard",   // where new users land
+    verifyRequest: "/login",
+    newUser: "/dashboard",
   },
 };
 
