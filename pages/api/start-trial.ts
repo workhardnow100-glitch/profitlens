@@ -21,7 +21,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .eq("user_id", session.user.id)
       .single();
 
-    if (existing && (existing.status === "active" || (existing.trial_end && new Date(existing.trial_end) > new Date()))) {
+    if (
+      existing &&
+      (existing.status === "active" ||
+        (existing.trial_end && new Date(existing.trial_end) > new Date()))
+    ) {
       return res.status(200).json({
         success: true,
         trialActive: true,
@@ -38,8 +42,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .upsert(
         {
           user_id: session.user.id,
+          email: session.user.email, // 👈 new email field
           status: "trialing",
           trial_end: trialEnd.toISOString(),
+          stripe_customer_id: `trial-${session.user.id}`, // placeholder
+          stripe_subscription_id: `trial-sub-${session.user.id}`, // placeholder
+          plan: "trial", // placeholder plan
         },
         { onConflict: "user_id" }
       );
