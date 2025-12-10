@@ -172,7 +172,7 @@ export default function BulkProcessing() {
         <img
           src="/banner.png"
           alt="Powered by ProfitLens, Supabase & AWS"
-          className="h-12"
+          className="h-200"
         />
       </div>
     </div>
