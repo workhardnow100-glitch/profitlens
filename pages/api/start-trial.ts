@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import type { NextApiRequest, NextApiResponse } from "next";
-import crypto from "crypto";
+import { randomUUID } from "crypto"; // ✅ import randomUUID directly
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -22,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: "Email required to start trial" });
       }
       email = guestEmail.trim().toLowerCase();
-      userId = `guest-${crypto.randomUUID()}`;
+      userId = randomUUID(); // ✅ pure UUID, no prefix
     }
 
     // Check existing subscription
