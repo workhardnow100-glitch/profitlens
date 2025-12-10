@@ -32,8 +32,8 @@ export default async function handler(req, res) {
 
   try {
     switch (event.type) {
+      // ✅ Checkout completed
       case "checkout.session.completed": {
-        // Retrieve full session with line items
         const session = await stripe.checkout.sessions.retrieve(event.data.object.id, {
           expand: ["line_items"],
         });
@@ -44,15 +44,18 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: "Missing email" });
         }
 
+        // 🔑 Retrieve full customer details
+        const customer = await stripe.customers.retrieve(session.customer);
+
         // ✅ Determine plan
         let plan;
         if (session.metadata?.plan) {
-          plan = session.metadata.plan; // from /api/checkout.js
+          plan = session.metadata.plan;
         } else {
           const priceId = session.line_items.data[0].price.id;
           if (priceId === process.env.STRIPE_BASIC_PRICE_ID) plan = "basic";
           else if (priceId === process.env.STRIPE_PRO_PRICE_ID) plan = "pro";
-          else plan = "basic"; // fallback
+          else plan = "basic";
         }
 
         // ✅ Check if user exists in app_users
@@ -65,7 +68,7 @@ export default async function handler(req, res) {
         let userId, clientId;
 
         if (!existingUser) {
-          // ✅ Create new client first
+          // ✅ Create new client
           const { data: newClient, error: clientError } = await supabaseAdmin
             .from("clients")
             .insert([{ name: `${email}'s client` }])
@@ -98,11 +101,17 @@ export default async function handler(req, res) {
 
           userId = newUser.id;
 
+          // ✅ Insert subscription with full customer details
           await supabaseAdmin.from("subscriptions").insert([{
             user_id: userId,
             status: plan,
-            stripe_customer_id: session.customer,
+            stripe_customer_id: customer.id,
             stripe_subscription_id: session.subscription,
+            email: customer.email,
+            customer_name: customer.name,
+            customer_phone: customer.phone,
+            customer_address: customer.address ? customer.address : null,
+            plan,
           }]);
 
           await sendEmail({
@@ -120,13 +129,19 @@ export default async function handler(req, res) {
           userId = existingUser.id;
           clientId = existingUser.client_id;
 
+          // ✅ Upsert subscription with full customer details
           await supabaseAdmin
             .from("subscriptions")
             .upsert([{
               user_id: userId,
               status: plan,
-              stripe_customer_id: session.customer,
+              stripe_customer_id: customer.id,
               stripe_subscription_id: session.subscription,
+              email: customer.email,
+              customer_name: customer.name,
+              customer_phone: customer.phone,
+              customer_address: customer.address ? customer.address : null,
+              plan,
             }], { onConflict: ["user_id"] });
 
           // ✅ Sync subscription status to app_users
@@ -138,7 +153,7 @@ export default async function handler(req, res) {
           console.log(`🔒 Subscription updated to ${plan} for existing user: ${email}`);
         }
 
-        // Optional: audit log
+        // Audit log
         await supabaseAdmin.from("audit").insert([{
           client_id: clientId,
           user: email,
@@ -147,6 +162,59 @@ export default async function handler(req, res) {
           timestamp: new Date().toISOString(),
         }]);
 
+        break;
+      }
+
+      // ✅ Customer details updated
+      case "customer.updated": {
+        const customer = event.data.object;
+
+        await supabaseAdmin
+          .from("subscriptions")
+          .update({
+            email: customer.email,
+            customer_name: customer.name,
+            customer_phone: customer.phone,
+            customer_address: customer.address ? customer.address : null,
+          })
+          .eq("stripe_customer_id", customer.id);
+
+        console.log(`🔄 Customer updated synced for ${customer.email}`);
+        break;
+      }
+
+      // ✅ Subscription updated (plan/status changes)
+      case "customer.subscription.updated": {
+        const subscription = event.data.object;
+        const customerId = subscription.customer;
+
+        await supabaseAdmin
+          .from("subscriptions")
+          .update({
+            status: subscription.status,
+            plan: subscription.items?.data[0]?.price?.nickname || "unknown",
+            stripe_subscription_id: subscription.id,
+          })
+          .eq("stripe_customer_id", customerId);
+
+        console.log(`🔄 Subscription updated: ${subscription.id} (${subscription.status})`);
+        break;
+      }
+
+      // ✅ Subscription cancelled
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object;
+        const customerId = subscription.customer;
+
+        await supabaseAdmin
+          .from("subscriptions")
+          .update({
+            status: "canceled",
+            stripe_subscription_id: subscription.id,
+          })
+          .eq("stripe_customer_id", customerId);
+
+        console.log(`❌ Subscription canceled: ${subscription.id}`);
         break;
       }
 
