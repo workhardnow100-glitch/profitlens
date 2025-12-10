@@ -257,11 +257,11 @@ export default async function handler(req, res) {
   }
 
   const isFounder = session.user.role === "admin";
-  const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+if (!(isFounder || isSubscribedOrTrial)) {
+  return res.status(403).json({ error: "Upgrade required" });
+}
 
-  if (!(isFounder || isSubscribed)) {
-    return res.status(403).json({ error: "Upgrade required" });
-  }
 
   const clientId = session.user.clientId;
   if (!clientId || clientId === "unknown-client") {
