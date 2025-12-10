@@ -25,7 +25,7 @@ const BaseAdapter = SupabaseAdapter({
 
 const PatchedAdapter: any = { ...BaseAdapter };
 
-// ✅ Override getUserByEmail to pull from app_users
+// ✅ Use app_users for user lookups
 PatchedAdapter.getUserByEmail = async (email: string) => {
   const { data, error } = await supabaseAdmin
     .from("app_users")
@@ -109,12 +109,51 @@ PatchedAdapter.useVerificationToken = async (token) => {
   }
 
   // Mark user as verified
-  await supabaseAdmin
+  const { error: verifyErr } = await supabaseAdmin
     .from("app_users")
-    .update({ email_verified: new Date().toISOString() })
+    .update({ email_verified: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq("email", consumed.identifier);
 
+  if (verifyErr) {
+    console.error("Failed to set email_verified on app_users:", verifyErr);
+    // Still return consumed so NextAuth proceeds, but session may not persist
+  }
+
   return consumed;
+};
+
+// ✅ Ensure NextAuth updates app_users (not the default users table)
+PatchedAdapter.updateUser = async (user) => {
+  const updates: any = {
+    updated_at: new Date().toISOString(),
+  };
+  if (user.name !== undefined) updates.name = user.name;
+  if (user.image !== undefined) updates.image = user.image;
+  if (user.emailVerified !== undefined && user.emailVerified !== null) {
+    updates.email_verified =
+      typeof user.emailVerified === "string"
+        ? user.emailVerified
+        : (user.emailVerified as Date).toISOString();
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("app_users")
+    .update(updates)
+    .eq("id", user.id)
+    .select("id, email, name, email_verified")
+    .single();
+
+  if (error || !data) {
+    console.error("Failed to update app_user:", error);
+    return null;
+  }
+
+  return {
+    id: data.id,
+    email: data.email,
+    name: data.name ?? null,
+    emailVerified: data.email_verified ?? null,
+  };
 };
 
 export const authOptions: NextAuthOptions = {
@@ -182,12 +221,14 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     async jwt({ token, user }) {
+      // Enrich on first login
       if (user) {
         token.sub = String(user.id);
         token.email = user.email;
         token.role = (user as any).role ?? "USER";
       }
 
+      // Refresh from DB to keep clientId and subscriptionStatus current
       if (token.email) {
         const { data: dbUser } = await supabaseAdmin
           .from("app_users")
