@@ -47,8 +47,20 @@ export default function Home() {
     });
   };
 
+  // ✅ Updated to send clientEmail to backend
   const startTrial = async () => {
-    const res = await fetch("/api/start-trial", { method: "POST" });
+    const normalizedEmail = clientEmail.trim().toLowerCase();
+    if (!normalizedEmail) {
+      alert("Please enter your email to start trial");
+      return;
+    }
+
+    const res = await fetch("/api/start-trial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guestEmail: normalizedEmail }),
+    });
+
     const data = await res.json();
     if (data.success) {
       setTrialInfo({
@@ -56,6 +68,8 @@ export default function Home() {
         trialEndsAt: data.trialEndsAt,
         status: data.status,
       });
+    } else {
+      console.error("Trial start error:", data.error);
     }
   };
 
@@ -154,20 +168,34 @@ export default function Home() {
 
           {/* Trial Signup Button */}
           {!trialInfo.trialActive && (
-            <button
-              onClick={startTrial}
-              style={{
-                marginBottom: "2rem",
-                padding: "0.6rem 1.2rem",
-                backgroundColor: "#0ea5e9",
-                color: "#fff",
-                borderRadius: "4px",
-                fontWeight: "bold",
-                border: "none",
-              }}
-            >
-              Start Free 24h Trial
-            </button>
+            <div style={{ marginBottom: "2rem" }}>
+              <input
+                type="email"
+                value={clientEmail}
+                onChange={(e) => setClientEmail(e.target.value)}
+                placeholder="Enter your email to start trial"
+                style={{
+                  padding: "0.5rem",
+                  borderRadius: "4px",
+                  border: "none",
+                  fontSize: "1rem",
+                  marginRight: "0.5rem",
+                }}
+              />
+              <button
+                onClick={startTrial}
+                style={{
+                  padding: "0.6rem 1.2rem",
+                  backgroundColor: "#0ea5e9",
+                  color: "#fff",
+                  borderRadius: "4px",
+                  fontWeight: "bold",
+                  border: "none",
+                }}
+              >
+                Start Free 24h Trial
+              </button>
+            </div>
           )}
 
           {/* Logo + Tagline */}
@@ -493,3 +521,4 @@ export default function Home() {
     </>
   );
 }
+
