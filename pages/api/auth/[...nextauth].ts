@@ -52,7 +52,6 @@ PatchedAdapter.createVerificationToken = async (token) => {
     .single();
 
   if (!user) {
-    // Audit log: blocked attempt
     await supabaseAdmin.from("audit").insert([{
       client_id: "unknown-client",
       actor_email: token.identifier,
@@ -62,7 +61,8 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  const isActive = ["basic", "pro"].includes(user.subscription_status);
+  // ✅ Allow trialing users as well
+  const isActive = ["basic", "pro", "trialing"].includes(user.subscription_status);
   if (!user.client_id || !isActive) {
     await supabaseAdmin.from("audit").insert([{
       client_id: user.client_id ?? "unknown-client",
@@ -131,16 +131,15 @@ export const authOptions: NextAuthOptions = {
 
         const { data: user, error } = await supabaseAdmin
           .from("app_users")
-          .select("id, email, name, role, client_id") // ✅ include client_id
+          .select("id, email, name, role, client_id")
           .eq("email", email)
           .single();
 
         if (error || !user) return null;
 
-        // ✅ Audit log: successful credentials login
         await supabaseAdmin.from("audit").insert([{
           client_id: user.client_id ?? "unknown-client",
-          actor_email: user.email, // ✅ correct column name
+          actor_email: user.email,
           action: "LOGIN",
           details: "Credentials login successful",
         }]);
@@ -204,7 +203,12 @@ export const authOptions: NextAuthOptions = {
     },
   },
 
-  pages: { signIn: "/login" },
+  // ✅ Redirect users to /dashboard after login
+  pages: {
+    signIn: "/login",
+    verifyRequest: "/login", // optional: reuse login page for verification
+    newUser: "/dashboard",   // where new users land
+  },
 };
 
 export default NextAuth(authOptions);
