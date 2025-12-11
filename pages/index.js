@@ -386,51 +386,53 @@ export default function Home() {
               flexWrap: "wrap",
             }}
           >
-            {/* Founder PIN Login — always available */}
-            <section style={{ flex: "1", minWidth: "280px" }}>
-              <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>
-                Founder Access
-              </h2>
+{/* Founder PIN Login — always available */}
+<section style={{ flex: "1", minWidth: "280px" }}>
+  <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>
+    Founder Access
+  </h2>
 
-              <form
-                onSubmit={handleFounderLogin}
-                style={{ display: "flex", gap: "0.5rem" }}
-              >
-                <input
-                  type="password"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  placeholder="Enter Founder PIN"
-                  style={{
-                    padding: "0.5rem",
-                    borderRadius: "4px",
-                    border: "none",
-                    fontSize: "1rem",
-                    flex: 1,
-                  }}
-                />
+  <form
+    onSubmit={handleFounderLogin}
+    style={{ display: "flex", gap: "0.5rem" }}
+  >
+    <input
+      type="password"
+      value={pin}
+      onChange={(e) => setPin(e.target.value)}
+      placeholder="Enter Founder PIN"
+      autoComplete="new-password"   // ✅ added here
+      style={{
+        padding: "0.5rem",
+        borderRadius: "4px",
+        border: "none",
+        fontSize: "1rem",
+        flex: 1,
+      }}
+    />
 
-                <button
-                  type="submit"
-                  style={{
-                    padding: "0.5rem 1rem",
-                    backgroundColor: "#38bdf8",
-                    color: "#fff",
-                    borderRadius: "4px",
-                    fontWeight: "bold",
-                    border: "none",
-                    fontSize: "1rem",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Unlock
-                </button>
-              </form>
+    <button
+      type="submit"
+      style={{
+        padding: "0.5rem 1rem",
+        backgroundColor: "#38bdf8",
+        color: "#fff",
+        borderRadius: "4px",
+        fontWeight: "bold",
+        border: "none",
+        fontSize: "1rem",
+        whiteSpace: "nowrap",
+      }}
+    >
+      Unlock
+    </button>
+  </form>
 
-              {status && (
-                <p style={{ marginTop: "1rem", color: "#f87171" }}>{status}</p>
-              )}
-            </section>
+  {status && (
+    <p style={{ marginTop: "1rem", color: "#f87171" }}>{status}</p>
+  )}
+</section>
+
 
             {/* Client Magic Link Login — gated by trial */}
             <section style={{ flex: "1", minWidth: "280px" }}>
