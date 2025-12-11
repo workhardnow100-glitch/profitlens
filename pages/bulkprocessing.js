@@ -80,11 +80,17 @@ export default function BulkProcessing() {
         }),
       });
 
-      // Only store failures (successes are visible on dashboard)
+      // Store failures
       setUploadFailures(result.failures || []);
 
       alert(result.message || "Bulk upload complete.");
-      // 👉 stay on bulk page so failures can be shown
+
+      // ✅ Redirect logic
+      if (!result.failures || result.failures.length === 0) {
+        // No failures → go to dashboard
+        router.push("/dashboard");
+      }
+      // If there are failures, stay on bulk page so FailedRowsCard can render
     } catch (err) {
       console.error("Bulk upload error:", err);
       alert(err?.message || "Upload failed");
