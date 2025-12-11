@@ -9,12 +9,12 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isFounder = session.user.role === "admin";
-  const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+const isFounder = session.user.role === "admin";
+const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+if (!(isFounder || isSubscribed)) {
+  return res.status(403).json({ error: "Upgrade required" });
+}
 
-  if (!(isFounder || isSubscribed)) {
-    return res.status(403).json({ error: "Upgrade required" });
-  }
 
   const userId = session.user.id;
   const clientId = session.user.clientId;
