@@ -10,8 +10,11 @@ export default async function handler(req, res) {
   }
 
 const isFounder = session.user.role === "admin";
-const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
-if (!(isFounder || isSubscribed)) {
+const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+  session.user.subscriptionStatus
+);
+
+if (!(isFounder || isSubscribedOrTrial)) {
   return res.status(403).json({ error: "Upgrade required" });
 }
 
