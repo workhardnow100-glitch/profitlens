@@ -3,13 +3,11 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "next-auth/react";
 import FailedRowsCard from "../components/FailedRowsCard";
-import SuccessCard from "../components/SuccessCard"; // optional, if you created it
 
 export default function BulkProcessing() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [uploadResults, setUploadResults] = useState([]);
   const [uploadFailures, setUploadFailures] = useState([]);
   const router = useRouter();
   const { data: session, status } = useSession();
@@ -20,7 +18,6 @@ export default function BulkProcessing() {
 
     if (session?.user) {
       const isAdmin = session.user.role === "admin";
-      // ✅ include trialing in allowed statuses
       const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
         session.user.subscriptionStatus
       );
@@ -83,13 +80,11 @@ export default function BulkProcessing() {
         }),
       });
 
-      // Store results and failures in state
-      setUploadResults(result.results || []);
+      // Only store failures (successes are visible on dashboard)
       setUploadFailures(result.failures || []);
 
       alert(result.message || "Bulk upload complete.");
-      // 👉 remove redirect so user stays on bulk page and sees cards
-      // router.push("/dashboard");
+      // 👉 stay on bulk page so failures can be shown
     } catch (err) {
       console.error("Bulk upload error:", err);
       alert(err?.message || "Upload failed");
@@ -179,8 +174,7 @@ export default function BulkProcessing() {
         </button>
       </div>
 
-      {/* Show successes and failures */}
-      <SuccessCard results={uploadResults} />
+      {/* Show failed rows in a separate card */}
       <FailedRowsCard failures={uploadFailures} />
 
       {/* Banner at the bottom */}
