@@ -1,26 +1,19 @@
 // components/FailedRowsCard.jsx
-export default function FailedRowsCard({ failures }) {
-  if (!failures || failures.length === 0) return null;
+export default function FailedRowsCard({ failures = [] }) {
+  // Always default to an empty array so .length is safe
+  if (failures.length === 0) return null;
 
   return (
-    <section style={{ marginTop: "2rem" }}>
-      <h3 style={{ fontSize: "1.25rem", marginBottom: "1rem" }}>
-        Failed Rows
-      </h3>
+    <section className="mt-8">
+      <h3 className="text-xl font-semibold mb-4">Failed Rows</h3>
       {failures.map((failure) => (
         <div
           key={failure.file}
-          style={{
-            border: "1px solid #f87171",
-            borderRadius: "6px",
-            padding: "1rem",
-            marginBottom: "1rem",
-            backgroundColor: "#fff5f5",
-          }}
+          className="border border-red-400 rounded-md p-4 mb-4 bg-red-50 text-black"
         >
           <strong>{failure.file}</strong> — {failure.error}
-          <ul style={{ marginTop: "0.5rem" }}>
-            {failure.rowFailures?.map((rowFail, idx) => (
+          <ul className="mt-2 list-disc list-inside">
+            {(failure.rowFailures || []).map((rowFail, idx) => (
               <li key={idx}>
                 Row {rowFail.row}: {rowFail.description} — {rowFail.error}
                 {rowFail.date && ` (Date: ${rowFail.date})`}
