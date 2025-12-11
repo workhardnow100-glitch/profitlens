@@ -2,33 +2,36 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { useSession } from "next-auth/react";
+import FailedRowsCard from "../components/FailedRowsCard";
+import SuccessCard from "../components/SuccessCard"; // optional, if you created it
 
 export default function BulkProcessing() {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [uploadResults, setUploadResults] = useState([]);
+  const [uploadFailures, setUploadFailures] = useState([]);
   const router = useRouter();
   const { data: session, status } = useSession();
 
-// 🔑 Access check
-useEffect(() => {
-  if (status === "loading") return;
+  // 🔑 Access check
+  useEffect(() => {
+    if (status === "loading") return;
 
-  if (session?.user) {
-    const isAdmin = session.user.role === "admin";
-    // ✅ include trialing in allowed statuses
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
-    );
+    if (session?.user) {
+      const isAdmin = session.user.role === "admin";
+      // ✅ include trialing in allowed statuses
+      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+        session.user.subscriptionStatus
+      );
 
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
+      if (!(isAdmin || isSubscribedOrTrial)) {
+        router.replace("/upgrade");
+      }
+    } else {
+      router.replace("/login");
     }
-  } else {
-    router.replace("/login");
-  }
-}, [session, status, router]);
-
+  }, [session, status, router]);
 
   const handleUpload = async () => {
     if (!files.length) {
@@ -80,8 +83,13 @@ useEffect(() => {
         }),
       });
 
+      // Store results and failures in state
+      setUploadResults(result.results || []);
+      setUploadFailures(result.failures || []);
+
       alert(result.message || "Bulk upload complete.");
-      router.push("/dashboard");
+      // 👉 remove redirect so user stays on bulk page and sees cards
+      // router.push("/dashboard");
     } catch (err) {
       console.error("Bulk upload error:", err);
       alert(err?.message || "Upload failed");
@@ -170,6 +178,10 @@ useEffect(() => {
           {refreshing ? "Refreshing..." : "Refresh Bank Data"}
         </button>
       </div>
+
+      {/* Show successes and failures */}
+      <SuccessCard results={uploadResults} />
+      <FailedRowsCard failures={uploadFailures} />
 
       {/* Banner at the bottom */}
       <div className="mt-auto flex justify-center">
