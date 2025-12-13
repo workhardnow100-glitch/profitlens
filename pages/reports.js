@@ -135,8 +135,167 @@ export default function Reports() {
     );
   }, [reports, selectedCategory]);
 
-  // ✅ Chart options (time series, stacked, waterfall, sankey, sunburst, heatmap)
-  // ... keep your existing useMemo chart option logic here (unchanged)
+  // ✅ Chart options
+  const timeSeriesOptions = useMemo(() => {
+    if (!filteredReports.length) return null;
+    const labels = filteredReports.map((r) => r.label);
+    const income = filteredReports.map((r) =>
+      (r.categories || []).reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0)
+    );
+    const expenses = filteredReports.map((r) =>
+      (r.categories || []).reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0)
+    );
+    const net = income.map((inc, i) => inc - expenses[i]);
+    return {
+      chart: { type: "spline", height: 320 },
+      title: { text: "Income vs Expenses vs Net Profit" },
+      xAxis: { categories: labels },
+      yAxis: { title: { text: "Amount (£)" } },
+      tooltip: { shared: true, valuePrefix: "£", valueDecimals: 2 },
+      series: [
+        { name: "Income", data: income, color: "#16a34a" },
+        { name: "Expenses", data: expenses, color: "#ef4444" },
+        { name: "Net Profit", data: net, color: "#2563eb" },
+      ],
+      credits: { enabled: false },
+    };
+  }, [filteredReports]);
+
+  const stackedCategoryOptions = useMemo(() => {
+    if (!filteredReports.length) return null;
+    const labels = filteredReports.map((r) => r.label);
+    const categorySet = new Set();
+    filteredReports.forEach((r) =>
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .forEach((c) => categorySet.add(c.name))
+    );
+    const catList = Array.from(categorySet);
+    const series = catList.map((cat) => {
+      const data = filteredReports.map((r) => {
+        const entry = (r.categories || []).find((c) => c.name === cat);
+        return entry && !excludedCategories.has(entry.name)
+          ? Number(entry.amount || 0)
+          : 0;
+      });
+      return { name: cat, data };
+    });
+    return {
+      chart: { type: "column", height: 320 },
+      title: { text: "Expense categories over time" },
+      xAxis: { categories: labels },
+      yAxis: { min: 0, title: { text: "Amount (£)" } },
+      plotOptions: { column: { stacking: "normal" } },
+      series,
+      credits: { enabled: false },
+    };
+  }, [filteredReports]);
+
+  const waterfallOptions = useMemo(() => {
+    if (!filteredReports.length) return null;
+    const latest = filteredReports[0];
+    if (!latest) return null;
+    const income = Number(latest.revenue || 0);
+    const expenseItems = (latest.categories || [])
+      .filter((c) => !excludedCategories.has(c.name))
+      .map((c) => ({
+        name: c.name,
+        y: -Number(c.amount || 0),
+        color: "#ef4444",
+      }));
+    const totalExpenses = -expenseItems.reduce((sum, c) => sum + Math.abs(c.y), 0);
+    const data = [
+      { name: "Income", y: income, color: "#16a34a" },
+      ...expenseItems,
+      { name: "Total Expenses", y: totalExpenses, color: "#dc2626" },
+      { name: "Net Profit", isSum: true, color: "#2563eb" },
+    ];
+    return {
+      chart: { type: "waterfall", height: 320 },
+      title: { text: "Profit Composition (Advanced)" },
+      series: [{ data }],
+      credits: { enabled: false },
+    };
+  }, [filteredReports]);
+
+  const sankeyOptions = useMemo(() => {
+    if (!transactions.length) return null;
+    const links = transactions
+      .filter((tx) => !excludedCategories.has(tx.category))
+      .map((tx) => ({
+        from: "Income",
+        to: tx.category,
+        weight: Math.abs(Number(tx.amount || 0)),
+      }));
+    return {
+      chart: { height: 320 },
+      title: { text: "Money Flow" },
+      series: [{ type: "sankey", keys: ["from", "to", "weight"], data: links }],
+      credits: { enabled: false },
+    };
+  }, [transactions]);
+
+  const sunburstOptions = useMemo(() => {
+    if (!transactions.length) return null;
+    const data = [];
+    const catTotals = {};
+    transactions
+      .filter((tx) => !excludedCategories.has(tx.category))
+      .forEach((tx) => {
+        const cat = tx.category;
+        const amt = Math.abs(Number(tx.amount || 0));
+        catTotals[cat] = (catTotals[cat] || 0) + amt;
+      });
+    Object.entries(catTotals).forEach(([cat, amt]) => {
+      data.push({ id: cat, parent: "root", name: cat, value: amt });
+    });
+    return {
+      chart: { height: 320 },
+      title: { text: "Spending Hierarchy" },
+      series: [
+        {
+          type: "sunburst",
+          data: [{ id: "root", name: "Total" }, ...data],
+          allowDrillToNode: true,
+        },
+      ],
+      credits: { enabled: false },
+    };
+  }, [transactions]);
+
+  const heatmapOptions = useMemo(() => {
+    if (!filteredReports.length) return null;
+    const categories = filteredReports.map((r) => r.label);
+    const catSet = new Set();
+    filteredReports.forEach((r) =>
+      (r.categories || [])
+        .filter((c) => !excludedCategories.has(c.name))
+        .forEach((c) => catSet.add(c.name))
+    );
+    const catList = Array.from(catSet);
+    const data = [];
+    filteredReports.forEach((r, i) => {
+      catList.forEach((cat, j) => {
+        const entry = (r.categories || []).find((c) => c.name === cat);
+        data.push([
+          i,
+          j,
+          entry && !excludedCategories.has(entry.name)
+            ? Number(entry.amount || 0)
+            : 0,
+        ]);
+      });
+    });
+    return {
+      chart: { type: "heatmap", height: 320 },
+      title: { text: "Spending Intensity" },
+      xAxis: { categories },
+      yAxis: { categories: catList, title: null },
+      colorAxis: { min: 0, minColor: "#f0f9ff", maxColor: "#0ea5e9" },
+      series: [{ data }],
+      credits: { enabled: false },
+    };
+  }, [filteredReports]);
 
   return (
     <ResponsiveLayout>
@@ -180,7 +339,6 @@ export default function Reports() {
           Download PDF
         </button>
       </div>
-
       {/* Charts */}
       <ResponsiveCard title="Income, expenses, and net profit">
         {!hc || loading ? (
@@ -253,7 +411,7 @@ export default function Reports() {
                 <tr key={tx.id}>
                   <td>{tx.date}</td>
                   <td>{tx.description}</td>
-                                    <td>{tx.category}</td>
+                  <td>{tx.category}</td>
                   <td>£{Number(tx.amount || 0).toFixed(2)}</td>
                 </tr>
               ))}
@@ -275,10 +433,7 @@ export default function Reports() {
         )}
 
         {filteredReports.map((report, i) => (
-          <ResponsiveCard
-            key={`${report.label}-${i}`}
-            title={report.label}
-          >
+          <ResponsiveCard key={`${report.label}-${i}`} title={report.label}>
             <p className="text-sm text-slate-500 mb-2">
               Revenue: £{report.revenue} · Expenses: £{report.expenses} · Net: £
               {report.net}
