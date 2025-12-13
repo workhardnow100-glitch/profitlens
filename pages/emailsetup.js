@@ -1,6 +1,6 @@
-// pages/emailsetup.js
 import { useState, useEffect } from "react";
-import Layout from "../components/layout";
+import ResponsiveLayout from "../components/ResponsiveLayout";
+import ResponsiveCard from "../components/ResponsiveCard";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
@@ -23,25 +23,17 @@ export default function EmailSetup() {
   const { data: session, status: authStatus } = useSession();
   const router = useRouter();
 
-// 🔑 Access check
-useEffect(() => {
-  if (authStatus === "loading") return;
-
-  if (session?.user) {
-    const isAdmin = session.user.role === "admin";
-    // ✅ include basic and trialing in allowed statuses
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
-    );
-
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
+  // 🔑 Access check
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    if (session?.user) {
+      const isAdmin = session.user.role === "admin";
+      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+      if (!(isAdmin || isSubscribedOrTrial)) router.replace("/upgrade");
+    } else {
+      router.replace("/login");
     }
-  } else {
-    router.replace("/login");
-  }
-}, [session, authStatus, router]);
-
+  }, [session, authStatus, router]);
 
   useEffect(() => {
     // Simulated connection + ingestion log
@@ -70,7 +62,7 @@ useEffect(() => {
   };
 
   return (
-    <Layout currentPageName="EmailSetup">
+    <ResponsiveLayout currentPageName="EmailSetup">
       <div className="p-8 space-y-8">
         <div>
           <h2 className="text-3xl font-bold text-slate-900">Email Integration</h2>
@@ -80,8 +72,7 @@ useEffect(() => {
         </div>
 
         {/* Setup */}
-        <div className="bg-white p-6 rounded-lg shadow-sm space-y-4">
-          <h3 className="text-xl font-semibold text-slate-800">Setup</h3>
+        <ResponsiveCard title="Setup">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-600 mb-1">Gmail App Password</label>
@@ -109,11 +100,10 @@ useEffect(() => {
           >
             Send Test Email
           </button>
-        </div>
+        </ResponsiveCard>
 
         {/* Ingestion Log */}
-        <div className="bg-white p-6 rounded-lg shadow-sm">
-          <h3 className="text-xl font-semibold text-slate-800 mb-4">Recent Ingested Emails</h3>
+        <ResponsiveCard title="Recent Ingested Emails">
           <div className="space-y-3">
             {ingestionLog.map((log, i) => (
               <div key={i} className="flex justify-between items-center border-b pb-2">
@@ -133,16 +123,13 @@ useEffect(() => {
               </div>
             ))}
           </div>
-        </div>
+        </ResponsiveCard>
 
         {/* Pro-only sections */}
         {session?.user?.subscriptionStatus === "pro" && (
           <>
             {/* Tagging Rules */}
-            <div className="bg-white p-6 rounded-lg shadow-sm space-y-4">
-              <h3 className="text-xl font-semibold text-slate-800">
-                Custom Tagging Rules <span className="text-xs text-indigo-600 ml-2">Pro</span>
-              </h3>
+            <ResponsiveCard title="Custom Tagging Rules (Pro)">
               {tagRules.map((rule, i) => (
                 <div key={i} className="grid grid-cols-2 gap-4">
                   <input
@@ -161,13 +148,10 @@ useEffect(() => {
                   />
                 </div>
               ))}
-            </div>
+            </ResponsiveCard>
 
             {/* Parsing Settings */}
-            <div className="bg-white p-6 rounded-lg shadow-sm space-y-4">
-              <h3 className="text-xl font-semibold text-slate-800">
-                Parsing Settings <span className="text-xs text-indigo-600 ml-2">Pro</span>
-              </h3>
+            <ResponsiveCard title="Parsing Settings (Pro)">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {["parsePDF", "parseCSV", "parseXLSX"].map((key) => (
                   <label key={key} className="flex items-center gap-2">
@@ -186,37 +170,34 @@ useEffect(() => {
                     onChange={(e) => setSettings((s) => ({ ...s, frequency: e.target.value }))}
                     className="ml-2 border p-1 rounded"
                   >
-                                    <option value="monthly">Monthly</option>
-                <option value="weekly">Weekly</option>
-                <option value="adhoc">Ad hoc</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={settings.autoTag}
-                onChange={() => setSettings((s) => ({ ...s, autoTag: !s.autoTag }))}
-              />
-              Auto-tag by sender domain
-            </label>
-          </div>
-        </div>
+                    <option value="monthly">Monthly</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="adhoc">Ad hoc</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.autoTag}
+                    onChange={() => setSettings((s) => ({ ...s, autoTag: !s.autoTag }))}
+                  />
+                  Auto-tag by sender domain
+                </label>
+              </div>
+            </ResponsiveCard>
 
-        {/* Security & Audit */}
-        <div className="bg-white p-6 rounded-lg shadow-sm space-y-2">
-          <h3 className="text-xl font-semibold text-slate-800">
-            Security & Audit <span className="text-xs text-indigo-600 ml-2">Pro</span>
-          </h3>
-          <p className="text-sm text-slate-500">
-            Last Gmail connection: 2025-09-12 • IP: 82.17.44.201
-          </p>
-          <button className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
-            Revoke Gmail App Password
-          </button>
-        </div>
-      </>
-      )}
-    </div>
-  </Layout>
-);
+            {/* Security & Audit */}
+            <ResponsiveCard title="Security & Audit (Pro)">
+              <p className="text-sm text-slate-500">
+                Last Gmail connection: 2025-09-12 • IP: 82.17.44.201
+              </p>
+              <button className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700">
+                Revoke Gmail App Password
+              </button>
+            </ResponsiveCard>
+          </>
+        )}
+      </div>
+    </ResponsiveLayout>
+  );
 }
