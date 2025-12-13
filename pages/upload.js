@@ -2,8 +2,10 @@
 import React, { useState, useEffect } from "react";
 import useSWR, { mutate } from "swr";
 import { useRouter } from "next/router";
-import Layout from "../components/layout";
 import { useSession } from "next-auth/react";
+
+import ResponsiveLayout from "../components/ResponsiveLayout";
+import ResponsiveCard from "../components/ResponsiveCard";
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
@@ -29,7 +31,6 @@ export default function Upload() {
       if (!(isAdmin || isSubscribedOrTrial)) {
         router.replace("/upgrade");
       } else {
-        // set local sessionUser state for uploads
         setSessionUser({
           id: session.user.id,
           email: session.user.email,
@@ -81,7 +82,7 @@ export default function Upload() {
   };
 
   return (
-    <Layout currentPageName="Upload">
+    <ResponsiveLayout>
       <div className="p-8">
         <h2 className="text-2xl font-bold text-slate-800">Upload Statements</h2>
         <p className="text-slate-600 mt-2">
@@ -89,7 +90,7 @@ export default function Upload() {
           Once uploaded, your data will be parsed and tagged automatically.
         </p>
 
-        <div className="mt-6 space-y-4">
+        <ResponsiveCard title="Upload">
           <input
             type="file"
             multiple
@@ -99,7 +100,7 @@ export default function Upload() {
           />
 
           {files.length > 0 && (
-            <ul className="text-sm text-slate-700 space-y-1">
+            <ul className="text-sm text-slate-700 space-y-1 mt-2">
               {files.map((file, i) => (
                 <li key={i}>📄 {file.name}</li>
               ))}
@@ -113,14 +114,13 @@ export default function Upload() {
           <button
             onClick={handleUpload}
             disabled={uploading}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+            className="mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
           >
             {uploading ? "Uploading..." : "Upload Statements"}
           </button>
 
           {uploadSummary && (
-            <div className="mt-6 bg-white/70 border rounded p-4">
-              <h3 className="text-lg font-semibold text-slate-800 mb-2">Upload Summary</h3>
+            <ResponsiveCard title="Upload Summary">
               <p className="text-sm text-slate-700 mb-2">
                 {uploadSummary.totalStatements} statements parsed across {uploadSummary.files.length} file(s).
               </p>
@@ -129,10 +129,10 @@ export default function Upload() {
                   <li key={i}>✅ {f.filename} ({f.rows} rows)</li>
                 ))}
               </ul>
-            </div>
+            </ResponsiveCard>
           )}
-        </div>
+        </ResponsiveCard>
       </div>
-    </Layout>
+    </ResponsiveLayout>
   );
 }
