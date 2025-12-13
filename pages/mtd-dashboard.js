@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import Papa from "papaparse";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
@@ -17,7 +16,8 @@ export default function MTDDashboard({ clientId }) {
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const vatPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+  // Current VAT period (YYYY-MM)
+  const vatPeriod = new Date().toISOString().slice(0, 7);
 
   useEffect(() => {
     fetchClient();
@@ -44,15 +44,17 @@ export default function MTDDashboard({ clientId }) {
   }
 
   async function checkLock() {
+    // Find VAT period row for this client and month
     const { data } = await supabase
-      .from("mtd_submissions")
-      .select("id")
+      .from("vat_periods")
+      .select("id, locked, submitted")
       .eq("client_id", clientId)
-      .eq("period", vatPeriod)
-      .eq("category", "vat")
+      .eq("period_start", `${vatPeriod}-01`)
       .maybeSingle();
 
-    setLocked(!!data);
+    if (data) {
+      setLocked(data.locked || data.submitted);
+    }
   }
 
   async function handleCSVUpload(e) {
@@ -62,6 +64,7 @@ export default function MTDDashboard({ clientId }) {
 
     setLoading(true);
 
+    const Papa = await import("papaparse"); // ✅ dynamic import
     Papa.parse(file, {
       header: true,
       complete: async ({ data }) => {
@@ -241,7 +244,9 @@ export default function MTDDashboard({ clientId }) {
 
           <div className="mt-4">
             {Object.entries(status).map(([k, v]) => (
-              <p key={k}>{k.toUpperCase()}: {v}</p>
+              <p key={k}>
+                {k.toUpperCase()}: {v}
+              </p>
             ))}
           </div>
         </ResponsiveCard>
