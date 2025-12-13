@@ -1,8 +1,10 @@
 // pages/clients.js
 import { useState, useMemo, useEffect } from "react";
-import Layout from "../components/layout";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
+
+import ResponsiveLayout from "../components/ResponsiveLayout";
+import ResponsiveCard from "../components/ResponsiveCard";
 
 export default function Clients() {
   const [clients, setClients] = useState([]);
@@ -14,25 +16,21 @@ export default function Clients() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-// 🔑 Access check
-useEffect(() => {
-  if (status === "loading") return;
-
-  if (session?.user) {
-    const isAdmin = session.user.role === "admin";
-    // ✅ include trialing in allowed statuses
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
-    );
-
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
+  // 🔑 Access check
+  useEffect(() => {
+    if (status === "loading") return;
+    if (session?.user) {
+      const isAdmin = session.user.role === "admin";
+      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+        session.user.subscriptionStatus
+      );
+      if (!(isAdmin || isSubscribedOrTrial)) {
+        router.replace("/upgrade");
+      }
+    } else {
+      router.replace("/login");
     }
-  } else {
-    router.replace("/login");
-  }
-}, [session, status, router]);
-
+  }, [session, status, router]);
 
   const handleAddClient = async () => {
     if (!name || !revenue || !expenses) return;
@@ -47,7 +45,7 @@ useEffect(() => {
 
     setClients(prev => [...prev, newClient]);
 
-    // 🔒 Audit log with real session data
+    // 🔒 Audit log
     await fetch("/api/audit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,7 +72,7 @@ useEffect(() => {
   const netProfit = totalRevenue - totalExpenses;
 
   return (
-    <Layout currentPageName="Clients">
+    <ResponsiveLayout>
       <div className="p-8 space-y-8">
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold text-slate-900">Manual Clients</h1>
@@ -96,64 +94,64 @@ useEffect(() => {
 
         <p className="text-slate-600">
           Type in client data, visualize profits, export to CSV—no bank statements involved. This is a static page
-          fill in the boxes for easy calculations from each client, ready for download. No saved data! 
+          fill in the boxes for easy calculations from each client, ready for download. No saved data!
         </p>
 
         {/* Add Client Form */}
-        <div className="grid grid-cols-4 gap-4 items-end">
-          <div>
-            <label className="text-sm text-slate-600">Client name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              placeholder="Acme Co."
-            />
+        <ResponsiveCard title="Add Client">
+          <div className="grid grid-cols-4 gap-4 items-end">
+            <div>
+              <label className="text-sm text-slate-600">Client name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="Acme Co."
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Revenue in</label>
+              <input
+                type="number"
+                value={revenue}
+                onChange={e => setRevenue(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="1000.00"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Expenses out</label>
+              <input
+                type="number"
+                value={expenses}
+                onChange={e => setExpenses(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="250.00"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Tag (optional)</label>
+              <input
+                type="text"
+                value={tag}
+                onChange={e => setTag(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="Retainer / One-off / VIP"
+              />
+            </div>
           </div>
-          <div>
-            <label className="text-sm text-slate-600">Revenue in</label>
-            <input
-              type="number"
-              value={revenue}
-              onChange={e => setRevenue(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              placeholder="1000.00"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-slate-600">Expenses out</label>
-            <input
-              type="number"
-              value={expenses}
-              onChange={e => setExpenses(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              placeholder="250.00"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-slate-600">Tag (optional)</label>
-            <input
-              type="text"
-              value={tag}
-              onChange={e => setTag(e.target.value)}
-              className="border px-3 py-2 rounded w-full"
-              placeholder="Retainer / One-off / VIP"
-            />
-          </div>
-        </div>
-
-        <button
-          onClick={handleAddClient}
-          className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
-        >
-          Add Client
-        </button>
+          <button
+            onClick={handleAddClient}
+            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Add Client
+          </button>
+        </ResponsiveCard>
 
         {/* Client List */}
         {clients.length > 0 && (
-          <section className="mt-8 space-y-4">
-            <h2 className="text-xl font-semibold text-slate-800">Client Entries</h2>
+          <ResponsiveCard title="Client Entries">
             <ul className="space-y-2">
               {clients.map(c => (
                 <li key={c.id} className="border-b pb-2 flex justify-between items-center">
@@ -169,12 +167,11 @@ useEffect(() => {
                 </li>
               ))}
             </ul>
-          </section>
+          </ResponsiveCard>
         )}
 
         {/* Quick Stats */}
-        <section className="mt-8">
-          <h2 className="text-xl font-semibold text-slate-800 mb-2">Quick Stats</h2>
+        <ResponsiveCard title="Quick Stats">
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white p-4 rounded shadow border">
               <p className="text-sm text-slate-500">Total revenue</p>
@@ -189,8 +186,8 @@ useEffect(() => {
               <p className="text-xl font-bold text-slate-800">£{netProfit.toFixed(2)}</p>
             </div>
           </div>
-        </section>
+        </ResponsiveCard>
       </div>
-    </Layout>
+    </ResponsiveLayout>
   );
 }
