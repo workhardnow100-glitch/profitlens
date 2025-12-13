@@ -144,9 +144,34 @@ export default function Transactions() {
         const start = new Date(today); start.setDate(today.getDate() - 29);
         return d >= start && d <= today;
       }
-      if (period === "last90") {
-        const start = new Date(today); start.setDate(today.getDate() - 89);
-        return d
+    if (period === "last90") {
+  const start = new Date(today);
+  start.setDate(today.getDate() - 89);
+  return d >= start && d <= today;
+}
+if (period === "thisTimeLastYear") {
+  const lastYear = today.getFullYear() - 1;
+  const end = new Date(lastYear, today.getMonth(), today.getDate());
+  const start = new Date(end);
+  start.setDate(end.getDate() - 29);
+  const dLastYear = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return dLastYear >= start && dLastYear <= end;
+}
+if (period === "custom") {
+  let from = customFrom ? new Date(customFrom) : null;
+  let to = customTo ? new Date(customTo) : null;
+  if (from) from = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  if (to) to = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  if (from && to) return d >= from && d <= to;
+  if (from && !to) return d >= from;
+  if (!from && to) return d <= to;
+  return true;
+}
+return true;
+});
+}, [data, period, customFrom, customTo]);
+
+
           // ⬇️ Aggregation logic
   const {
     totalIncome,
