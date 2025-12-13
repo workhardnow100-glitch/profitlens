@@ -1,8 +1,12 @@
+// pages/profile.js
 import React, { useEffect, useState, useRef } from "react";
-import Layout from "../components/layout";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import { useReactToPrint } from "react-to-print";
+
+import ResponsiveLayout from "../components/ResponsiveLayout";
+import ResponsiveCard from "../components/ResponsiveCard";
+import ResponsiveTable from "../components/ResponsiveTable";
 
 export default function ProfilePage() {
   const { data: session, status } = useSession();
@@ -25,17 +29,14 @@ export default function ProfilePage() {
   // 🔑 Access control
   useEffect(() => {
     if (status === "loading") return;
-
     if (!session?.user) {
       router.replace("/login");
       return;
     }
-
     const isAdmin = session.user.role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
       session.user.subscriptionStatus
     );
-
     if (!(isAdmin || isSubscribedOrTrial)) {
       router.replace("/upgrade");
     }
@@ -64,11 +65,8 @@ export default function ProfilePage() {
         setLoading(false);
       }
     };
-
     fetchProfile();
   }, [session, status, router]);
-
-
 
   const handlePrint = useReactToPrint({
     content: () => reportRef.current,
@@ -79,7 +77,6 @@ export default function ProfilePage() {
     const rows = [
       ["Date", "Description", "Category", "Business Type", "Amount", "Account Number", "Sort Code"],
     ];
-
     transactions.forEach(tx => {
       const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
       rows.push([
@@ -92,7 +89,6 @@ export default function ProfilePage() {
         tx.sort_code || account?.sort_code || "",
       ]);
     });
-
     const csvContent =
       "data:text/csv;charset=utf-8," + rows.map(r => r.join(",")).join("\n");
     const link = document.createElement("a");
@@ -107,7 +103,7 @@ export default function ProfilePage() {
   if (!session?.user) return null;
 
   return (
-    <Layout currentPageName="Profile">
+    <ResponsiveLayout>
       <div className="p-8" ref={reportRef}>
         <h2 className="text-2xl font-bold text-slate-800">Your Profile</h2>
         <p className="text-slate-600 mt-2">
@@ -115,13 +111,10 @@ export default function ProfilePage() {
         </p>
 
         {/* Account info */}
-        <div className="bg-white shadow-sm rounded p-4 mt-6">
-          <h3 className="text-lg font-semibold text-slate-700">Account details</h3>
-          <div className="mt-2 text-slate-700">
-            <p><span className="font-medium">Account number:</span> {account?.account_number || "—"}</p>
-            <p><span className="font-medium">Sort code:</span> {account?.sort_code || "—"}</p>
-          </div>
-        </div>
+        <ResponsiveCard title="Account details">
+          <p><span className="font-medium">Account number:</span> {account?.account_number || "—"}</p>
+          <p><span className="font-medium">Sort code:</span> {account?.sort_code || "—"}</p>
+        </ResponsiveCard>
 
         {/* Export buttons */}
         <div className="flex gap-4 mt-6">
@@ -136,40 +129,26 @@ export default function ProfilePage() {
         {error && <p className="text-red-500 mt-6">Error: {error}</p>}
 
         {/* Summary */}
-        <div className="bg-white p-4 rounded-lg shadow-sm mt-8">
-          <h3 className="text-lg font-semibold text-slate-700">Summary</h3>
+        <ResponsiveCard title="Summary">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Total Income</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(summary.totalIncome).toFixed(2)}
-              </p>
+              <p className="text-slate-800 font-semibold">£{Number(summary.totalIncome).toFixed(2)}</p>
             </div>
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Total Expenses</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(summary.totalExpenses).toFixed(2)}
-              </p>
+              <p className="text-slate-800 font-semibold">£{Number(summary.totalExpenses).toFixed(2)}</p>
             </div>
             <div className="border border-slate-200 rounded p-3">
               <p className="text-sm text-slate-600">Net Profit</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(summary.netProfit).toFixed(2)}
-              </p>
+              <p className="text-slate-800 font-semibold">£{Number(summary.netProfit).toFixed(2)}</p>
             </div>
           </div>
-        </div>
+        </ResponsiveCard>
 
-        {/* ONLY SOLE TRADER HMRC BLOCK */}
-        <div className="bg-white p-4 rounded-lg shadow-sm mt-8">
-          <h3 className="text-lg font-semibold text-slate-700">
-            HMRC – Sole Trader
-          </h3>
-          <p className="text-slate-600 mt-1">
-            Total Owed: £{soleTraderTotal.toFixed(2)}
-          </p>
-
-          {/* Category cards */}
+        {/* Sole Trader HMRC Block */}
+        <ResponsiveCard title="HMRC – Sole Trader">
+          <p className="text-slate-600 mt-1">Total Owed: £{soleTraderTotal.toFixed(2)}</p>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {hmrcCategories
               .filter(c => c.business_type === "sole_trader")
@@ -183,71 +162,59 @@ export default function ProfilePage() {
               ))}
           </div>
 
-          {/* Transaction table */}
           <h4 className="text-md font-semibold mt-6 text-slate-700">Transactions</h4>
-          <table className="min-w-full mt-2 text-sm">
-            <thead>
-              <tr className="bg-slate-100 text-slate-600 font-semibold">
-                <th className="px-4 py-2 text-left">Date</th>
-                <th className="px-4 py-2 text-left">Description</th>
-                <th className="px-4 py-2 text-left">Category</th>
-                <th className="px-4 py-2 text-left">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions
-                .filter(tx => {
-                  const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-                  return cat?.business_type === "sole_trader";
-                })
-                .map(tx => {
-                  const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-                  return (
-                    <tr key={tx.id} className="border-t">
-                      <td className="px-4 py-2">{tx.date}</td>
-                      <td className="px-4 py-2">{tx.description}</td>
-                      <td className="px-4 py-2">
-                        <select
-                          value={cat?.id || ""}
-                          onChange={async (e) => {
-                            const newCategoryId = e.target.value;
-                            try {
-                              await fetch("/api/profile", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  transactionId: tx.id,
-                                  newCategoryId,
-                                }),
-                              });
-                              router.reload();
-                            } catch (err) {
-                              console.error("Failed to update category", err);
-                            }
-                          }}
-                          className="border rounded px-2 py-1 text-sm"
-                        >
-                          <option value="">Uncategorised</option>
-                          {hmrcCategories
-                            .filter(c => c.business_type === "sole_trader")
-                            .map(option => (
-                              <option key={option.id} value={option.id}>
-                                {option.category_name}
-                              </option>
-                            ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-2">£{Number(tx.amount).toFixed(2)}</td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
-        </div>
+          <ResponsiveTable headers={["Date", "Description", "Category", "Amount"]}>
+            {transactions
+              .filter(tx => {
+                const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+                return cat?.business_type === "sole_trader";
+              })
+              .map(tx => {
+                const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
+                return (
+                  <tr key={tx.id} className="border-t">
+                    <td>{tx.date}</td>
+                    <td>{tx.description}</td>
+                    <td>
+                      <select
+                        value={cat?.id || ""}
+                        onChange={async (e) => {
+                          const newCategoryId = e.target.value;
+                          try {
+                            await fetch("/api/profile", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                transactionId: tx.id,
+                                newCategoryId,
+                              }),
+                            });
+                            router.reload();
+                          } catch (err) {
+                            console.error("Failed to update category", err);
+                          }
+                        }}
+                        className="border rounded px-2 py-1 text-sm"
+                      >
+                                               <option value="">Uncategorised</option>
+                        {hmrcCategories
+                          .filter(c => c.business_type === "sole_trader")
+                          .map(option => (
+                            <option key={option.id} value={option.id}>
+                              {option.category_name}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                    <td>£{Number(tx.amount).toFixed(2)}</td>
+                  </tr>
+                );
+              })}
+          </ResponsiveTable>
+        </ResponsiveCard>
 
         {/* Monthly breakdown */}
-        <div className="bg-white p-4 rounded-lg shadow-sm mt-8">
-          <h3 className="text-lg font-semibold text-slate-700">By month</h3>
+        <ResponsiveCard title="By month">
           <div className="mt-3 space-y-2">
             {Object.entries(byMonth).map(([month, vals]) => (
               <div
@@ -261,8 +228,9 @@ export default function ProfilePage() {
               </div>
             ))}
           </div>
-        </div>
+        </ResponsiveCard>
       </div>
-    </Layout>
+    </ResponsiveLayout>
   );
 }
+
