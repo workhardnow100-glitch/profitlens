@@ -24,7 +24,6 @@ export default function MTDDashboard() {
   const [client, setClient] = useState(null);
   const [statusMap, setStatusMap] = useState({});
   const [locked, setLocked] = useState(false);
-  const [loading, setLoading] = useState(false);
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
 
@@ -84,38 +83,6 @@ export default function MTDDashboard() {
     if (data) {
       setLocked(data.locked || data.submitted);
     }
-  }
-
-  async function handleCSVUpload(e) {
-    if (locked) return;
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setLoading(true);
-    const Papa = await import("papaparse");
-    Papa.parse(file, {
-      header: true,
-      complete: async ({ data }) => {
-        const rows = data
-          .filter((r) => r.amount)
-          .map((r) => ({
-            client_id: clientId,
-            user_id: userId,
-            statement_id: r.statement_id || crypto.randomUUID(),
-            date: r.date || null,
-            description: r.description || null,
-            amount: parseFloat(r.amount),
-            category: r.category || null,
-            vat_rate: r.vat_rate || null,
-            vat_amount: r.vat_amount || null,
-            source: "mtd_dashboard",
-          }));
-
-        await supabase.from("transactions").insert(rows);
-        await fetchTransactions();
-        setLoading(false);
-      },
-    });
   }
 
   async function handleCategoryChange(row, category) {
@@ -202,7 +169,7 @@ export default function MTDDashboard() {
     if (category === "vat" && data.success) setLocked(true);
   }
 
-  if (status === "loading" || loading) return <div>Loading…</div>;
+  if (status === "loading") return <div>Loading…</div>;
   if (!session?.user) return null;
 
   return (
@@ -217,10 +184,6 @@ export default function MTDDashboard() {
             className="border p-1 mr-2"
           />
           {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
-        </ResponsiveCard>
-
-        <ResponsiveCard title="Upload CSV">
-          <input type="file" accept=".csv" disabled={locked} onChange={handleCSVUpload} />
         </ResponsiveCard>
 
         <ResponsiveCard title="Transactions">
@@ -244,7 +207,7 @@ export default function MTDDashboard() {
                   <select
                     value={r.category || ""}
                     onChange={(e) => handleCategoryChange(r, e.target.value)}
-                                    >
+                  >
                     <option />
                     {categories.map((c) => (
                       <option key={c}>{c}</option>
