@@ -5,6 +5,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// Helper to group transactions by period
 function groupByPeriod(transactions, periodType) {
   const periods = {};
   transactions.forEach((t) => {
@@ -23,8 +24,12 @@ function groupByPeriod(transactions, periodType) {
     } else if (periodType === "cis") {
       const d = new Date(t.date);
       label = `${d.getFullYear()}-${d.getMonth() + 1}`;
-      start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
-      end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split("T")[0];
+      start = new Date(d.getFullYear(), d.getMonth(), 1)
+        .toISOString()
+        .split("T")[0];
+      end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+        .toISOString()
+        .split("T")[0];
     } else {
       const d = new Date(t.date);
       label = `${d.getFullYear()}`;
@@ -43,39 +48,35 @@ function groupByPeriod(transactions, periodType) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
   const { clientId } = req.body;
   if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    // Fetch transactions
+    // Fetch all transactions for client
     const { data: transactions, error: txError } = await supabase
       .from("transactions")
       .select("*")
       .eq("client_id", clientId);
 
-    if (txError) throw txError;
+    if (txError) throw new Error(txError.message);
 
-    // Fetch HMRC token (server-safe)
-    let tokens = null;
-    try {
-      const { data, error } = await supabase
-        .from("hmrc_tokens")
-        .select("*")
-        .eq("client_id", clientId)
-        .single();
-      if (error) console.warn("No HMRC token:", error.message);
-      else tokens = data;
-    } catch (e) {
-      console.warn("HMRC token fetch failed:", e.message);
-    }
+    // Fetch HMRC token, safely handle if none exists
+    const { data: tokens, error: tokenError } = await supabase
+      .from("hmrc_tokens")
+      .select("*")
+      .eq("client_id", clientId)
+      .limit(1);
 
-    const hasHMRC = tokens?.access_token ? true : false;
+    if (tokenError) console.warn("HMRC token fetch warning:", tokenError.message);
 
-    const vatTx = (transactions || []).filter((t) => t.hmrc_category_id === "VAT");
-    const cisTx = (transactions || []).filter((t) => t.hmrc_category_id === "CIS");
-    const corpTx = (transactions || []).filter((t) => t.type === "income" || t.type === "expense");
-    const saTx = (transactions || []).filter((t) => t.type === "income" || t.type === "expense");
+    const token = Array.isArray(tokens) && tokens.length > 0 ? tokens[0] : null;
+    const hasHMRC = token?.access_token ? true : false;
+
+    // Filter transactions by tax type
+    const vatTx = transactions.filter((t) => t.hmrc_category_id === "VAT");
+    const cisTx = transactions.filter((t) => t.hmrc_category_id === "CIS");
+    const corpTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
+    const saTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
 
     res.status(200).json({
       vat: groupByPeriod(vatTx, "vat").map((p) => ({ ...p, hmrcAuthorized: hasHMRC })),
