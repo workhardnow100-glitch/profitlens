@@ -1,232 +1,153 @@
-import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/router";
+// pages/clients.js
+import { useState, useMemo } from "react";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
-import ResponsiveTable from "../components/ResponsiveTable";
 
-export default function MTDDashboard() {
-  const { data: session, status } = useSession();
-  const router = useRouter();
+export default function Clients() {
+  const [clients, setClients] = useState([]);
+  const [name, setName] = useState("");
+  const [revenue, setRevenue] = useState("");
+  const [expenses, setExpenses] = useState("");
+  const [tag, setTag] = useState("");
 
-  const [transactions, setTransactions] = useState([]);
-  const [statusMap, setStatusMap] = useState({});
-  const [locked, setLocked] = useState(false);
-  const [stats, setStats] = useState([]);
+  const handleAddClient = () => {
+    if (!name || !revenue || !expenses) return;
 
-  const vatPeriod = new Date().toISOString().slice(0, 7);
-
-  // 🔑 Access control
-  useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) {
-      router.replace("/login");
-      return;
-    }
-
-    const isAdmin = session.user.role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
-      return;
-    }
-  }, [session, status, router]);
-
-  // 🔹 Fetch transactions & VAT lock
-  useEffect(() => {
-    if (!session?.user) return;
-
-    async function fetchTransactions() {
-      const res = await fetch("/api/mtd-dashboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "fetchTransactions", clientId: session.user.clientId }),
-      });
-      const result = await res.json();
-      if (res.ok) {
-        setTransactions(result.data || []);
-        generateStats(result.data || []);
-      } else {
-        console.error("Fetch transactions error:", result.error);
-      }
-    }
-
-    async function checkLock() {
-      const res = await fetch("/api/mtd-dashboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "checkLock", clientId: session.user.clientId }),
-      });
-      const result = await res.json();
-      if (res.ok) setLocked(result.locked);
-      else console.error("Check lock error:", result.error);
-    }
-
-    fetchTransactions();
-    checkLock();
-  }, [session]);
-
-  // 🔹 Generate top stats
-  function generateStats(txList) {
-    const vatTotal = txList.filter(t => t.category === "vat").reduce((a,r)=>a+(r.vat_amount||0),0);
-    const incomeTotal = txList.filter(t => t.category === "income").reduce((a,r)=>a+r.amount,0);
-    const corpTotal = txList.filter(t => t.category === "corp").reduce((a,r)=>a+r.amount,0);
-    const cisTotal = txList.filter(t => t.category === "cis").reduce((a,r)=>a+r.amount,0);
-
-    const newStats = [
-      { label: "VAT Total", value: vatTotal.toFixed(2) },
-      { label: "Income Total", value: incomeTotal.toFixed(2) },
-      { label: "Corporation Tax Total", value: corpTotal.toFixed(2) },
-    ];
-
-    if (session.user.cis_registered) newStats.push({ label: "CIS Deducted", value: cisTotal.toFixed(2) });
-
-    setStats(newStats);
-  }
-
-  // 🔹 Update category
-  async function handleCategoryChange(row, category) {
-    if (locked) return;
-    await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "updateCategory", clientId: session.user.clientId, rowId: row.id, category }),
-    });
-    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, category } : tx));
-    generateStats(transactions);
-  }
-
-  // 🔹 Update VAT
-  async function handleVAT(row, rate) {
-    if (locked) return;
-    await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "updateVAT", clientId: session.user.clientId, rowId: row.id, vatRate: rate }),
-    });
-    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, vat_rate: rate, vat_amount: tx.amount*(rate/100) } : tx));
-    generateStats(transactions);
-  }
-
-  // 🔹 Verify CIS
-  async function verifyCIS(nino) {
-    const res = await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verifyCIS", clientId: session.user.clientId, nino }),
-    });
-    const data = await res.json();
-    session.user.cis_registered = data.registered;
-    generateStats(transactions);
-  }
-
-  // 🔹 HMRC payload generator
-  function generateHMRCJson() {
-    const vat = transactions.filter(t => t.category === "vat");
-    const income = transactions.filter(t => t.category === "income");
-    const corp = transactions.filter(t => t.category === "corp");
-    const cis = transactions.filter(t => t.category === "cis");
-
-    return {
-      vat: {
-        period: vatPeriod,
-        netSales: vat.reduce((a,r)=>a+Math.max(r.amount,0),0),
-        netPurchases: vat.reduce((a,r)=>a+Math.abs(Math.min(r.amount,0)),0),
-        vatDue: vat.reduce((a,r)=>a+(r.vat_amount||0),0)
-      },
-      income: { income: income.reduce((a,r)=>a+r.amount,0) },
-      cis: { deducted: cis.reduce((a,r)=>a+r.amount,0) },
-      corporationTax: { profit: corp.reduce((a,r)=>a+r.amount,0) },
-      generatedAt: new Date().toISOString(),
+    const newClient = {
+      id: `c_${clients.length + 1}`,
+      name,
+      revenue: parseFloat(revenue),
+      expenses: parseFloat(expenses),
+      tag,
     };
-  }
 
-  const payload = generateHMRCJson();
-  const categories = ["vat","income","corp"];
-  if (session.user.cis_registered) categories.push("cis");
+    setClients(prev => [...prev, newClient]);
 
-  // 🔹 Submit to HMRC
-  async function submit(category) {
-    const key = `${session.user.clientId}-${category}-${vatPeriod}`;
-    setStatusMap(prev => ({ ...prev, [category]: "Submitting..." }));
+    setName("");
+    setRevenue("");
+    setExpenses("");
+    setTag("");
+  };
 
-    const res = await fetch("/api/submit-mtd", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: session.user.clientId, category, payload, period: vatPeriod, idempotencyKey: key }),
-    });
+  const handleClearAll = () => {
+    setClients([]);
+  };
 
-    const data = await res.json();
-    setStatusMap(prev => ({ ...prev, [category]: data.success ? "Success" : "Failed" }));
-    if (category === "vat" && data.success) setLocked(true);
-  }
-
-  if (status === "loading") return <div>Loading…</div>;
-  if (!session?.user) return null;
+  const totalRevenue = useMemo(() => clients.reduce((sum, c) => sum + c.revenue, 0), [clients]);
+  const totalExpenses = useMemo(() => clients.reduce((sum, c) => sum + c.expenses, 0), [clients]);
+  const netProfit = totalRevenue - totalExpenses;
 
   return (
-    <ResponsiveLayout currentPageName="MTD Dashboard">
-      <div className="p-6 space-y-6">
-        <h1 className="text-3xl font-bold">MTD Dashboard</h1>
-
-        {/* Top Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {stats.map(s => (
-            <ResponsiveCard key={s.label}>
-              <div className="text-slate-500">{s.label}</div>
-              <div className="text-2xl font-bold">£{s.value}</div>
-            </ResponsiveCard>
-          ))}
+    <ResponsiveLayout>
+      <div className="p-8 space-y-8">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-slate-900">Manual Clients</h1>
+          <div className="flex gap-4">
+            <button
+              onClick={() => console.log("TODO: Export CSV")}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Export CSV
+            </button>
+            <button
+              onClick={handleClearAll}
+              className="px-4 py-2 bg-slate-200 text-slate-700 rounded hover:bg-slate-300"
+            >
+              Clear All
+            </button>
+          </div>
         </div>
 
-        <ResponsiveCard title="CIS Verification">
-          <input
-            defaultValue={session.user.nino || ""}
-            onBlur={e => verifyCIS(e.target.value)}
-            className="border p-1 mr-2"
-          />
-          {session.user.cis_registered ? "Registered ✅" : "Not Registered ❌"}
-        </ResponsiveCard>
-
-        <ResponsiveCard title="Transactions">
-          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Cat"]}>
-            {transactions.map(r => (
-              <tr key={r.id}>
-                <td>{r.date}</td>
-                <td>{r.description}</td>
-                <td>{r.amount}</td>
-                <td>
-                  {r.category === "vat" ? (
-                    <input type="number" value={r.vat_rate || 0} onChange={e => handleVAT(r, +e.target.value)} className="w-16 border"/>
-                  ) : "-"}
-                </td>
-                <td>
-                  <select value={r.category || ""} onChange={e => handleCategoryChange(r, e.target.value)}>
-                    <option />
-                    {categories.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </ResponsiveTable>
-        </ResponsiveCard>
-
-        <ResponsiveCard title="Submit to HMRC">
-          <div className="flex gap-3">
-            {categories.map(c => (
-              <button key={c} onClick={() => submit(c)} className="bg-blue-600 text-white px-4 py-2 rounded">
-                Submit {c.toUpperCase()}
-              </button>
-            ))}
+        {/* Add Client Form */}
+        <ResponsiveCard title="Add Client">
+          <div className="grid grid-cols-4 gap-4 items-end">
+            <div>
+              <label className="text-sm text-slate-600">Client name</label>
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="Acme Co."
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Revenue in</label>
+              <input
+                type="number"
+                value={revenue}
+                onChange={e => setRevenue(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="1000.00"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Expenses out</label>
+              <input
+                type="number"
+                value={expenses}
+                onChange={e => setExpenses(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="250.00"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-slate-600">Tag (optional)</label>
+              <input
+                type="text"
+                value={tag}
+                onChange={e => setTag(e.target.value)}
+                className="border px-3 py-2 rounded w-full"
+                placeholder="Retainer / One-off / VIP"
+              />
+            </div>
           </div>
-          <div className="mt-4">
-            {Object.entries(statusMap).map(([k,v]) => <p key={k}>{k.toUpperCase()}: {v}</p>)}
-          </div>
+          <button
+            onClick={handleAddClient}
+            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            Add Client
+          </button>
         </ResponsiveCard>
 
-        <ResponsiveCard title="HMRC Payload">
-          <pre className="text-xs bg-gray-100 p-4">{JSON.stringify(payload, null, 2)}</pre>
+        {/* Client List */}
+        {clients.length > 0 && (
+          <ResponsiveCard title="Client Entries">
+            <ul className="space-y-2">
+              {clients.map(c => (
+                <li key={c.id} className="border-b pb-2 flex justify-between items-center">
+                  <div>
+                    <p className="font-medium text-slate-800">{c.name}</p>
+                    <p className="text-sm text-slate-500">
+                      Revenue: £{c.revenue.toFixed(2)} • Expenses: £{c.expenses.toFixed(2)} • Tag: {c.tag || "—"}
+                    </p>
+                  </div>
+                  <span className="text-xs px-2 py-1 rounded bg-green-50 text-green-700">
+                    Profit: £{(c.revenue - c.expenses).toFixed(2)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </ResponsiveCard>
+        )}
+
+        {/* Quick Stats */}
+        <ResponsiveCard title="Quick Stats">
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded shadow border">
+              <p className="text-sm text-slate-500">Total revenue</p>
+              <p className="text-xl font-bold text-slate-800">£{totalRevenue.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-4 rounded shadow border">
+              <p className="text-sm text-slate-500">Total expenses</p>
+              <p className="text-xl font-bold text-slate-800">£{totalExpenses.toFixed(2)}</p>
+            </div>
+            <div className="bg-white p-4 rounded shadow border">
+              <p className="text-sm text-slate-500">Net profit</p>
+              <p className="text-xl font-bold text-slate-800">£{netProfit.toFixed(2)}</p>
+            </div>
+          </div>
         </ResponsiveCard>
       </div>
     </ResponsiveLayout>
