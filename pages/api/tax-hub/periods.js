@@ -2,33 +2,39 @@
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   const { clientId } = req.body;
-  if (!clientId) return res.status(400).json({ error: "Missing clientId" });
+  if (!clientId)
+    return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    // Fetch all transactions for this client
-    const { data: transactions, error } = await supabaseAdmin
+    // ✅ 1. Fetch all transactions for this client
+    const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select("*")
+      .select("id, date, hmrc_category_id, tax_locked, client_id")
       .eq("client_id", clientId);
 
-    if (error) throw error;
+    if (txError) throw txError;
 
-    // Group by tax type (hmrc_category_id)
+    // ✅ 2. Normalize category text
+    const normalize = (str) =>
+      (str || "").trim().toLowerCase();
+
+    // ✅ 3. Group by canonical tax type
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
 
     transactions.forEach((tx) => {
-      // Example: Map specific UUIDs to tax types
-      // Replace these with your real mappings
-      if (tx.hmrc_category_id === "6157554f-3107-4116-b989-f5f4a44866b7") grouped.vat.push(tx);
-      else if (tx.hmrc_category_id === "ff989cd7-269c-43fd-85cb-647751d98e22") grouped.cis.push(tx);
-      else if (tx.hmrc_category_id === "638f87a3-63a0-4a04-bc68-9dd55f917732") grouped.corp.push(tx);
-      else if (tx.hmrc_category_id === "3734faf6-4ce4-4580-94aa-368cb891ff9e") grouped.sa.push(tx);
+      const cat = normalize(tx.hmrc_category_id);
+
+      if (cat === "vat") grouped.vat.push(tx);
+      else if (cat === "cis") grouped.cis.push(tx);
+      else if (cat === "corporation tax" || cat === "corp") grouped.corp.push(tx);
+      else if (cat === "self assessment" || cat === "sa") grouped.sa.push(tx);
     });
 
-    // Transform into periods array
+    // ✅ 4. Convert transactions → period objects
     const makePeriods = (txs) =>
       txs.map((tx) => ({
         periodLabel: tx.date,
@@ -38,14 +44,16 @@ export default async function handler(req, res) {
         hmrcAuthorized: !!tx.hmrc_category_id,
       }));
 
-    res.status(200).json({
+    // ✅ 5. Return clean JSON
+    return res.status(200).json({
       vat: makePeriods(grouped.vat),
       cis: makePeriods(grouped.cis),
       corp: makePeriods(grouped.corp),
       sa: makePeriods(grouped.sa),
     });
+
   } catch (err) {
     console.error("Tax Hub periods error:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 }
