@@ -16,10 +16,31 @@ export default function VATPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
+  // ✅ VAT Stagger state
+  const [vatStagger, setVatStagger] = useState(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
   }, [session, status, router]);
+
+  // ✅ Load VAT stagger from Tax Hub API
+  useEffect(() => {
+    async function loadStagger() {
+      if (!session?.user) return;
+
+      const res = await fetch("/api/tax-hub/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: session.user.clientId }),
+      });
+
+      const data = await res.json();
+      if (data.vatStagger) setVatStagger(data.vatStagger);
+    }
+
+    loadStagger();
+  }, [session]);
 
   // Fetch VAT summary
   async function fetchVAT() {
@@ -124,6 +145,13 @@ export default function VATPage() {
             </div>
           </div>
         </ResponsiveCard>
+
+        {/* ✅ VAT STAGGER BADGE */}
+        {vatStagger && (
+          <div className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm font-medium">
+            VAT Stagger: {vatStagger}
+          </div>
+        )}
 
         {/* Results */}
         {result && (

@@ -1,46 +1,45 @@
 // pages/api/sa/submit.js
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
 
   const { clientId, periodStart, periodEnd } = req.body;
-  if (!clientId || !periodStart || !periodEnd) return res.status(400).json({ error: "Missing parameters" });
+
+  if (!clientId || !periodStart || !periodEnd)
+    return res.status(400).json({ error: "Missing required fields" });
 
   try {
-    // Optional: check for incomplete transactions
-    const { data: incompleteTx, error: checkError } = await supabase
-      .from("transactions")
-      .select("id")
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .is("amount", null);
-    if (checkError) throw new Error(checkError.message);
-
-    if (incompleteTx.length > 0) {
-      return res.status(400).json({ error: "Cannot submit. Some transactions are incomplete." });
-    }
-
-    // Lock all transactions for SA period
-    const { data, error } = await supabase
+    // ✅ Lock SA transactions
+    const { error: lockError } = await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
+      .eq("category", "self_assessment")
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
-    if (error) throw new Error(error.message);
+    if (lockError) throw lockError;
 
-    return res.status(200).json({ success: true, lockedTransactions: data.length });
+    // ✅ Create submission record
+    const { error: subError } = await supabaseAdmin
+      .from("sa_submissions")
+      .insert([
+        {
+          client_id: clientId,
+          period_start: periodStart,
+          period_end: periodEnd,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+    if (subError) throw subError;
+
+    return res.status(200).json({ success: true });
 
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("SA submit error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }

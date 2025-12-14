@@ -18,40 +18,90 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1️⃣ Check for incomplete CIS data
-    const { data: incompleteTx, error: checkError } = await supabase
+    // ✅ 1. Fetch CIS transactions for this period
+    const { data: cisTxs, error: fetchError } = await supabase
       .from("transactions")
-      .select("id")
+      .select("id, date, category, vat_amount, cis_amount, tax_locked")
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd)
-      .eq("hmrc_category_id", "CIS")
-      .is("cis_amount", null);
+      .order("date", { ascending: true });
 
-    if (checkError) throw new Error(checkError.message);
+    if (fetchError) throw new Error(fetchError.message);
 
-    if (incompleteTx.length > 0) {
+    if (!cisTxs || cisTxs.length === 0) {
       return res.status(400).json({
-        error: "Cannot submit. Some CIS transactions have missing amounts."
+        error: "No CIS transactions found for this period."
       });
     }
 
-    // 2️⃣ Lock CIS transactions for the period
-    const { data, error } = await supabase
+    // ✅ 2. Check for missing CIS amounts
+    const missing = cisTxs.filter((tx) => tx.cis_amount == null);
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: "Cannot submit. Some CIS transactions have missing CIS amounts."
+      });
+    }
+
+    // ✅ 3. Compute CIS totals
+    let cisDeducted = 0; // you withheld from subcontractors
+    let cisSuffered = 0; // contractors withheld from you
+
+    cisTxs.forEach((tx) => {
+      if (tx.category === "cis_deducted") {
+        cisDeducted += Number(tx.cis_amount || 0);
+      }
+      if (tx.category === "cis_suffered") {
+        cisSuffered += Number(tx.cis_amount || 0);
+      }
+    });
+
+    const netCis = cisDeducted - cisSuffered;
+
+    // ✅ 4. Lock CIS transactions for the period
+    const { error: lockError } = await supabase
       .from("transactions")
-      .update({ tax_locked: true }) // or your locked column
+      .update({ tax_locked: true })
       .eq("client_id", clientId)
       .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .eq("hmrc_category_id", "CIS");
+      .lte("date", periodEnd);
 
-    if (error) throw new Error(error.message);
+    if (lockError) throw new Error(lockError.message);
 
-    // 3️⃣ Return success
-    return res.status(200).json({ success: true, lockedTransactions: data.length });
+    // ✅ 5. Insert CIS submission record
+    const { data: submission, error: insertError } = await supabase
+      .from("cis_submissions")
+      .insert([
+        {
+          client_id: clientId,
+          period_start: periodStart,
+          period_end: periodEnd,
+          cis_deducted: cisDeducted,
+          cis_suffered: cisSuffered,
+          net_cis: netCis,
+          hmrc_response: {
+            status: "SUCCESS",
+            processingDate: new Date().toISOString(),
+            message: "CIS return accepted (simulated HMRC response)"
+          }
+        }
+      ])
+      .select()
+      .single();
+
+    if (insertError) throw new Error(insertError.message);
+
+    // ✅ 6. Return HMRC-style response
+    return res.status(200).json({
+      success: true,
+      hmrcResponse: submission.hmrc_response,
+      cisDeducted,
+      cisSuffered,
+      netCis
+    });
 
   } catch (err) {
-    console.error(err);
+    console.error("CIS submission error:", err);
     return res.status(500).json({ success: false, error: err.message });
   }
 }

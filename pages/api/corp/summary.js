@@ -12,54 +12,70 @@ export default async function handler(req, res) {
   }
 
   const { clientId, periodStart, periodEnd } = req.body;
+
   if (!clientId || !periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
   try {
-    // Fetch all income transactions
-    const { data: incomeTx, error: incomeError } = await supabase
+    // ✅ 1. Fetch Corporation Tax transactions
+    const { data: corpTxs, error: fetchError } = await supabase
       .from("transactions")
-      .select("*")
+      .select("id, date, category, amount, tax_locked")
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd)
-      .eq("type", "income"); // adjust based on your schema
-    if (incomeError) throw new Error(incomeError.message);
+      .order("date", { ascending: true });
 
-    // Fetch all expense transactions
-    const { data: expenseTx, error: expenseError } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .eq("type", "expense"); // adjust based on your schema
-    if (expenseError) throw new Error(expenseError.message);
+    if (fetchError) throw new Error(fetchError.message);
 
-    // Calculate totals
-    const totalIncome = incomeTx.reduce((sum, t) => sum + (t.amount || 0), 0);
-    const totalExpenses = expenseTx.reduce((sum, t) => sum + (t.amount || 0), 0);
-    const profit = totalIncome - totalExpenses;
+    if (!corpTxs || corpTxs.length === 0) {
+      return res.status(400).json({
+        error: "No Corporation Tax transactions found for this period."
+      });
+    }
 
-    // Estimate Corporation Tax (example: 19%)
-    const taxRate = 0.19;
-    const taxLiability = profit > 0 ? profit * taxRate : 0;
+    // ✅ 2. Compute profit before tax
+    let income = 0;
+    let expenses = 0;
 
-    // Combine transactions for reference
-    const transactions = [...incomeTx, ...expenseTx];
+    corpTxs.forEach((tx) => {
+      if (tx.category === "income") {
+        income += Number(tx.amount || 0);
+      }
+      if (tx.category === "expense") {
+        expenses += Number(tx.amount || 0);
+      }
+    });
 
-    res.status(200).json({
-      totalIncome,
-      totalExpenses,
-      profit,
-      taxLiability,
-      transactions,
-      locked: false
+    const profitBeforeTax = income - expenses;
+
+    // ✅ 3. Compute Corporation Tax due
+    const corpTaxRate = 0.19; // 19% for now
+    const corpTaxDue = profitBeforeTax > 0 ? profitBeforeTax * corpTaxRate : 0;
+
+    // ✅ 4. Effective rate (for display)
+    const effectiveRate =
+      profitBeforeTax > 0 ? (corpTaxDue / profitBeforeTax) * 100 : 0;
+
+    // ✅ 5. Determine locked state
+    const locked = corpTxs.some((tx) => tx.tax_locked === true);
+
+    // ✅ 6. Return summary
+    return res.status(200).json({
+      success: true,
+      periodStart,
+      periodEnd,
+      profitBeforeTax,
+      corpTaxDue,
+      effectiveRate,
+      locked,
+      transactions: corpTxs
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("Corporation Tax summary error:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 }
+

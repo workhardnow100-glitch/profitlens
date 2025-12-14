@@ -1,64 +1,94 @@
 // pages/api/sa/summary.js
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  }
 
   const { clientId, periodStart, periodEnd } = req.body;
-  if (!clientId || !periodStart || !periodEnd) {
-    return res.status(400).json({ error: "Missing required parameters" });
-  }
+
+  if (!clientId || !periodStart || !periodEnd)
+    return res.status(400).json({ error: "Missing required fields" });
 
   try {
-    // Fetch income transactions
-    const { data: incomeTx, error: incomeError } = await supabase
+    // ✅ Load SA transactions
+    const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select("*")
+      .select("id, date, description, amount, category, tax_locked, hmrc_category_id")
       .eq("client_id", clientId)
       .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .eq("type", "income");
-    if (incomeError) throw new Error(incomeError.message);
+      .lte("date", periodEnd);
 
-    // Fetch expense transactions
-    const { data: expenseTx, error: expenseError } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .eq("type", "expense");
-    if (expenseError) throw new Error(expenseError.message);
+    if (txError) throw txError;
 
-    // Calculate totals
-    const totalIncome = incomeTx.reduce((sum, t) => sum + (t.amount || 0), 0);
-    const totalExpenses = expenseTx.reduce((sum, t) => sum + (t.amount || 0), 0);
+    // ✅ Filter SA‑mapped transactions
+    const saTx = transactions.filter(
+      (t) => t.hmrc_category_id && t.category === "self_assessment"
+    );
+
+    // ✅ Compute totals
+    let totalIncome = 0;
+    let totalExpenses = 0;
+
+    saTx.forEach((tx) => {
+      const amt = Number(tx.amount || 0);
+      if (amt > 0) totalIncome += amt;
+      else totalExpenses += Math.abs(amt);
+    });
+
     const profit = totalIncome - totalExpenses;
 
-    // Estimate income tax (simple example: 20%)
-    const taxRate = 0.20;
-    const taxLiability = profit > 0 ? profit * taxRate : 0;
+    // ✅ ✅ ✅ FULL UK TAX BAND CALCULATION
+    let personalAllowance = 12570;
 
-    const transactions = [...incomeTx, ...expenseTx];
+    // ✅ Personal allowance tapering above £100k
+    if (profit > 100000) {
+      const reduction = Math.floor((profit - 100000) / 2);
+      personalAllowance = Math.max(0, personalAllowance - reduction);
+    }
 
-    res.status(200).json({
+    const taxableIncome = Math.max(0, profit - personalAllowance);
+
+    let taxLiability = 0;
+    let remaining = taxableIncome;
+
+    // ✅ 20% basic rate (up to £50,270)
+    const basicLimit = 50270 - personalAllowance;
+    if (remaining > 0) {
+      const basicTaxable = Math.min(remaining, basicLimit);
+      taxLiability += basicTaxable * 0.20;
+      remaining -= basicTaxable;
+    }
+
+    // ✅ 40% higher rate (up to £125,140)
+    const higherLimit = 125140 - 50270;
+    if (remaining > 0) {
+      const higherTaxable = Math.min(remaining, higherLimit);
+      taxLiability += higherTaxable * 0.40;
+      remaining -= higherTaxable;
+    }
+
+    // ✅ 45% additional rate (above £125,140)
+    if (remaining > 0) {
+      taxLiability += remaining * 0.45;
+    }
+
+    // ✅ Determine lock status
+    const locked = saTx.some((tx) => tx.tax_locked);
+
+    return res.status(200).json({
       totalIncome,
       totalExpenses,
       profit,
+      taxableIncome,
+      personalAllowance,
       taxLiability,
-      transactions,
-      locked: false,
+      transactions: saTx,
+      locked,
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error("SA summary error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
