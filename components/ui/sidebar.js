@@ -1,75 +1,57 @@
 // components/ui/sidebar.js
-import React, { createContext, useContext, useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { BarChart, Users } from "lucide-react";
 
-// Context for sidebar state
-const SidebarContext = createContext();
-export const useSidebar = () => useContext(SidebarContext);
+// ✅ Structural wrappers
+export const SidebarProvider = ({ children }) => <>{children}</>;
 
-export const SidebarProvider = ({ children }) => {
-  const [open, setOpen] = useState(false);
-  return (
-    <SidebarContext.Provider value={{ open, setOpen }}>
-      {children}
-    </SidebarContext.Provider>
-  );
-};
+export const Sidebar = ({ children, className }) => (
+  <aside className={className}>{children}</aside>
+);
 
-// Sidebar that slides in/out on mobile
-export const Sidebar = ({ children, className }) => {
-  const { open } = useSidebar();
-  return (
-    <aside
-      className={`${className} fixed inset-y-0 left-0 w-64 transform bg-white transition-transform duration-200 ease-in-out
-        ${open ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 md:static`}
-    >
-      {children}
-    </aside>
-  );
-};
-
-// Trigger toggles sidebar open/close
-export const SidebarTrigger = ({ children, className }) => {
-  const { setOpen } = useSidebar();
-  return (
-    <button
-      onClick={() => setOpen((prev) => !prev)}
-      className={className}
-    >
-      {children || "☰"}
-    </button>
-  );
-};
-
-// Structural wrappers
 export const SidebarHeader = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
 export const SidebarContent = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
 export const SidebarGroup = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
 export const SidebarGroupLabel = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
 export const SidebarGroupContent = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
 export const SidebarFooter = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
+
+// ✅ Trigger now forwards props (including onClick)
+export const SidebarTrigger = ({ children, className, ...props }) => (
+  <button {...props} className={className}>
+    {children || "☰"}
+  </button>
+);
+
 export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
+
 export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// SidebarMenu with navigation items
+// ✅ SidebarMenu with navigation items
 export function SidebarMenu() {
   const router = useRouter();
+
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
     { title: "Profile", url: "/profile", icon: Users },
@@ -81,7 +63,7 @@ export function SidebarMenu() {
     { title: "Email Setup", url: "/emailsetup", icon: Users },
     { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
     { title: "Accountants", url: "/accountants", icon: Users },
-    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart },
+    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart }, // ✅ New link
   ];
 
   return (
