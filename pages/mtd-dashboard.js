@@ -1,3 +1,4 @@
+// pages/mtd-dashboard.js
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -25,13 +26,9 @@ export default function MTDDashboard() {
       router.replace("/login");
       return;
     }
-
     const isAdmin = session.user.role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
-      return;
-    }
+    if (!(isAdmin || isSubscribedOrTrial)) router.replace("/upgrade");
   }, [session, status, router]);
 
   // 🔹 Fetch client info
@@ -52,7 +49,10 @@ export default function MTDDashboard() {
       const res = await fetch("/api/mtd-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "fetchTransactions" }),
+        body: JSON.stringify({ 
+          action: "fetchTransactions",
+          clientId: session.user.clientId
+        }),
       });
       const { data } = await res.json();
       setTransactions(data || []);
@@ -63,7 +63,10 @@ export default function MTDDashboard() {
       const res = await fetch("/api/mtd-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "checkLock" }),
+        body: JSON.stringify({ 
+          action: "checkLock",
+          clientId: session.user.clientId
+        }),
       });
       const { locked } = await res.json();
       setLocked(locked);
@@ -87,7 +90,6 @@ export default function MTDDashboard() {
     ];
 
     if (client?.cis_registered) newStats.push({ label: "CIS Deducted", value: cisTotal.toFixed(2) });
-
     setStats(newStats);
   }
 
@@ -97,7 +99,12 @@ export default function MTDDashboard() {
     await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "updateCategory", rowId: row.id, category }),
+      body: JSON.stringify({ 
+        action: "updateCategory", 
+        clientId: session.user.clientId,
+        rowId: row.id, 
+        category 
+      }),
     });
     setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, category } : tx));
     generateStats(transactions);
@@ -109,7 +116,12 @@ export default function MTDDashboard() {
     await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "updateVAT", rowId: row.id, vatRate: rate }),
+      body: JSON.stringify({ 
+        action: "updateVAT", 
+        clientId: session.user.clientId,
+        rowId: row.id, 
+        vatRate: rate 
+      }),
     });
     setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, vat_rate: rate, vat_amount: tx.amount*(rate/100) } : tx));
     generateStats(transactions);
@@ -120,7 +132,11 @@ export default function MTDDashboard() {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verifyCIS", nino }),
+      body: JSON.stringify({ 
+        action: "verifyCIS", 
+        clientId: session.user.clientId,
+        nino 
+      }),
     });
     const data = await res.json();
     setClient(prev => ({ ...prev, cis_registered: data.registered }));
