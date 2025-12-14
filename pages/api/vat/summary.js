@@ -1,3 +1,4 @@
+// pages/api/vat/summary.js
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -16,6 +17,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing parameters" });
   }
 
+  // 1️⃣ Fetch transactions for client + date range, include tax_locked
   const { data: transactions, error } = await supabase
     .from("transactions")
     .select("*")
@@ -28,6 +30,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
+  // 2️⃣ Determine if all transactions in this period are locked
+  const isLocked = transactions.length > 0 && transactions.every(tx => tx.tax_locked);
+
+  // 3️⃣ Calculate VAT boxes
   let box1 = 0;
   let box4 = 0;
   let box6 = 0;
@@ -48,11 +54,12 @@ export default async function handler(req, res) {
     }
   }
 
-  const box3 = box1;
-  const box5 = box3 - box4;
+  const box3 = box1;         // Total VAT due on sales
+  const box5 = box3 - box4;  // Net VAT to pay
 
   return res.json({
     period: `${periodStart} → ${periodEnd}`,
+    locked: isLocked,
     boxes: {
       box1: Number(box1.toFixed(2)),
       box3: Number(box3.toFixed(2)),
