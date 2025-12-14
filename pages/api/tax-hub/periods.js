@@ -41,7 +41,7 @@ export default async function handler(req, res) {
       else if (canonical === "self assessment") grouped.sa.push(tx);
     });
 
-    // ✅ 4. Convert transactions → period objects
+    // ✅ 4A. Convert transactions → simple periods (VAT, Corp, SA)
     const makePeriods = (txs) =>
       txs.map((tx) => ({
         periodLabel: tx.date,
@@ -51,10 +51,62 @@ export default async function handler(req, res) {
         hmrcAuthorized: !!tx.hmrc_category_id,
       }));
 
+    // ✅ 4B. Build CIS monthly periods (6th → 5th)
+    function buildCISPeriods(cisTxs) {
+      const periods = {};
+
+      cisTxs.forEach((tx) => {
+        const d = new Date(tx.date);
+
+        // Determine CIS period start (6th of month)
+        let periodStart = new Date(d.getFullYear(), d.getMonth(), 6);
+
+        // If transaction is before the 6th, it belongs to previous period
+        if (d.getDate() < 6) {
+          periodStart = new Date(d.getFullYear(), d.getMonth() - 1, 6);
+        }
+
+        // Period end = 5th of next month
+        const periodEnd = new Date(
+          periodStart.getFullYear(),
+          periodStart.getMonth() + 1,
+          5
+        );
+
+        const key = `${periodStart.toISOString().slice(0, 10)}_${periodEnd
+          .toISOString()
+          .slice(0, 10)}`;
+
+        if (!periods[key]) {
+          periods[key] = {
+            periodLabel: `${periodStart
+              .toISOString()
+              .slice(0, 10)} → ${periodEnd.toISOString().slice(0, 10)}`,
+            periodStart: periodStart.toISOString().slice(0, 10),
+            periodEnd: periodEnd.toISOString().slice(0, 10),
+            locked: false,
+            hmrcAuthorized: true,
+            transactions: [],
+          };
+        }
+
+        periods[key].transactions.push(tx);
+
+        // If ANY transaction is locked → whole period is locked
+        if (tx.tax_locked) {
+          periods[key].locked = true;
+        }
+      });
+
+      return Object.values(periods);
+    }
+
+    const cisPeriods = buildCISPeriods(grouped.cis);
+
     // ✅ 5. Return clean JSON
     return res.status(200).json({
       vat: makePeriods(grouped.vat),
-      cis: makePeriods(grouped.cis),
+      cis: cisPeriods,
       corp: makePeriods(grouped.corp),
       sa: makePeriods(grouped.sa),
     });
