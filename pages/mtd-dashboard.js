@@ -7,7 +7,7 @@ import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 
-// --- Numeric sanitizers (fix sums for values like "£-0.06") ---
+// --- Numeric sanitizers ---
 function toNumber(val) {
   if (val == null) return 0;
   if (typeof val === "number") return val;
@@ -31,7 +31,7 @@ export default function MTDDashboard() {
   const [stats, setStats] = useState([]);
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
-  const categories = ["vat", "income", "corp", "cis"];
+  const categories = ["income", "corp", "cis", "other"];
   const allowedVatRates = [0, 5, 20];
 
   // Access control
@@ -68,7 +68,6 @@ export default function MTDDashboard() {
       });
       const { data } = await res.json();
 
-      // Coerce to numbers so totals are reliable
       const rows = (data || []).map(tx => ({
         ...tx,
         amount: toNumber(tx.amount),
@@ -94,20 +93,12 @@ export default function MTDDashboard() {
     checkLock();
   }, [session]);
 
-  // Generate top stats (numeric-safe)
+  // Generate top stats
   function generateStats(txList) {
-    const vatTotal = txList
-      .filter(t => t.category === "vat")
-      .reduce((a, r) => a + (toNumber(r.vat_amount) || 0), 0);
-    const incomeTotal = txList
-      .filter(t => t.category === "income")
-      .reduce((a, r) => a + toNumber(r.amount), 0);
-    const corpTotal = txList
-      .filter(t => t.category === "corp")
-      .reduce((a, r) => a + toNumber(r.amount), 0);
-    const cisTotal = txList
-      .filter(t => t.category === "cis")
-      .reduce((a, r) => a + toNumber(r.amount), 0);
+    const vatTotal = txList.filter(t => t.category === "vat").reduce((a,r)=>a+(toNumber(r.vat_amount)||0),0);
+    const incomeTotal = txList.filter(t => t.category === "income").reduce((a,r)=>a+toNumber(r.amount),0);
+    const corpTotal = txList.filter(t => t.category === "corp").reduce((a,r)=>a+toNumber(r.amount),0);
+    const cisTotal = txList.filter(t => t.category === "cis").reduce((a,r)=>a+toNumber(r.amount),0);
 
     const newStats = [
       { label: "VAT Total", value: vatTotal.toFixed(2) },
@@ -118,7 +109,7 @@ export default function MTDDashboard() {
     setStats(newStats);
   }
 
-  // Update category (local)
+  // Update category
   function handleCategoryChange(rowId, category) {
     if (locked) return;
     const updatedTx = transactions.map(tx => tx.id === rowId ? { ...tx, category } : tx);
@@ -126,7 +117,7 @@ export default function MTDDashboard() {
     generateStats(updatedTx);
   }
 
-  // Update VAT (local, numeric-safe, validated)
+  // Update VAT
   function handleVAT(rowId, rate) {
     if (locked) return;
     const numericRate = toRate(rate);
@@ -156,45 +147,33 @@ export default function MTDDashboard() {
     generateStats(transactions);
   }
 
-  // HMRC payload generator (numeric-safe)
+  // HMRC payload generator
   function generateHMRCJson() {
     const vat = transactions.filter(t => t.category === "vat");
     const income = transactions.filter(t => t.category === "income");
     const corp = transactions.filter(t => t.category === "corp");
     const cis = transactions.filter(t => t.category === "cis");
 
-    const netSales = vat.reduce((a, r) => a + Math.max(toNumber(r.amount), 0), 0);
-    const netPurchases = vat.reduce((a, r) => a + Math.abs(Math.min(toNumber(r.amount), 0)), 0);
-    const vatDue = vat.reduce((a, r) => a + (toNumber(r.vat_amount) || 0), 0);
+    const netSales = vat.reduce((a,r)=>a+Math.max(toNumber(r.amount),0),0);
+    const netPurchases = vat.reduce((a,r)=>a+Math.abs(Math.min(toNumber(r.amount),0)),0);
+    const vatDue = vat.reduce((a,r)=>a+(toNumber(r.vat_amount)||0),0);
 
     return {
       vat: { period: vatPeriod, netSales, netPurchases, vatDue },
-      income: { income: income.reduce((a, r) => a + toNumber(r.amount), 0) },
-      cis: { deducted: cis.reduce((a, r) => a + toNumber(r.amount), 0) },
-      corporationTax: { profit: corp.reduce((a, r) => a + toNumber(r.amount), 0) },
+      income: { income: income.reduce((a,r)=>a+toNumber(r.amount),0) },
+      cis: { deducted: cis.reduce((a,r)=>a+toNumber(r.amount),0) },
+      corporationTax: { profit: corp.reduce((a,r)=>a+toNumber(r.amount),0) },
       generatedAt: new Date().toISOString(),
     };
   }
 
   const payload = generateHMRCJson();
 
-  // Totals (numeric-safe)
-  const totalRevenue = useMemo(
-    () => transactions.filter(t => t.category === "income").reduce((sum, t) => sum + toNumber(t.amount), 0),
-    [transactions]
-  );
-  const totalVAT = useMemo(
-    () => transactions.reduce((sum, t) => sum + (toNumber(t.vat_amount) || 0), 0),
-    [transactions]
-  );
-  const totalCorp = useMemo(
-    () => transactions.filter(t => t.category === "corp").reduce((sum, t) => sum + toNumber(t.amount), 0),
-    [transactions]
-  );
-  const totalCIS = useMemo(
-    () => transactions.filter(t => t.category === "cis").reduce((sum, t) => sum + toNumber(t.amount), 0),
-    [transactions]
-  );
+  // Totals
+  const totalRevenue = useMemo(() => transactions.filter(t=>t.category==="income").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
+  const totalVAT = useMemo(() => transactions.reduce((sum,t)=>sum+(toNumber(t.vat_amount)||0),0), [transactions]);
+  const totalCorp = useMemo(() => transactions.filter(t=>t.category==="corp").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
+  const totalCIS = useMemo(() => transactions.filter(t=>t.category==="cis").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
   const netProfit = totalRevenue - totalVAT - totalCorp;
 
   if (status === "loading") return <div>Loading…</div>;
@@ -222,7 +201,7 @@ export default function MTDDashboard() {
             onBlur={e => verifyCIS(e.target.value)}
             className="border p-1 mr-2"
           />
-          {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
+                    {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
         </ResponsiveCard>
 
         {/* Transactions Table */}
@@ -234,14 +213,17 @@ export default function MTDDashboard() {
                 <td>{tx.description}</td>
                 <td>£{toNumber(tx.amount).toFixed(2)}</td>
                 <td>
-                  {tx.category === "vat" ? (
-                    <input
-                      type="number"
-                      value={tx.vat_rate ?? 0}
-                      onChange={e => handleVAT(tx.id, e.target.value)}
-                      className="w-20 border rounded px-1 py-0.5 text-center"
-                    />
-                  ) : "-"}
+                  <select
+                    value={tx.vat_rate ?? ""}
+                    onChange={e => handleVAT(tx.id, e.target.value)}
+                    disabled={tx.category !== "vat"}
+                    className="border rounded px-1 py-0.5 w-full"
+                  >
+                    <option value="">-</option>
+                    <option value="0">0%</option>
+                    <option value="5">5%</option>
+                    <option value="20">20%</option>
+                  </select>
                 </td>
                 <td>
                   <select
@@ -250,11 +232,10 @@ export default function MTDDashboard() {
                     className="border rounded px-1 py-0.5 w-full"
                   >
                     <option value="">Select</option>
-                    {categories.map(c => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
+                    <option value="income">Income</option>
+                    <option value="corp">Corporation Tax</option>
+                    <option value="cis">CIS</option>
+                    <option value="other">Other</option>
                   </select>
                 </td>
               </tr>
@@ -265,7 +246,7 @@ export default function MTDDashboard() {
               <td>£{(totalRevenue + totalCorp + totalCIS).toFixed(2)}</td>
               <td>£{totalVAT.toFixed(2)}</td>
               <td>
-                Income £{totalRevenue.toFixed(2)} | Corp £{totalCorp.toFixed(2)} | CIS £{totalCIS.toFixed(2)}
+                Income £{totalRevenue.toFixed(2)} | Corp £{totalCorp.toFixed(2)} | CIS £{totalCIS.toFixed(2)} | Net £{netProfit.toFixed(2)}
               </td>
             </tr>
           </ResponsiveTable>
@@ -283,7 +264,7 @@ export default function MTDDashboard() {
         {/* Submit to HMRC */}
         <ResponsiveCard title="Submit to HMRC">
           <div className="flex gap-3 flex-wrap">
-            {categories.map(c => (
+            {["vat","income","corp","cis"].map(c => (
               <button
                 key={c}
                 onClick={() => submit(c)}
@@ -294,7 +275,7 @@ export default function MTDDashboard() {
             ))}
           </div>
           <div className="mt-4">
-            {Object.entries(statusMap).map(([k, v]) => (
+            {Object.entries(statusMap).map(([k,v]) => (
               <p key={k}>{k.toUpperCase()}: {v}</p>
             ))}
           </div>
