@@ -24,7 +24,9 @@ export default async function handler(req, res) {
     // ✅ 2. Fetch all transactions for this client
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select("id, date, hmrc_category_id, tax_locked, client_id")
+      .select(
+        "id, date, hmrc_category_id, tax_locked, client_id, category, vat_amount"
+      )
       .eq("client_id", clientId);
 
     if (txError) throw txError;
@@ -110,17 +112,17 @@ export default async function handler(req, res) {
         let periodStart, periodEnd;
 
         if (month >= 1 && month <= 3) {
-          periodStart = new Date(year, 0, 1);   // Jan 1
-          periodEnd = new Date(year, 2, 31);    // Mar 31
+          periodStart = new Date(year, 0, 1); // Jan 1
+          periodEnd = new Date(year, 2, 31);  // Mar 31
         } else if (month >= 4 && month <= 6) {
-          periodStart = new Date(year, 3, 1);   // Apr 1
-          periodEnd = new Date(year, 5, 30);    // Jun 30
+          periodStart = new Date(year, 3, 1); // Apr 1
+          periodEnd = new Date(year, 5, 30);  // Jun 30
         } else if (month >= 7 && month <= 9) {
-          periodStart = new Date(year, 6, 1);   // Jul 1
-          periodEnd = new Date(year, 8, 30);    // Sep 30
+          periodStart = new Date(year, 6, 1); // Jul 1
+          periodEnd = new Date(year, 8, 30);  // Sep 30
         } else {
-          periodStart = new Date(year, 9, 1);   // Oct 1
-          periodEnd = new Date(year, 11, 31);   // Dec 31
+          periodStart = new Date(year, 9, 1); // Oct 1
+          periodEnd = new Date(year, 11, 31); // Dec 31
         }
 
         const key = `${periodStart.toISOString().slice(0, 10)}_${periodEnd
@@ -150,7 +152,39 @@ export default async function handler(req, res) {
       return Object.values(periods);
     }
 
-    const vatPeriods = buildVATPeriods(grouped.vat);
+    // ✅ 4D. VAT totals per period (Output, Input, Net)
+    function addVatTotalsToPeriods(vatPeriods) {
+      return vatPeriods.map((period) => {
+        let outputVat = 0;
+        let inputVat = 0;
+
+        period.transactions.forEach((tx) => {
+          const vat = Number(tx.vat_amount || 0);
+
+          if (!vat) return;
+
+          // Sales → Output VAT
+          if (tx.category === "sales") {
+            outputVat += vat;
+          } else {
+            // Everything else → Input VAT
+            inputVat += vat;
+          }
+        });
+
+        const netVat = outputVat - inputVat;
+
+        return {
+          ...period,
+          outputVat,
+          inputVat,
+          netVat,
+        };
+      });
+    }
+
+    let vatPeriods = buildVATPeriods(grouped.vat);
+    vatPeriods = addVatTotalsToPeriods(vatPeriods);
 
     // ✅ 5. Return clean JSON
     return res.status(200).json({
