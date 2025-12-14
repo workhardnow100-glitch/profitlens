@@ -27,27 +27,22 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// ✅ Unified toISODate (removed duplicate definition)
 function toISODate(input) {
   if (!input) return null;
   const raw = String(input).trim();
 
-  // Already ISO
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
 
-  // DD/MM/YYYY → YYYY-MM-DD
   const match = raw.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
   if (match) {
     const [_, d, m, y] = match;
     return `${y}-${m}-${d}`;
   }
 
-  // Fallback
   const parsed = new Date(raw);
   return isNaN(parsed.getTime()) ? null : parsed.toISOString().split("T")[0];
 }
 
-// ✅ Parse CSV/XLSX
 function parseFileBuffer(filename, buffer) {
   const ext = path.extname(filename).toLowerCase();
   if (ext === ".csv") {
@@ -62,7 +57,6 @@ function parseFileBuffer(filename, buffer) {
   throw new Error(`Unsupported file type: ${ext}`);
 }
 
-// ✅ Infer Category
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
   const desc = description?.trim() || "";
@@ -112,7 +106,6 @@ function inferCategory(type = "", description = "") {
   }
 }
 
-// ✅ Utility: safely get value
 function getValue(row, keys = []) {
   for (const k of keys) {
     if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
@@ -122,7 +115,6 @@ function getValue(row, keys = []) {
   return null;
 }
 
-// ✅ Detect reversal pairs
 function detectReversalPairs(rows) {
   const pairs = new Map();
 
@@ -157,7 +149,6 @@ function detectReversalPairs(rows) {
   return pairs;
 }
 
-// ✅ Normalize row
 function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const debit = toNumber(getValue(row, ["Debit Amount", "Debit", "Dr"]));
   const credit = toNumber(getValue(row, ["Credit Amount", "Credit", "Cr"]));
@@ -179,7 +170,7 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const type = String(getValue(row, ["Transaction Type", "Type", "Code"]) || "").trim().toUpperCase();
   const account_number = String(getValue(row, ["Account Number", "Account"]) || "").trim();
   const sort_code = String(getValue(row, ["Sort Code", "SortCode"]) || "").trim();
-  const category = inferCategory(type, description);
+   const category = inferCategory(type, description);
   const reversal_group_id = reversalPairs?.get(i) || null;
   const is_reversal = !!reversal_group_id;
 
@@ -236,9 +227,10 @@ export default async function handler(req, res) {
       const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
       if (!email) return res.status(400).json({ error: "Missing email" });
 
+      // ✅ PATCH: select default_client_id instead of client_id
       const { data: user, error: userErr } = await supabaseAdmin
         .from("app_users")
-        .select("id, client_id")
+        .select("id, default_client_id")
         .eq("email", email)
         .single();
 
@@ -246,7 +238,7 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const clientId = user.client_id;
+      const clientId = user.default_client_id;  // ✅ correct UUID
       const userId = user.id;
 
       const uploaded = Array.isArray(files.files) ? files.files : [files.files].filter(Boolean);
@@ -313,7 +305,7 @@ export default async function handler(req, res) {
           const { error: txErr } = await supabaseAdmin.from("transactions").insert(txPayload);
           if (txErr) throw new Error(`Transaction insert failed: ${txErr.message}`);
 
-          // ✅ FIX: exclude reversals from revenue/expenses
+          // ✅ exclude reversals from revenue/expenses
           const revenue = txPayload
             .filter((r) => r.amount > 0 && !r.is_reversal)
             .reduce((s, r) => s + r.amount, 0);
