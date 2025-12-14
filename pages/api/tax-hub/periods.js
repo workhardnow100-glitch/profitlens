@@ -1,4 +1,3 @@
-// pages/api/tax-hub/periods.js
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -10,7 +9,19 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    // ✅ 1. Fetch all transactions for this client
+    // ✅ 1. Load all HMRC categories (UUID → canonical_name)
+    const { data: categories, error: catError } = await supabaseAdmin
+      .from("hmrc_categories")
+      .select("id, canonical_name");
+
+    if (catError) throw catError;
+
+    const categoryMap = {};
+    categories.forEach((c) => {
+      categoryMap[c.id] = (c.canonical_name || "").toLowerCase();
+    });
+
+    // ✅ 2. Fetch all transactions for this client
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("id, date, hmrc_category_id, tax_locked, client_id")
@@ -18,20 +29,16 @@ export default async function handler(req, res) {
 
     if (txError) throw txError;
 
-    // ✅ 2. Normalize category text
-    const normalize = (str) =>
-      (str || "").trim().toLowerCase();
-
     // ✅ 3. Group by canonical tax type
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
 
     transactions.forEach((tx) => {
-      const cat = normalize(tx.hmrc_category_id);
+      const canonical = categoryMap[tx.hmrc_category_id] || "";
 
-      if (cat === "vat") grouped.vat.push(tx);
-      else if (cat === "cis") grouped.cis.push(tx);
-      else if (cat === "corporation tax" || cat === "corp") grouped.corp.push(tx);
-      else if (cat === "self assessment" || cat === "sa") grouped.sa.push(tx);
+      if (canonical === "vat") grouped.vat.push(tx);
+      else if (canonical === "cis") grouped.cis.push(tx);
+      else if (canonical === "corporation tax") grouped.corp.push(tx);
+      else if (canonical === "self assessment") grouped.sa.push(tx);
     });
 
     // ✅ 4. Convert transactions → period objects
