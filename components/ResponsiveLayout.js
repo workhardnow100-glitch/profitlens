@@ -11,7 +11,7 @@ import {
   SidebarMenu,
   SidebarFooter,
   SidebarTrigger,
-} from "../ui/sidebar";
+} from "./ui/sidebar";
 import { TrendingUp } from "lucide-react";
 
 export default function ResponsiveLayout({ children }) {

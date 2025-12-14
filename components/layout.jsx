@@ -29,7 +29,7 @@ import {
   SidebarFooter,
   SidebarProvider,
   SidebarTrigger,
-} from "../ui/sidebar";
+} from "./ui/sidebar";
 
 const navigationItems = [
   { title: "Dashboard", url: createPageUrl("Dashboard"), icon: BarChart3 },
