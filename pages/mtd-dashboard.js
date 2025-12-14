@@ -1,5 +1,9 @@
+// pages/mtd-dashboard.js
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/router";
+
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
@@ -9,21 +13,47 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-export default function MTDDashboard({ clientId }) {
+export default function MTDDashboard() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+
+  const [clientId, setClientId] = useState(null);
+  const [userId, setUserId] = useState(null);
+
   const [transactions, setTransactions] = useState([]);
   const [client, setClient] = useState(null);
-  const [status, setStatus] = useState({});
+  const [statusMap, setStatusMap] = useState({});
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // Current VAT period (YYYY-MM)
   const vatPeriod = new Date().toISOString().slice(0, 7);
 
+  // 🔑 Access control
   useEffect(() => {
+    if (status === "loading") return;
+    if (!session?.user) {
+      router.replace("/login");
+      return;
+    }
+    const isAdmin = session.user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
+      return;
+    }
+
+    setUserId(session.user.id);
+    setClientId(session.user.default_client_id);
+  }, [session, status, router]);
+
+  useEffect(() => {
+    if (!clientId) return;
     fetchClient();
     fetchTransactions();
     checkLock();
-  }, []);
+  }, [clientId]);
 
   async function fetchClient() {
     const { data } = await supabase
@@ -44,7 +74,6 @@ export default function MTDDashboard({ clientId }) {
   }
 
   async function checkLock() {
-    // Find VAT period row for this client and month
     const { data } = await supabase
       .from("vat_periods")
       .select("id, locked, submitted")
@@ -63,8 +92,7 @@ export default function MTDDashboard({ clientId }) {
     if (!file) return;
 
     setLoading(true);
-
-    const Papa = await import("papaparse"); // ✅ dynamic import
+    const Papa = await import("papaparse");
     Papa.parse(file, {
       header: true,
       complete: async ({ data }) => {
@@ -72,12 +100,15 @@ export default function MTDDashboard({ clientId }) {
           .filter((r) => r.amount)
           .map((r) => ({
             client_id: clientId,
-            date: r.date,
-            description: r.description,
+            user_id: userId,
+            statement_id: r.statement_id || crypto.randomUUID(),
+            date: r.date || null,
+            description: r.description || null,
             amount: parseFloat(r.amount),
-            vat_rate: null,
-            vat_amount: null,
-            category: null,
+            category: r.category || null,
+            vat_rate: r.vat_rate || null,
+            vat_amount: r.vat_amount || null,
+            source: "mtd_dashboard",
           }));
 
         await supabase.from("transactions").insert(rows);
@@ -89,20 +120,17 @@ export default function MTDDashboard({ clientId }) {
 
   async function handleCategoryChange(row, category) {
     if (locked) return;
-
     const update = { category };
     if (category !== "vat") {
       update.vat_rate = null;
       update.vat_amount = null;
     }
-
     await supabase.from("transactions").update(update).eq("id", row.id);
     fetchTransactions();
   }
 
   async function handleVAT(row, rate) {
     if (locked) return;
-
     await supabase
       .from("transactions")
       .update({
@@ -110,7 +138,6 @@ export default function MTDDashboard({ clientId }) {
         vat_amount: row.amount * (rate / 100),
       })
       .eq("id", row.id);
-
     fetchTransactions();
   }
 
@@ -156,8 +183,7 @@ export default function MTDDashboard({ clientId }) {
 
   async function submit(category) {
     const key = `${clientId}-${category}-${vatPeriod}`;
-
-    setStatus((p) => ({ ...p, [category]: "Submitting..." }));
+    setStatusMap((p) => ({ ...p, [category]: "Submitting..." }));
 
     const res = await fetch("/api/submit-mtd", {
       method: "POST",
@@ -172,11 +198,12 @@ export default function MTDDashboard({ clientId }) {
     });
 
     const data = await res.json();
-    setStatus((p) => ({ ...p, [category]: data.success ? "Success" : "Failed" }));
+    setStatusMap((p) => ({ ...p, [category]: data.success ? "Success" : "Failed" }));
     if (category === "vat" && data.success) setLocked(true);
   }
 
-  if (loading) return <div>Loading…</div>;
+  if (status === "loading" || loading) return <div>Loading…</div>;
+  if (!session?.user) return null;
 
   return (
     <ResponsiveLayout currentPageName="MTD Dashboard">
@@ -217,7 +244,7 @@ export default function MTDDashboard({ clientId }) {
                   <select
                     value={r.category || ""}
                     onChange={(e) => handleCategoryChange(r, e.target.value)}
-                  >
+                                    >
                     <option />
                     {categories.map((c) => (
                       <option key={c}>{c}</option>
@@ -243,7 +270,7 @@ export default function MTDDashboard({ clientId }) {
           </div>
 
           <div className="mt-4">
-            {Object.entries(status).map(([k, v]) => (
+            {Object.entries(statusMap).map(([k, v]) => (
               <p key={k}>
                 {k.toUpperCase()}: {v}
               </p>
