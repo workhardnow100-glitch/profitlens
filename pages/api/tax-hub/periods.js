@@ -112,17 +112,17 @@ export default async function handler(req, res) {
         let periodStart, periodEnd;
 
         if (month >= 1 && month <= 3) {
-          periodStart = new Date(year, 0, 1); // Jan 1
-          periodEnd = new Date(year, 2, 31);  // Mar 31
+          periodStart = new Date(year, 0, 1);
+          periodEnd = new Date(year, 2, 31);
         } else if (month >= 4 && month <= 6) {
-          periodStart = new Date(year, 3, 1); // Apr 1
-          periodEnd = new Date(year, 5, 30);  // Jun 30
+          periodStart = new Date(year, 3, 1);
+          periodEnd = new Date(year, 5, 30);
         } else if (month >= 7 && month <= 9) {
-          periodStart = new Date(year, 6, 1); // Jul 1
-          periodEnd = new Date(year, 8, 30);  // Sep 30
+          periodStart = new Date(year, 6, 1);
+          periodEnd = new Date(year, 8, 30);
         } else {
-          periodStart = new Date(year, 9, 1); // Oct 1
-          periodEnd = new Date(year, 11, 31); // Dec 31
+          periodStart = new Date(year, 9, 1);
+          periodEnd = new Date(year, 11, 31);
         }
 
         const key = `${periodStart.toISOString().slice(0, 10)}_${periodEnd
@@ -160,25 +160,20 @@ export default async function handler(req, res) {
 
         period.transactions.forEach((tx) => {
           const vat = Number(tx.vat_amount || 0);
-
           if (!vat) return;
 
-          // Sales → Output VAT
           if (tx.category === "sales") {
             outputVat += vat;
           } else {
-            // Everything else → Input VAT
             inputVat += vat;
           }
         });
-
-        const netVat = outputVat - inputVat;
 
         return {
           ...period,
           outputVat,
           inputVat,
-          netVat,
+          netVat: outputVat - inputVat,
         };
       });
     }

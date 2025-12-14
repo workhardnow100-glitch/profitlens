@@ -1,91 +1,85 @@
-import { createClient } from "@supabase/supabase-js";
-import fetch from "node-fetch";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  }
 
   const { clientId, periodStart, periodEnd } = req.body;
+
   if (!clientId || !periodStart || !periodEnd) {
-    return res.status(400).json({ error: "Missing parameters" });
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // 1️⃣ Get client OAuth token
-    const { data: tokenData, error: tokenError } = await supabase
-      .from("hmrc_tokens")
-      .select("*")
-      .eq("client_id", clientId)
-      .single();
-
-    if (tokenError || !tokenData) throw new Error("HMRC token not found");
-
-    const accessToken = tokenData.access_token;
-
-    // 2️⃣ Fetch transactions & calculate boxes
-    const { data: transactions } = await supabase
+    // ✅ 1. Fetch all VAT transactions for this period
+    const { data: vatTxs, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select("*")
+      .select("id, category, vat_amount, tax_locked, date")
       .eq("client_id", clientId)
+      .eq("hmrc_category_id", "vat") // canonical VAT category
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
-    // Example VAT box calculation (adjust to your rules)
-    const boxes = {
-      vat_due_sales: transactions.reduce((a, t) => a + (t.vat_amount || 0), 0),
-      vat_reclaimed: 0, // replace with actual logic
-      // add other boxes 3-9 as needed
-    };
+    if (txError) throw txError;
 
-    // 3️⃣ Build HMRC payload
-    const payload = {
-      periodKey: `A${periodStart.replace(/-/g, "")}`, // example periodKey
-      vatDueSales: boxes.vat_due_sales,
-      vatReclaimedCurrPeriod: boxes.vat_reclaimed,
-      // map other boxes as per HMRC spec
-      // e.g., totalVatDue, totalVatReclaimed, netVatDue, etc.
-      fromDate: periodStart,
-      toDate: periodEnd,
-    };
+    if (!vatTxs || vatTxs.length === 0) {
+      return res.status(400).json({ error: "No VAT transactions in this period" });
+    }
 
-    // 4️⃣ Submit to HMRC sandbox
-    const hmrcRes = await fetch(
-      "https://test-api.service.hmrc.gov.uk/organisations/vat/{vrn}/returns",
-      {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-          "Accept": "application/vnd.hmrc.1.0+json",
-        },
-        body: JSON.stringify(payload),
+    // ✅ 2. Recalculate totals server-side
+    let outputVat = 0;
+    let inputVat = 0;
+
+    vatTxs.forEach((tx) => {
+      const vat = Number(tx.vat_amount || 0);
+
+      if (tx.category === "sales") {
+        outputVat += vat;
+      } else {
+        inputVat += vat;
       }
-    );
+    });
 
-    const hmrcData = await hmrcRes.json();
-    if (!hmrcRes.ok) throw new Error(JSON.stringify(hmrcData));
+    const netVat = outputVat - inputVat;
 
-    // 5️⃣ Lock transactions only if HMRC submission succeeds
-    const { error: lockError } = await supabase
+    // ✅ 3. Insert submission record
+    const { error: insertError } = await supabaseAdmin
+      .from("vat_submissions")
+      .insert({
+        client_id: clientId,
+        period_start: periodStart,
+        period_end: periodEnd,
+        output_vat: outputVat,
+        input_vat: inputVat,
+        net_vat: netVat,
+      });
+
+    if (insertError) throw insertError;
+
+    // ✅ 4. Lock all transactions in this period
+    const { error: lockError } = await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
+      .eq("hmrc_category_id", "vat")
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
-    if (lockError) throw new Error(lockError.message);
+    if (lockError) throw lockError;
 
-    // 6️⃣ Return success
-    return res.status(200).json({ success: true, hmrcResponse: hmrcData });
+    // ✅ 5. Return success + totals
+    return res.status(200).json({
+      success: true,
+      message: "VAT return submitted successfully",
+      totals: {
+        outputVat,
+        inputVat,
+        netVat,
+      },
+    });
 
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, error: err.message });
+    console.error("VAT submission error:", err);
+    return res.status(500).json({ error: err.message });
   }
 }
