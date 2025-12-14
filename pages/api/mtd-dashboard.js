@@ -2,7 +2,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// --- inferCategory logic (same as main dashboard) ---
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
   if (normalized === "FPO") return "Payment";
@@ -12,6 +11,7 @@ function inferCategory(type = "", description = "") {
   if (normalized === "DD") return "Direct Debit";
   if (normalized === "SO") return "Standing Order";
   if (normalized === "INT") return "Interest";
+
   const rules = [
     { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
     { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
@@ -23,22 +23,20 @@ function inferCategory(type = "", description = "") {
     { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
     { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
   ];
+
   for (const rule of rules) if (rule.regex.test(description)) return rule.category;
   return "Other";
 }
-// --- end inferCategory ---
 
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  const clientId = session.user.default_client_id;
-  if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
+  const { action, clientId, rowId, category, vatRate, nino } = req.body;
+
+  if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    const { action, rowId, category, vatRate, nino } = req.body;
-
-    // --- Fetch transactions for MTD dashboard ---
     if (action === "fetchTransactions") {
       const { data, error } = await supabaseAdmin
         .from("transactions")
@@ -63,13 +61,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ data: recent });
     }
 
-    // --- Update category ---
     if (action === "updateCategory") {
+      if (!rowId || !category) return res.status(400).json({ error: "Missing rowId or category" });
+
       const update = { category };
       if (category !== "vat") {
         update.vat_rate = null;
         update.vat_amount = null;
       }
+
       const { error } = await supabaseAdmin
         .from("transactions")
         .update(update)
@@ -80,14 +80,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    // --- Update VAT ---
     if (action === "updateVAT") {
-      const { data: tx } = await supabaseAdmin
+      if (!rowId || vatRate === undefined) return res.status(400).json({ error: "Missing rowId or vatRate" });
+
+      const { data: tx, error: txError } = await supabaseAdmin
         .from("transactions")
         .select("amount")
         .eq("id", rowId)
         .eq("client_id", clientId)
         .single();
+
+      if (txError) return res.status(500).json({ error: txError.message });
 
       const vatAmount = tx.amount * (vatRate / 100);
 
@@ -101,18 +104,11 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    // --- Verify CIS ---
     if (action === "verifyCIS") {
-      const registered = nino && nino.startsWith("AB");
-      await supabaseAdmin
-        .from("clients")
-        .update({ cis_registered: registered })
-        .eq("id", clientId);
-
+      const registered = nino && nino.startsWith("AB"); // simple stub for demo
       return res.status(200).json({ registered });
     }
 
-    // --- Check VAT lock ---
     if (action === "checkLock") {
       const vatPeriod = new Date().toISOString().slice(0, 7);
       const { data, error } = await supabaseAdmin
