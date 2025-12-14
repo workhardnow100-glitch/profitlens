@@ -2,7 +2,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import {
   getTransactionsByClient,
-  updateTransactionCategory, // still available if needed for corrections
   lockVatPeriod,
   checkVatLock
 } from "../../lib/db";
@@ -42,21 +41,21 @@ export default async function handler(req, res) {
           return { ...tx, category, vat_amount };
         });
 
-        // 🔹 Totals
+        // 🔹 Totals (always numeric)
         const vatDue = data.filter(t => t.category === "vat")
-                           .reduce((s, t) => s + t.vat_amount, 0);
+                           .reduce((s, t) => s + (t.vat_amount || 0), 0);
 
         const netSales = data.filter(t => t.category === "vat" && t.amount > 0)
-                             .reduce((s, t) => s + t.amount, 0);
+                             .reduce((s, t) => s + (t.amount || 0), 0);
 
         const netPurchases = data.filter(t => t.category === "vat" && t.amount < 0)
-                                 .reduce((s, t) => s + Math.abs(t.amount), 0);
+                                 .reduce((s, t) => s + Math.abs(t.amount || 0), 0);
 
         const incomeTotal = data.filter(t => t.category === "income")
-                                .reduce((s, t) => s + t.amount, 0);
+                                .reduce((s, t) => s + (t.amount || 0), 0);
 
         const corpProfit = data.filter(t => t.category === "income" || t.category === "expense")
-                               .reduce((s, t) => s + t.amount, 0);
+                               .reduce((s, t) => s + (t.amount || 0), 0);
 
         const corpTax = corpProfit > 0 ? round2(corpProfit * 0.19) : 0;
 
@@ -68,14 +67,14 @@ export default async function handler(req, res) {
             netPurchases: round2(netPurchases),
             income: round2(incomeTotal),
             corpProfit: round2(corpProfit),
-            corpTax
+            corpTax: round2(corpTax)
           }
         });
       }
 
       case "checkLock": {
         const locked = await checkVatLock(clientId);
-        return res.json({ locked });
+        return res.json({ locked: !!locked });
       }
 
       case "lockVat": {
@@ -87,7 +86,7 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "Invalid action" });
     }
   } catch (err) {
-    console.error(err);
+    console.error("MTD Dashboard API error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 }
