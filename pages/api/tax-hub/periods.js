@@ -6,14 +6,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Helper to group transactions by period
 function groupByPeriod(transactions, periodType) {
   const periods = {};
   transactions.forEach((t) => {
+    if (!t?.date) return; // skip missing dates
+    const d = new Date(t.date);
     let label = "", start = t.date, end = t.date;
 
     if (periodType === "vat") {
-      const d = new Date(t.date);
       const quarter = Math.floor(d.getMonth() / 3) + 1;
       label = `${d.getFullYear()} Q${quarter}`;
       start = new Date(d.getFullYear(), (quarter - 1) * 3, 1)
@@ -23,19 +23,26 @@ function groupByPeriod(transactions, periodType) {
         .toISOString()
         .split("T")[0];
     } else if (periodType === "cis") {
-      const d = new Date(t.date);
       label = `${d.getFullYear()}-${d.getMonth() + 1}`;
-      start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
-      end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split("T")[0];
+      start = new Date(d.getFullYear(), d.getMonth(), 1)
+        .toISOString()
+        .split("T")[0];
+      end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
+        .toISOString()
+        .split("T")[0];
     } else {
-      const d = new Date(t.date);
       label = `${d.getFullYear()}`;
-      start = new Date(d.getFullYear(), 0, 1).toISOString().split("T")[0];
-      end = new Date(d.getFullYear(), 11, 31).toISOString().split("T")[0];
+      start = new Date(d.getFullYear(), 0, 1)
+        .toISOString()
+        .split("T")[0];
+      end = new Date(d.getFullYear(), 11, 31)
+        .toISOString()
+        .split("T")[0];
     }
 
-    if (!periods[label])
+    if (!periods[label]) {
       periods[label] = { periodLabel: label, periodStart: start, periodEnd: end, locked: false };
+    }
 
     if (t.tax_locked) periods[label].locked = true;
   });
@@ -56,7 +63,7 @@ export default async function handler(req, res) {
       .eq("client_id", clientId);
     if (error) throw new Error(error.message);
 
-    // Check if HMRC OAuth token exists
+    // Fetch HMRC token (optional)
     const { data: tokens } = await supabase
       .from("hmrc_tokens")
       .select("*")
@@ -67,8 +74,8 @@ export default async function handler(req, res) {
     const hasHMRC = tokens?.access_token ? true : false;
 
     // Filter transactions by tax type
-    const vatTx = transactions.filter((t) => t.hmrc_category_id === "VAT");
-    const cisTx = transactions.filter((t) => t.hmrc_category_id === "CIS");
+    const vatTx = transactions.filter((t) => t.hmrc_category_id); // keep all VAT-linked transactions
+    const cisTx = transactions.filter((t) => t.hmrc_category_id); // keep all CIS-linked
     const corpTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
     const saTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
 
@@ -79,7 +86,7 @@ export default async function handler(req, res) {
       sa: groupByPeriod(saTx, "annual"),
     });
   } catch (err) {
-    console.error(err);
+    console.error("Tax Hub periods error:", err);
     res.status(500).json({ error: err.message });
   }
 }

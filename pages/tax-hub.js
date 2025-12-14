@@ -1,4 +1,3 @@
-// pages/tax-hub.js
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -23,7 +22,6 @@ export default function TaxHub() {
     else fetchPeriods();
   }, [session, status]);
 
-  // If OAuth just completed, refresh periods automatically
   useEffect(() => {
     if (router.query.authorized) {
       fetchPeriods();
@@ -40,10 +38,16 @@ export default function TaxHub() {
         body: JSON.stringify({ clientId: session.user.clientId }),
       });
       const data = await res.json();
-      setPeriods(data);
+      setPeriods({
+        vat: data.vat || [],
+        cis: data.cis || [],
+        corp: data.corp || [],
+        sa: data.sa || [],
+      });
     } catch (err) {
       console.error(err);
       alert("Error fetching tax periods: " + err.message);
+      setPeriods({ vat: [], cis: [], corp: [], sa: [] });
     } finally {
       setLoading(false);
     }
@@ -58,14 +62,13 @@ export default function TaxHub() {
     { key: "sa", name: "Self Assessment", path: "/sa" },
   ];
 
-  const needsHMRCAuth = !periods.vat.some((p) => p.hmrcAuthorized);
+  const needsHMRCAuth = !((periods.vat || []).some((p) => p.hmrcAuthorized));
 
   return (
     <ResponsiveLayout currentPageName="Tax Hub">
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">Tax Hub</h1>
 
-        {/* HMRC Authorization */}
         {needsHMRCAuth && !loading && (
           <div className="mb-4">
             <p className="text-yellow-600 mb-2">
@@ -86,9 +89,9 @@ export default function TaxHub() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {taxTypes.map((tax) => (
               <ResponsiveCard key={tax.key} title={tax.name}>
-                {periods[tax.key]?.length > 0 ? (
+                {(periods[tax.key] || []).length > 0 ? (
                   <ul className="space-y-2">
-                    {periods[tax.key].map((p) => (
+                    {(periods[tax.key] || []).map((p) => (
                       <li
                         key={p.periodStart}
                         className="flex justify-between items-center border p-2 rounded"
@@ -114,8 +117,6 @@ export default function TaxHub() {
                           >
                             View
                           </button>
-
-                          {/* Submit button only for VAT/CIS and unlocked */}
                           {!p.locked && (tax.key === "vat" || tax.key === "cis") && (
                             <button
                               className={`px-2 py-1 rounded text-white ${
@@ -126,11 +127,7 @@ export default function TaxHub() {
                               disabled={!p.hmrcAuthorized}
                               onClick={async () => {
                                 if (!p.hmrcAuthorized) return;
-                                if (
-                                  !confirm(
-                                    `Submit ${tax.name} period ${p.periodLabel} to HMRC?`
-                                  )
-                                )
+                                if (!confirm(`Submit ${tax.name} period ${p.periodLabel} to HMRC?`))
                                   return;
 
                                 try {
@@ -149,7 +146,7 @@ export default function TaxHub() {
                                     alert(
                                       `${tax.name} period submitted and locked successfully.`
                                     );
-                                    fetchPeriods(); // refresh periods
+                                    fetchPeriods();
                                   } else {
                                     alert("Submission failed: " + data.error);
                                   }
