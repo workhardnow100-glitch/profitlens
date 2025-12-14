@@ -1,4 +1,3 @@
-// pages/api/tax-hub/periods.js
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -9,11 +8,10 @@ const supabase = createClient(
 function groupByPeriod(transactions, periodType) {
   const periods = {};
   transactions.forEach((t) => {
-    if (!t?.date) return; // skip missing dates
-    const d = new Date(t.date);
     let label = "", start = t.date, end = t.date;
 
     if (periodType === "vat") {
+      const d = new Date(t.date);
       const quarter = Math.floor(d.getMonth() / 3) + 1;
       label = `${d.getFullYear()} Q${quarter}`;
       start = new Date(d.getFullYear(), (quarter - 1) * 3, 1)
@@ -23,26 +21,19 @@ function groupByPeriod(transactions, periodType) {
         .toISOString()
         .split("T")[0];
     } else if (periodType === "cis") {
+      const d = new Date(t.date);
       label = `${d.getFullYear()}-${d.getMonth() + 1}`;
-      start = new Date(d.getFullYear(), d.getMonth(), 1)
-        .toISOString()
-        .split("T")[0];
-      end = new Date(d.getFullYear(), d.getMonth() + 1, 0)
-        .toISOString()
-        .split("T")[0];
+      start = new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split("T")[0];
+      end = new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split("T")[0];
     } else {
+      const d = new Date(t.date);
       label = `${d.getFullYear()}`;
-      start = new Date(d.getFullYear(), 0, 1)
-        .toISOString()
-        .split("T")[0];
-      end = new Date(d.getFullYear(), 11, 31)
-        .toISOString()
-        .split("T")[0];
+      start = new Date(d.getFullYear(), 0, 1).toISOString().split("T")[0];
+      end = new Date(d.getFullYear(), 11, 31).toISOString().split("T")[0];
     }
 
-    if (!periods[label]) {
+    if (!periods[label])
       periods[label] = { periodLabel: label, periodStart: start, periodEnd: end, locked: false };
-    }
 
     if (t.tax_locked) periods[label].locked = true;
   });
@@ -52,32 +43,39 @@ function groupByPeriod(transactions, periodType) {
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
   const { clientId } = req.body;
   if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    // Fetch all transactions for client
-    const { data: transactions, error } = await supabase
+    // Fetch transactions
+    const { data: transactions, error: txError } = await supabase
       .from("transactions")
       .select("*")
       .eq("client_id", clientId);
-    if (error) throw new Error(error.message);
 
-    // Fetch HMRC token (optional)
-    const { data: tokens } = await supabase
-      .from("hmrc_tokens")
-      .select("*")
-      .eq("client_id", clientId)
-      .single()
-      .catch(() => null);
+    if (txError) throw txError;
+
+    // Fetch HMRC token (server-safe)
+    let tokens = null;
+    try {
+      const { data, error } = await supabase
+        .from("hmrc_tokens")
+        .select("*")
+        .eq("client_id", clientId)
+        .single();
+      if (error) console.warn("No HMRC token:", error.message);
+      else tokens = data;
+    } catch (e) {
+      console.warn("HMRC token fetch failed:", e.message);
+    }
 
     const hasHMRC = tokens?.access_token ? true : false;
 
-    // Filter transactions by tax type
-    const vatTx = transactions.filter((t) => t.hmrc_category_id); // keep all VAT-linked transactions
-    const cisTx = transactions.filter((t) => t.hmrc_category_id); // keep all CIS-linked
-    const corpTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
-    const saTx = transactions.filter((t) => t.type === "income" || t.type === "expense");
+    const vatTx = (transactions || []).filter((t) => t.hmrc_category_id === "VAT");
+    const cisTx = (transactions || []).filter((t) => t.hmrc_category_id === "CIS");
+    const corpTx = (transactions || []).filter((t) => t.type === "income" || t.type === "expense");
+    const saTx = (transactions || []).filter((t) => t.type === "income" || t.type === "expense");
 
     res.status(200).json({
       vat: groupByPeriod(vatTx, "vat").map((p) => ({ ...p, hmrcAuthorized: hasHMRC })),
