@@ -41,7 +41,7 @@ export default async function handler(req, res) {
       else if (canonical === "self assessment") grouped.sa.push(tx);
     });
 
-    // ✅ 4A. Convert transactions → simple periods (VAT, Corp, SA)
+    // ✅ 4A. Simple periods (Corp, SA)
     const makePeriods = (txs) =>
       txs.map((tx) => ({
         periodLabel: tx.date,
@@ -51,22 +51,18 @@ export default async function handler(req, res) {
         hmrcAuthorized: !!tx.hmrc_category_id,
       }));
 
-    // ✅ 4B. Build CIS monthly periods (6th → 5th)
+    // ✅ 4B. CIS monthly periods (6th → 5th)
     function buildCISPeriods(cisTxs) {
       const periods = {};
 
       cisTxs.forEach((tx) => {
         const d = new Date(tx.date);
 
-        // Determine CIS period start (6th of month)
         let periodStart = new Date(d.getFullYear(), d.getMonth(), 6);
-
-        // If transaction is before the 6th, it belongs to previous period
         if (d.getDate() < 6) {
           periodStart = new Date(d.getFullYear(), d.getMonth() - 1, 6);
         }
 
-        // Period end = 5th of next month
         const periodEnd = new Date(
           periodStart.getFullYear(),
           periodStart.getMonth() + 1,
@@ -92,7 +88,6 @@ export default async function handler(req, res) {
 
         periods[key].transactions.push(tx);
 
-        // If ANY transaction is locked → whole period is locked
         if (tx.tax_locked) {
           periods[key].locked = true;
         }
@@ -103,9 +98,63 @@ export default async function handler(req, res) {
 
     const cisPeriods = buildCISPeriods(grouped.cis);
 
+    // ✅ 4C. VAT quarterly periods (Stagger 1 default)
+    function buildVATPeriods(vatTxs) {
+      const periods = {};
+
+      vatTxs.forEach((tx) => {
+        const d = new Date(tx.date);
+        const year = d.getFullYear();
+        const month = d.getMonth() + 1;
+
+        let periodStart, periodEnd;
+
+        if (month >= 1 && month <= 3) {
+          periodStart = new Date(year, 0, 1);   // Jan 1
+          periodEnd = new Date(year, 2, 31);    // Mar 31
+        } else if (month >= 4 && month <= 6) {
+          periodStart = new Date(year, 3, 1);   // Apr 1
+          periodEnd = new Date(year, 5, 30);    // Jun 30
+        } else if (month >= 7 && month <= 9) {
+          periodStart = new Date(year, 6, 1);   // Jul 1
+          periodEnd = new Date(year, 8, 30);    // Sep 30
+        } else {
+          periodStart = new Date(year, 9, 1);   // Oct 1
+          periodEnd = new Date(year, 11, 31);   // Dec 31
+        }
+
+        const key = `${periodStart.toISOString().slice(0, 10)}_${periodEnd
+          .toISOString()
+          .slice(0, 10)}`;
+
+        if (!periods[key]) {
+          periods[key] = {
+            periodLabel: `${periodStart
+              .toISOString()
+              .slice(0, 10)} → ${periodEnd.toISOString().slice(0, 10)}`,
+            periodStart: periodStart.toISOString().slice(0, 10),
+            periodEnd: periodEnd.toISOString().slice(0, 10),
+            locked: false,
+            hmrcAuthorized: true,
+            transactions: [],
+          };
+        }
+
+        periods[key].transactions.push(tx);
+
+        if (tx.tax_locked) {
+          periods[key].locked = true;
+        }
+      });
+
+      return Object.values(periods);
+    }
+
+    const vatPeriods = buildVATPeriods(grouped.vat);
+
     // ✅ 5. Return clean JSON
     return res.status(200).json({
-      vat: makePeriods(grouped.vat),
+      vat: vatPeriods,
       cis: cisPeriods,
       corp: makePeriods(grouped.corp),
       sa: makePeriods(grouped.sa),
