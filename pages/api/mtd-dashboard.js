@@ -1,71 +1,76 @@
-// pages/api/mtd-dashboard.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
-
-// 🔧 replace with your DB helpers
 import {
   getTransactionsByClient,
-  updateTransactionCategory,
+  updateTransactionCategory, // still available if needed for corrections
   lockVatPeriod,
   checkVatLock
 } from "../../lib/db";
 
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthenticated" });
-  }
+  if (!session?.user) return res.status(401).json({ error: "Unauthenticated" });
 
   const { action, clientId } = req.body;
-  if (!clientId) {
-    return res.status(400).json({ error: "Missing clientId" });
-  }
+  if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
     switch (action) {
       case "fetchTransactions": {
         const rows = await getTransactionsByClient(clientId);
 
-        // 🔹 Server-side VAT calculation (authoritative per row)
+        // 🔹 Auto-classify and calculate VAT per row
         const data = rows.map(tx => {
-          if (tx.category === "vat") {
-            const rate = tx.vat_rate ?? 20;
-            return {
-              ...tx,
-              vat_rate: rate,
-              vat_amount: Number((tx.amount * rate / 100).toFixed(2))
-            };
+          let category = tx.category;
+
+          if (!category) {
+            if (tx.amount > 0) category = "income";
+            else if (tx.amount < 0) category = "expense";
           }
-          return { ...tx, vat_amount: 0 };
+
+          let vat_amount = 0;
+          if (category === "vat" || tx.vat_rate) {
+            const rate = tx.vat_rate ?? 20;
+            vat_amount = round2(tx.amount * rate / 100);
+            category = "vat";
+          }
+
+          return { ...tx, category, vat_amount };
         });
 
-        // 🔹 Totals calculated server-side
-        const vatDue = data
-          .filter(t => t.category === "vat")
-          .reduce((s, t) => s + t.vat_amount, 0);
+        // 🔹 Totals
+        const vatDue = data.filter(t => t.category === "vat")
+                           .reduce((s, t) => s + t.vat_amount, 0);
 
-        const incomeTotal = data
-          .filter(t => t.category === "income")
-          .reduce((s, t) => s + t.amount, 0);
+        const netSales = data.filter(t => t.category === "vat" && t.amount > 0)
+                             .reduce((s, t) => s + t.amount, 0);
 
-        const corpProfit = data
-          .filter(t => t.category === "corp")
-          .reduce((s, t) => s + t.amount, 0);
+        const netPurchases = data.filter(t => t.category === "vat" && t.amount < 0)
+                                 .reduce((s, t) => s + Math.abs(t.amount), 0);
+
+        const incomeTotal = data.filter(t => t.category === "income")
+                                .reduce((s, t) => s + t.amount, 0);
+
+        const corpProfit = data.filter(t => t.category === "income" || t.category === "expense")
+                               .reduce((s, t) => s + t.amount, 0);
+
+        const corpTax = corpProfit > 0 ? round2(corpProfit * 0.19) : 0;
 
         return res.json({
           data,
           totals: {
-            vatDue,
-            income: incomeTotal,
-            corp: corpProfit
+            vatDue: round2(vatDue),
+            netSales: round2(netSales),
+            netPurchases: round2(netPurchases),
+            income: round2(incomeTotal),
+            corpProfit: round2(corpProfit),
+            corpTax
           }
         });
-      }
-
-      case "updateCategory": {
-        const { rowId, category } = req.body;
-        await updateTransactionCategory(rowId, category);
-        return res.json({ success: true });
       }
 
       case "checkLock": {

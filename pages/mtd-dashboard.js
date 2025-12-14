@@ -11,7 +11,7 @@ export default function MTDDashboard() {
   const router = useRouter();
 
   const [transactions, setTransactions] = useState([]);
-  const [totals, setTotals] = useState({ vatDue: 0, income: 0, corp: 0 });
+  const [totals, setTotals] = useState({});
   const [locked, setLocked] = useState(false);
   const [statusMap, setStatusMap] = useState({});
 
@@ -45,7 +45,7 @@ export default function MTDDashboard() {
 
       const { data, totals } = await res.json();
       setTransactions(data || []);
-      setTotals(totals || { vatDue: 0, income: 0, corp: 0 });
+      setTotals(totals || {});
 
       const lockRes = await fetch("/api/mtd-dashboard", {
         method: "POST",
@@ -63,36 +63,18 @@ export default function MTDDashboard() {
     load();
   }, [session]);
 
-  // 🧮 HMRC payload (now uses API totals)
+  // 🧮 HMRC payload
   const hmrcPayload = {
     vat: {
       period: vatPeriod,
+      netSales: totals.netSales,
+      netPurchases: totals.netPurchases,
       vatDue: totals.vatDue,
     },
     income: { income: totals.income },
-    corporationTax: { profit: totals.corp },
+    corporationTax: { profit: totals.corpProfit, tax: totals.corpTax },
     generatedAt: new Date().toISOString()
   };
-
-  // 🔁 Category change
-  async function updateCategory(id, category) {
-    if (locked) return;
-
-    await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "updateCategory",
-        clientId: session.user.clientId,
-        rowId: id,
-        category
-      })
-    });
-
-    setTransactions(prev =>
-      prev.map(t => (t.id === id ? { ...t, category } : t))
-    );
-  }
 
   // 🚀 Submit VAT
   async function submitVAT() {
@@ -119,9 +101,12 @@ export default function MTDDashboard() {
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-4">
-          <ResponsiveCard label="VAT Due">£{totals.vatDue.toFixed(2)}</ResponsiveCard>
-          <ResponsiveCard label="Income">£{totals.income.toFixed(2)}</ResponsiveCard>
-          <ResponsiveCard label="Corp Profit">£{totals.corp.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="VAT Due">£{totals.vatDue?.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="Net Sales">£{totals.netSales?.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="Net Purchases">£{totals.netPurchases?.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="Income">£{totals.income?.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="Corp Profit">£{totals.corpProfit?.toFixed(2)}</ResponsiveCard>
+          <ResponsiveCard label="Corp Tax">£{totals.corpTax?.toFixed(2)}</ResponsiveCard>
         </div>
 
         {/* Transactions */}
@@ -135,19 +120,7 @@ export default function MTDDashboard() {
                 <td className="text-right">
                   {tx.category === "vat" ? `£${tx.vat_amount.toFixed(2)}` : "—"}
                 </td>
-                <td>
-                  <select
-                    disabled={locked}
-                    className="border rounded px-2 py-1"
-                    value={tx.category || ""}
-                    onChange={e => updateCategory(tx.id, e.target.value)}
-                  >
-                    <option value="">Select</option>
-                    <option value="income">Income</option>
-                    <option value="vat">VAT</option>
-                    <option value="corp">Corp</option>
-                  </select>
-                </td>
+                <td>{tx.category}</td> {/* 🔹 Read-only category */}
               </tr>
             ))}
           </ResponsiveTable>
