@@ -1,5 +1,5 @@
 // pages/api/tax-hub/periods.js
-import { supabaseAdmin } from "../../../lib/supabaseAdmin";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
