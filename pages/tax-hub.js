@@ -38,14 +38,16 @@ export default function TaxHub() {
         body: JSON.stringify({ clientId: session.user.clientId }),
       });
       const data = await res.json();
+
+      // Safely set periods even if empty
       setPeriods({
-        vat: data.vat || [],
-        cis: data.cis || [],
-        corp: data.corp || [],
-        sa: data.sa || [],
+        vat: Array.isArray(data.vat) ? data.vat : [],
+        cis: Array.isArray(data.cis) ? data.cis : [],
+        corp: Array.isArray(data.corp) ? data.corp : [],
+        sa: Array.isArray(data.sa) ? data.sa : [],
       });
     } catch (err) {
-      console.error(err);
+      console.error("Tax Hub periods error:", err);
       alert("Error fetching tax periods: " + err.message);
       setPeriods({ vat: [], cis: [], corp: [], sa: [] });
     } finally {
@@ -62,6 +64,7 @@ export default function TaxHub() {
     { key: "sa", name: "Self Assessment", path: "/sa" },
   ];
 
+  // Safe check for HMRC authorization
   const needsHMRCAuth = !((periods.vat || []).some((p) => p.hmrcAuthorized));
 
   return (
