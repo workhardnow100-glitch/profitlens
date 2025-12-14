@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { BarChart, Users } from "lucide-react";
 
-// ✅ Context for open/close state
+// Context for sidebar state
 const SidebarContext = createContext();
 export const useSidebar = () => useContext(SidebarContext);
 
@@ -17,7 +17,7 @@ export const SidebarProvider = ({ children }) => {
   );
 };
 
-// ✅ Sidebar with responsive behaviour
+// Sidebar that slides in/out on mobile
 export const Sidebar = ({ children, className }) => {
   const { open } = useSidebar();
   return (
@@ -30,31 +30,7 @@ export const Sidebar = ({ children, className }) => {
   );
 };
 
-export const SidebarHeader = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-export const SidebarContent = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-export const SidebarGroup = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-export const SidebarGroupLabel = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-export const SidebarGroupContent = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-export const SidebarFooter = ({ children, className }) => (
-  <div className={className}>{children}</div>
-);
-
-// ✅ Trigger toggles sidebar open/close
+// Trigger toggles sidebar open/close
 export const SidebarTrigger = ({ children, className }) => {
   const { setOpen } = useSidebar();
   return (
@@ -67,16 +43,33 @@ export const SidebarTrigger = ({ children, className }) => {
   );
 };
 
+// Structural wrappers
+export const SidebarHeader = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroup = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroupLabel = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroupContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarFooter = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
 export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
-
 export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// ✅ SidebarMenu with navigation items
+// SidebarMenu with navigation items
 export function SidebarMenu() {
   const router = useRouter();
-
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
     { title: "Profile", url: "/profile", icon: Users },
