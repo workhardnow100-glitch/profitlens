@@ -1,15 +1,34 @@
 // components/ui/sidebar.js
-import React from "react";
+import React, { createContext, useContext, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { BarChart, Users } from "lucide-react";
 
-// ✅ Structural wrappers
-export const SidebarProvider = ({ children }) => <>{children}</>;
+// ✅ Context for open/close state
+const SidebarContext = createContext();
+export const useSidebar = () => useContext(SidebarContext);
 
-export const Sidebar = ({ children, className }) => (
-  <aside className={className}>{children}</aside>
-);
+export const SidebarProvider = ({ children }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <SidebarContext.Provider value={{ open, setOpen }}>
+      {children}
+    </SidebarContext.Provider>
+  );
+};
+
+// ✅ Sidebar with responsive behaviour
+export const Sidebar = ({ children, className }) => {
+  const { open } = useSidebar();
+  return (
+    <aside
+      className={`${className} fixed inset-y-0 left-0 w-64 transform bg-white transition-transform duration-200 ease-in-out
+        ${open ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 md:static`}
+    >
+      {children}
+    </aside>
+  );
+};
 
 export const SidebarHeader = ({ children, className }) => (
   <div className={className}>{children}</div>
@@ -35,9 +54,18 @@ export const SidebarFooter = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-export const SidebarTrigger = ({ children, className }) => (
-  <button className={className}>{children}</button>
-);
+// ✅ Trigger toggles sidebar open/close
+export const SidebarTrigger = ({ children, className }) => {
+  const { setOpen } = useSidebar();
+  return (
+    <button
+      onClick={() => setOpen((prev) => !prev)}
+      className={className}
+    >
+      {children || "☰"}
+    </button>
+  );
+};
 
 export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
 
@@ -45,7 +73,7 @@ export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// ✅ Your existing SidebarMenu with navigation items
+// ✅ SidebarMenu with navigation items
 export function SidebarMenu() {
   const router = useRouter();
 
@@ -60,7 +88,7 @@ export function SidebarMenu() {
     { title: "Email Setup", url: "/emailsetup", icon: Users },
     { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
     { title: "Accountants", url: "/accountants", icon: Users },
-    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart }, // ✅ New link
+    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart },
   ];
 
   return (
