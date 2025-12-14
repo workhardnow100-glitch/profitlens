@@ -1,4 +1,52 @@
-export function SidebarMenu({ children }) {
+// components/ui/sidebar.js
+import React from "react";
+import Link from "next/link";
+import { useRouter } from "next/router";
+import { BarChart, Users } from "lucide-react";
+
+// ✅ Structural wrappers
+export const SidebarProvider = ({ children }) => <>{children}</>;
+
+export const Sidebar = ({ children, className }) => (
+  <aside className={className}>{children}</aside>
+);
+
+export const SidebarHeader = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarGroup = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarGroupLabel = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarGroupContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarFooter = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+export const SidebarTrigger = ({ children, className }) => (
+  <button className={className}>{children}</button>
+);
+
+export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
+
+export const SidebarMenuButton = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+
+// ✅ Your existing SidebarMenu with navigation items
+export function SidebarMenu() {
   const router = useRouter();
 
   const navigationItems = [
@@ -12,9 +60,7 @@ export function SidebarMenu({ children }) {
     { title: "Email Setup", url: "/emailsetup", icon: Users },
     { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
     { title: "Accountants", url: "/accountants", icon: Users },
-
-    // ✅ New MTD Dashboard link
-    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart },
+    { title: "MTD Dashboard", url: "/mtd-dashboard", icon: BarChart }, // ✅ New link
   ];
 
   return (
