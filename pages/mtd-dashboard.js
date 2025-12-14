@@ -1,4 +1,3 @@
-// pages/mtd-dashboard.js
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -12,8 +11,6 @@ export default function MTDDashboard() {
   const router = useRouter();
 
   const [clientId, setClientId] = useState(null);
-  const [userId, setUserId] = useState(null);
-
   const [transactions, setTransactions] = useState([]);
   const [client, setClient] = useState(null);
   const [statusMap, setStatusMap] = useState({});
@@ -21,23 +18,13 @@ export default function MTDDashboard() {
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
 
-  // 🔑 Access control
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) {
       router.replace("/login");
       return;
     }
-    const isAdmin = session.user.role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
-    );
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
-      return;
-    }
 
-    setUserId(session.user.id);
     setClientId(session.user.default_client_id);
   }, [session, status, router]);
 
@@ -48,7 +35,6 @@ export default function MTDDashboard() {
     checkLock();
   }, [clientId]);
 
-  // 🔹 Fetch client
   async function fetchClient() {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
@@ -59,7 +45,6 @@ export default function MTDDashboard() {
     setClient(data);
   }
 
-  // 🔹 Fetch transactions
   async function fetchTransactions() {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
@@ -70,7 +55,6 @@ export default function MTDDashboard() {
     setTransactions(data || []);
   }
 
-  // 🔹 Check VAT lock
   async function checkLock() {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
@@ -81,7 +65,6 @@ export default function MTDDashboard() {
     setLocked(locked);
   }
 
-  // 🔹 Update category
   async function handleCategoryChange(row, category) {
     if (locked) return;
     await fetch("/api/mtd-dashboard", {
@@ -97,7 +80,6 @@ export default function MTDDashboard() {
     fetchTransactions();
   }
 
-  // 🔹 Update VAT
   async function handleVAT(row, rate) {
     if (locked) return;
     await fetch("/api/mtd-dashboard", {
@@ -113,18 +95,16 @@ export default function MTDDashboard() {
     fetchTransactions();
   }
 
-  // 🔹 Verify CIS
   async function verifyCIS(nino) {
-    const res = await fetch("/api/mtd-dashboard", {
+    const res = await fetch("/api/verify-cis", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verifyCIS", clientId, nino }),
+      body: JSON.stringify({ clientId, nino }),
     });
     const data = await res.json();
     setClient((p) => ({ ...p, cis_registered: data.registered }));
   }
 
-  // 🔹 HMRC payload generator
   function generateHMRCJson() {
     const vat = transactions.filter((t) => t.category === "vat");
     const income = transactions.filter((t) => t.category === "income");
@@ -134,8 +114,6 @@ export default function MTDDashboard() {
     return {
       vat: {
         period: vatPeriod,
-        netSales: vat.reduce((a, r) => a + Math.max(r.amount, 0), 0),
-        netPurchases: vat.reduce((a, r) => a + Math.abs(Math.min(r.amount, 0)), 0),
         vatDue: vat.reduce((a, r) => a + (r.vat_amount || 0), 0),
       },
       income: {
@@ -147,15 +125,9 @@ export default function MTDDashboard() {
       corporationTax: {
         profit: corp.reduce((a, r) => a + r.amount, 0),
       },
-      generatedAt: new Date().toISOString(),
     };
   }
 
-  const payload = generateHMRCJson();
-  const categories = ["vat", "income", "corp"];
-  if (client?.cis_registered) categories.push("cis");
-
-  // 🔹 Submit to HMRC
   async function submit(category) {
     const key = `${clientId}-${category}-${vatPeriod}`;
     setStatusMap((p) => ({ ...p, [category]: "Submitting..." }));
@@ -166,7 +138,7 @@ export default function MTDDashboard() {
       body: JSON.stringify({
         clientId,
         category,
-        payload,
+        payload: generateHMRCJson(),
         period: vatPeriod,
         idempotencyKey: key,
       }),
@@ -180,81 +152,58 @@ export default function MTDDashboard() {
   if (status === "loading") return <div>Loading…</div>;
   if (!session?.user) return null;
 
+  const categories = ["vat", "income", "corp"];
+  if (client?.cis_registered) categories.push("cis");
+
   return (
     <ResponsiveLayout currentPageName="MTD Dashboard">
-      <div className="p-6 space-y-6">
-        <h1 className="text-3xl font-bold">MTD Dashboard</h1>
+      <ResponsiveCard title="CIS Verification">
+        <input
+          defaultValue={client?.nino || ""}
+          onBlur={(e) => verifyCIS(e.target.value)}
+        />
+        {client?.cis_registered ? "Registered" : "Not Registered"}
+      </ResponsiveCard>
 
-        <ResponsiveCard title="CIS Verification">
-          <input
-            defaultValue={client?.nino || ""}
-            onBlur={(e) => verifyCIS(e.target.value)}
-            className="border p-1 mr-2"
-          />
-          {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
-        </ResponsiveCard>
+      <ResponsiveCard title="Transactions">
+        <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Cat"]}>
+          {transactions.map((r) => (
+            <tr key={r.id}>
+              <td>{r.date}</td>
+              <td>{r.description}</td>
+              <td>{r.amount}</td>
+              <td>
+                {r.category === "vat" ? (
+                  <input
+                    type="number"
+                    value={r.vat_rate || 0}
+                    onChange={(e) => handleVAT(r, +e.target.value)}
+                  />
+                ) : "-"}
+              </td>
+              <td>
+                <select
+                  value={r.category || ""}
+                  onChange={(e) => handleCategoryChange(r, e.target.value)}
+                >
+                  <option />
+                  {categories.map((c) => (
+                    <option key={c}>{c}</option>
+                  ))}
+                </select>
+              </td>
+            </tr>
+          ))}
+        </ResponsiveTable>
+      </ResponsiveCard>
 
-        <ResponsiveCard title="Transactions">
-          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Cat"]}>
-            {transactions.map((r) => (
-              <tr key={r.id}>
-                <td>{r.date}</td>
-                <td>{r.description}</td>
-                <td>{r.amount}</td>
-                <td>
-                  {r.category === "vat" ? (
-                    <input
-                      type="number"
-                      value={r.vat_rate || 0}
-                      onChange={(e) => handleVAT(r, +e.target.value)}
-                      className="w-16 border"
-                    />
-                  ) : "-"}
-                </td>
-                <td>
-                  <select
-                    value={r.category || ""}
-                    onChange={(e) => handleCategoryChange(r, e.target.value)}
-                  >
-                    <option />
-                    {categories.map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </ResponsiveTable>
-        </ResponsiveCard>
-
-        <ResponsiveCard title="Submit to HMRC">
-          <div className="flex gap-3">
-            {categories.map((c) => (
-              <button
-                key={c}
-                onClick={() => submit(c)}
-                className="bg-blue-600 text-white px-4 py-2 rounded"
-              >
-                Submit {c.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          <div className="mt-4">
-            {Object.entries(statusMap).map(([k, v]) => (
-              <p key={k}>
-                {k.toUpperCase()}: {v}
-              </p>
-            ))}
-          </div>
-        </ResponsiveCard>
-
-        <ResponsiveCard title="HMRC Payload">
-          <pre className="text-xs bg-gray-100 p-4">
-            {JSON.stringify(payload, null, 2)}
-          </pre>
-        </ResponsiveCard>
-      </div>
+      <ResponsiveCard title="Submit to HMRC">
+        {categories.map((c) => (
+          <button key={c} onClick={() => submit(c)}>
+            Submit {c.toUpperCase()}
+          </button>
+        ))}
+      </ResponsiveCard>
     </ResponsiveLayout>
   );
 }
