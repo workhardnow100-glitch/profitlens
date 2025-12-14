@@ -1,17 +1,11 @@
 // pages/mtd-dashboard.js
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
 
 export default function MTDDashboard() {
   const { data: session, status } = useSession();
@@ -54,70 +48,83 @@ export default function MTDDashboard() {
     checkLock();
   }, [clientId]);
 
+  // 🔹 Fetch client
   async function fetchClient() {
-    const { data } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("id", clientId)
-      .single();
+    const res = await fetch("/api/mtd-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "fetchClient", clientId }),
+    });
+    const { data } = await res.json();
     setClient(data);
   }
 
+  // 🔹 Fetch transactions
   async function fetchTransactions() {
-    const { data } = await supabase
-      .from("transactions")
-      .select("*")
-      .eq("client_id", clientId)
-      .order("date", { ascending: false });
+    const res = await fetch("/api/mtd-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "fetchTransactions", clientId }),
+    });
+    const { data } = await res.json();
     setTransactions(data || []);
   }
 
+  // 🔹 Check VAT lock
   async function checkLock() {
-    const { data } = await supabase
-      .from("vat_periods")
-      .select("id, locked, submitted")
-      .eq("client_id", clientId)
-      .eq("period_start", `${vatPeriod}-01`)
-      .maybeSingle();
-
-    if (data) {
-      setLocked(data.locked || data.submitted);
-    }
-  }
-
-  async function handleCategoryChange(row, category) {
-    if (locked) return;
-    const update = { category };
-    if (category !== "vat") {
-      update.vat_rate = null;
-      update.vat_amount = null;
-    }
-    await supabase.from("transactions").update(update).eq("id", row.id);
-    fetchTransactions();
-  }
-
-  async function handleVAT(row, rate) {
-    if (locked) return;
-    await supabase
-      .from("transactions")
-      .update({
-        vat_rate: rate,
-        vat_amount: row.amount * (rate / 100),
-      })
-      .eq("id", row.id);
-    fetchTransactions();
-  }
-
-  async function verifyCIS(nino) {
-    const res = await fetch("/api/verify-cis", {
+    const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId, nino }),
+      body: JSON.stringify({ action: "checkLock", clientId }),
+    });
+    const { locked } = await res.json();
+    setLocked(locked);
+  }
+
+  // 🔹 Update category
+  async function handleCategoryChange(row, category) {
+    if (locked) return;
+    await fetch("/api/mtd-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "updateCategory",
+        clientId,
+        rowId: row.id,
+        category,
+      }),
+    });
+    fetchTransactions();
+  }
+
+  // 🔹 Update VAT
+  async function handleVAT(row, rate) {
+    if (locked) return;
+    await fetch("/api/mtd-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "updateVAT",
+        clientId,
+        rowId: row.id,
+        vatRate: rate,
+      }),
+    });
+    fetchTransactions();
+  }
+
+  // 🔹 Verify CIS
+  async function verifyCIS(nino) {
+    const res = await fetch("/api/mtd-dashboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "verifyCIS", clientId, nino }),
     });
     const data = await res.json();
     setClient((p) => ({ ...p, cis_registered: data.registered }));
   }
 
+  // 🔹 HMRC payload generator
   function generateHMRCJson() {
     const vat = transactions.filter((t) => t.category === "vat");
     const income = transactions.filter((t) => t.category === "income");
@@ -148,6 +155,7 @@ export default function MTDDashboard() {
   const categories = ["vat", "income", "corp"];
   if (client?.cis_registered) categories.push("cis");
 
+  // 🔹 Submit to HMRC
   async function submit(category) {
     const key = `${clientId}-${category}-${vatPeriod}`;
     setStatusMap((p) => ({ ...p, [category]: "Submitting..." }));
