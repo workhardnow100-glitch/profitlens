@@ -15,7 +15,7 @@ export default function MtdDashboard() {
     const fetchSummary = async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/mtd-dashboards", {
+        const res = await fetch("/api/mtd-dashboard", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
