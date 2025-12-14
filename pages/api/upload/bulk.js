@@ -57,6 +57,7 @@ function parseFileBuffer(filename, buffer) {
   throw new Error(`Unsupported file type: ${ext}`);
 }
 
+// 🔎 Descriptive category inference (for reports/forecasts)
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
   const desc = description?.trim() || "";
@@ -106,6 +107,16 @@ function inferCategory(type = "", description = "") {
   }
 }
 
+// ✅ Canonical MTD category mapping
+function mapToMtdCategory(rawCategory, description = "") {
+  const desc = (description || "").toUpperCase();
+  if (/VAT|HMRC/.test(desc) || rawCategory === "Tax Payment") return "vat";
+  if (/CONSTRUC|CIS/.test(desc) || rawCategory === "Subcontractor Payment") return "cis";
+  if (/SERVICE CHARGE|INTEREST|BANK FEE/.test(desc) || rawCategory === "Bank Fees") return "corp";
+  if (/PAYMENT|INVOICE|CLIENT|SALES|REVENUE/.test(desc) || rawCategory === "Payment") return "income";
+  return "other";
+}
+
 function getValue(row, keys = []) {
   for (const k of keys) {
     if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
@@ -117,16 +128,13 @@ function getValue(row, keys = []) {
 
 function detectReversalPairs(rows) {
   const pairs = new Map();
-
   rows.forEach((row, i) => {
     const desc = String(getValue(row, ["Transaction Description", "Description", "Details"]) || "").toUpperCase();
     const isReturned = /RETURNED\s*DD/.test(desc);
     const amount =
       toNumber(getValue(row, ["Credit Amount", "Credit", "Cr"])) ||
       toNumber(getValue(row, ["Debit Amount", "Debit", "Dr"]));
-
     if (!isReturned || amount === null) return;
-
     const matchIndex = rows.findIndex((other, j) => {
       if (i === j) return false;
       const otherDesc = String(getValue(other, ["Transaction Description", "Description", "Details"]) || "").toUpperCase();
@@ -138,14 +146,12 @@ function detectReversalPairs(rows) {
         !/RETURNED\s*DD/.test(otherDesc)
       );
     });
-
     if (matchIndex !== -1) {
       const groupId = crypto.randomUUID();
       pairs.set(i, groupId);
       pairs.set(matchIndex, groupId);
     }
   });
-
   return pairs;
 }
 
@@ -170,7 +176,10 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const type = String(getValue(row, ["Transaction Type", "Type", "Code"]) || "").trim().toUpperCase();
   const account_number = String(getValue(row, ["Account Number", "Account"]) || "").trim();
   const sort_code = String(getValue(row, ["Sort Code", "SortCode"]) || "").trim();
-   const category = inferCategory(type, description);
+
+  const descriptiveCategory = inferCategory(type, description);
+  const canonicalCategory = mapToMtdCategory(descriptiveCategory, description);
+
   const reversal_group_id = reversalPairs?.get(i) || null;
   const is_reversal = !!reversal_group_id;
 
@@ -181,7 +190,8 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     debit_amount: debit ?? null,
     credit_amount: credit ?? null,
     balance: balance ?? null,
-    category: category || null,
+    category: canonicalCategory,          // ✅ canonical for MTD dashboard
+    hmrc_category_id: descriptiveCategory, // ✅ keep descriptive for reports
     type: type || null,
     account_number: account_number || null,
     sort_code: sort_code || null,
@@ -197,7 +207,7 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
 function groupByCategory(rows) {
   const map = {};
   for (const r of rows) {
-    const cat = r.category || "Uncategorized";
+    const cat = r.hmrc_category_id || "Uncategorized";
     const amt = r.amount ?? 0;
     map[cat] = (map[cat] || 0) + amt;
   }
@@ -227,7 +237,6 @@ export default async function handler(req, res) {
       const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
       if (!email) return res.status(400).json({ error: "Missing email" });
 
-      // ✅ PATCH: select default_client_id instead of client_id
       const { data: user, error: userErr } = await supabaseAdmin
         .from("app_users")
         .select("id, default_client_id")
@@ -238,7 +247,7 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const clientId = user.default_client_id;  // ✅ correct UUID
+      const clientId = user.default_client_id;
       const userId = user.id;
 
       const uploaded = Array.isArray(files.files) ? files.files : [files.files].filter(Boolean);
@@ -298,14 +307,12 @@ export default async function handler(req, res) {
 
           const txPayload = normalized.map((r) => ({
             ...r,
-            category: r.category?.trim() || "Uncategorized",
             statement_id: statement.id,
           }));
 
           const { error: txErr } = await supabaseAdmin.from("transactions").insert(txPayload);
           if (txErr) throw new Error(`Transaction insert failed: ${txErr.message}`);
 
-          // ✅ exclude reversals from revenue/expenses
           const revenue = txPayload
             .filter((r) => r.amount > 0 && !r.is_reversal)
             .reduce((s, r) => s + r.amount, 0);
@@ -377,7 +384,7 @@ export default async function handler(req, res) {
             details: `File: ${originalName}, Transactions: ${txPayload.length}, Revenue: ${revenue}, Expenses: ${expenses}, Net: ${netProfit}`,
           }]);
 
-          results.push({
+                    results.push({
             file: originalName,
             storage_path: storagePath,
             statement_id: statement.id,
