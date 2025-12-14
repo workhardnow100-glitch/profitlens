@@ -14,6 +14,7 @@ export default function MTDDashboard() {
   const [client, setClient] = useState(null);
   const [statusMap, setStatusMap] = useState({});
   const [locked, setLocked] = useState(false);
+  const [stats, setStats] = useState([]);
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
 
@@ -36,10 +37,7 @@ export default function MTDDashboard() {
   // 🔹 Fetch client info
   useEffect(() => {
     async function fetchClient() {
-      const res = await fetch("/api/clients", { // or your existing clients API
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
+      const res = await fetch("/api/clients"); // or your existing clients API
       const data = await res.json();
       setClient(data || {});
     }
@@ -58,6 +56,7 @@ export default function MTDDashboard() {
       });
       const { data } = await res.json();
       setTransactions(data || []);
+      generateStats(data || []);
     }
 
     async function checkLock() {
@@ -74,6 +73,24 @@ export default function MTDDashboard() {
     checkLock();
   }, [session]);
 
+  // 🔹 Generate top stats
+  function generateStats(txList) {
+    const vatTotal = txList.filter(t => t.category === "vat").reduce((a,r)=>a+(r.vat_amount||0),0);
+    const incomeTotal = txList.filter(t => t.category === "income").reduce((a,r)=>a+r.amount,0);
+    const corpTotal = txList.filter(t => t.category === "corp").reduce((a,r)=>a+r.amount,0);
+    const cisTotal = txList.filter(t => t.category === "cis").reduce((a,r)=>a+r.amount,0);
+
+    const newStats = [
+      { label: "VAT Total", value: vatTotal.toFixed(2) },
+      { label: "Income Total", value: incomeTotal.toFixed(2) },
+      { label: "Corporation Tax Total", value: corpTotal.toFixed(2) },
+    ];
+
+    if (client?.cis_registered) newStats.push({ label: "CIS Deducted", value: cisTotal.toFixed(2) });
+
+    setStats(newStats);
+  }
+
   // 🔹 Update category
   async function handleCategoryChange(row, category) {
     if (locked) return;
@@ -83,6 +100,7 @@ export default function MTDDashboard() {
       body: JSON.stringify({ action: "updateCategory", rowId: row.id, category }),
     });
     setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, category } : tx));
+    generateStats(transactions);
   }
 
   // 🔹 Update VAT
@@ -93,7 +111,8 @@ export default function MTDDashboard() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "updateVAT", rowId: row.id, vatRate: rate }),
     });
-    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, vat_rate: rate, vat_amount: tx.amount * (rate/100) } : tx));
+    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, vat_rate: rate, vat_amount: tx.amount*(rate/100) } : tx));
+    generateStats(transactions);
   }
 
   // 🔹 Verify CIS
@@ -105,6 +124,7 @@ export default function MTDDashboard() {
     });
     const data = await res.json();
     setClient(prev => ({ ...prev, cis_registered: data.registered }));
+    generateStats(transactions);
   }
 
   // 🔹 HMRC payload generator
@@ -115,21 +135,16 @@ export default function MTDDashboard() {
     const cis = transactions.filter(t => t.category === "cis");
 
     return {
-      vat: {
-        period: vatPeriod,
-        netSales: vat.reduce((a, r) => a + Math.max(r.amount, 0), 0),
-        netPurchases: vat.reduce((a, r) => a + Math.abs(Math.min(r.amount, 0)), 0),
-        vatDue: vat.reduce((a, r) => a + (r.vat_amount || 0), 0),
-      },
-      income: { income: income.reduce((a, r) => a + r.amount, 0) },
-      cis: { deducted: cis.reduce((a, r) => a + r.amount, 0) },
-      corporationTax: { profit: corp.reduce((a, r) => a + r.amount, 0) },
+      vat: { period: vatPeriod, netSales: vat.reduce((a,r)=>a+Math.max(r.amount,0),0), netPurchases: vat.reduce((a,r)=>a+Math.abs(Math.min(r.amount,0)),0), vatDue: vat.reduce((a,r)=>a+(r.vat_amount||0),0) },
+      income: { income: income.reduce((a,r)=>a+r.amount,0) },
+      cis: { deducted: cis.reduce((a,r)=>a+r.amount,0) },
+      corporationTax: { profit: corp.reduce((a,r)=>a+r.amount,0) },
       generatedAt: new Date().toISOString(),
     };
   }
 
   const payload = generateHMRCJson();
-  const categories = ["vat", "income", "corp"];
+  const categories = ["vat","income","corp"];
   if (client?.cis_registered) categories.push("cis");
 
   // 🔹 Submit to HMRC
@@ -155,6 +170,16 @@ export default function MTDDashboard() {
     <ResponsiveLayout currentPageName="MTD Dashboard">
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">MTD Dashboard</h1>
+
+        {/* Top Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {stats.map(s => (
+            <ResponsiveCard key={s.label}>
+              <div className="text-slate-500">{s.label}</div>
+              <div className="text-2xl font-bold">£{s.value}</div>
+            </ResponsiveCard>
+          ))}
+        </div>
 
         <ResponsiveCard title="CIS Verification">
           <input
