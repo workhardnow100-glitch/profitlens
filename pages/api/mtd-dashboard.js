@@ -3,36 +3,24 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-function inferCategory(type = "", description = "") {
-  const normalized = type?.trim().toUpperCase() || "";
-  if (normalized === "FPO") return "Payment";
-  if (normalized === "TFR") return "Transfer";
-  if (normalized === "CHG") return "Bank Charges";
-  if (normalized === "DEB") return "Debit";
-  if (normalized === "DD") return "Direct Debit";
-  if (normalized === "SO") return "Standing Order";
-  if (normalized === "INT") return "Interest";
-
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Utilities" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
-  ];
-
-  for (const rule of rules) if (rule.regex.test(description)) return rule.category;
-  return "Other";
-}
-
+// --- Helpers ---
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+// HMRC-aligned category inference
+function inferCategory(type = "", description = "") {
+  const desc = (description || "").toUpperCase();
+
+  if (/SERVICE CHARGES|INTEREST|COMPANIESHOUSE|BANK/i.test(desc)) return "corp";
+  if (/CONSTRUC|CIS/i.test(desc)) return "cis";
+  if (/VAT|HMRC/i.test(desc)) return "vat";
+  if (/PAYMENT|CREDIT|INVOICE|CLIENT|SALES|REVENUE/i.test(desc)) return "income";
+
+  return "other";
+}
+
+// Check if VAT period is locked/submitted
 async function isVatLocked(clientId) {
   const vatPeriod = new Date().toISOString().slice(0, 7);
   const { data, error } = await supabaseAdmin
@@ -52,7 +40,7 @@ export default async function handler(req, res) {
 
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const { action, clientId, rowId, category, vatRate, nino } = req.body;
+  const { action, clientId, rowId, category, vatRate, nino, vatNumber } = req.body;
   if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
@@ -105,7 +93,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true });
       }
 
-      // Update VAT (validate rate, compute amount with absolute, round to 2dp)
+      // Update VAT (validate rate, compute amount)
       case "updateVAT": {
         const locked = await isVatLocked(clientId);
         if (locked) return res.status(423).json({ error: "VAT period locked or submitted" });
@@ -149,6 +137,17 @@ export default async function handler(req, res) {
       case "checkLock": {
         const locked = await isVatLocked(clientId);
         return res.status(200).json({ locked });
+      }
+
+      // Update VAT number for client
+      case "updateVATNumber": {
+        if (!vatNumber) return res.status(400).json({ error: "Missing vatNumber" });
+        const { error } = await supabaseAdmin
+          .from("clients")
+          .update({ vat_number: vatNumber })
+          .eq("id", clientId);
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ success: true });
       }
 
       default:

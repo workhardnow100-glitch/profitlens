@@ -15,10 +15,6 @@ function toNumber(val) {
   const n = Number(cleaned);
   return isNaN(n) ? 0 : n;
 }
-function toRate(val) {
-  const n = Number(val);
-  return isNaN(n) ? 0 : n;
-}
 
 export default function MTDDashboard() {
   const { data: session, status } = useSession();
@@ -29,10 +25,13 @@ export default function MTDDashboard() {
   const [statusMap, setStatusMap] = useState({});
   const [locked, setLocked] = useState(false);
   const [stats, setStats] = useState([]);
+  const [periodType, setPeriodType] = useState("monthly");
+  const [vatNumber, setVatNumber] = useState("");
 
-  const vatPeriod = new Date().toISOString().slice(0, 7);
-  const categories = ["income", "corp", "cis", "other"];
-  const allowedVatRates = [0, 5, 20];
+  const vatPeriod =
+    periodType === "monthly"
+      ? new Date().toISOString().slice(0, 7) // YYYY-MM
+      : `${new Date().getFullYear()}-Q${Math.floor(new Date().getMonth() / 3) + 1}`;
 
   // Access control
   useEffect(() => {
@@ -52,6 +51,7 @@ export default function MTDDashboard() {
       const res = await fetch("/api/clients");
       const data = await res.json();
       setClient(data || {});
+      setVatNumber(data?.vatNumber || "");
     }
     fetchClient();
   }, []);
@@ -67,14 +67,11 @@ export default function MTDDashboard() {
         body: JSON.stringify({ action: "fetchTransactions", clientId: session.user.clientId }),
       });
       const { data } = await res.json();
-
       const rows = (data || []).map(tx => ({
         ...tx,
         amount: toNumber(tx.amount),
-        vat_rate: tx.vat_rate != null ? toRate(tx.vat_rate) : undefined,
-        vat_amount: tx.vat_amount != null ? toNumber(tx.vat_amount) : undefined,
+        vat_amount: tx.vat_amount != null ? toNumber(tx.vat_amount) : 0,
       }));
-
       setTransactions(rows);
       generateStats(rows);
     }
@@ -95,74 +92,35 @@ export default function MTDDashboard() {
 
   // Generate top stats
   function generateStats(txList) {
-    const vatTotal = txList.filter(t => t.category === "vat").reduce((a,r)=>a+(toNumber(r.vat_amount)||0),0);
-    const incomeTotal = txList.filter(t => t.category === "income").reduce((a,r)=>a+toNumber(r.amount),0);
-    const corpTotal = txList.filter(t => t.category === "corp").reduce((a,r)=>a+toNumber(r.amount),0);
-    const cisTotal = txList.filter(t => t.category === "cis").reduce((a,r)=>a+toNumber(r.amount),0);
+    const vatTotal = txList.reduce((a, r) => a + (r.vat_amount || 0), 0);
+    const incomeTotal = txList.filter(t => t.category === "income").reduce((a, r) => a + toNumber(r.amount), 0);
+    const corpTotal = txList.filter(t => t.category === "corp").reduce((a, r) => a + toNumber(r.amount), 0);
+    const cisTotal = txList.filter(t => t.category === "cis").reduce((a, r) => a + toNumber(r.amount), 0);
 
     const newStats = [
       { label: "VAT Total", value: vatTotal.toFixed(2) },
       { label: "Income Total", value: incomeTotal.toFixed(2) },
       { label: "Corporation Tax Total", value: corpTotal.toFixed(2) },
+      { label: "CIS Deducted", value: cisTotal.toFixed(2) },
     ];
-    if (client?.cis_registered) newStats.push({ label: "CIS Deducted", value: cisTotal.toFixed(2) });
     setStats(newStats);
-  }
-
-  // Update category
-  function handleCategoryChange(rowId, category) {
-    if (locked) return;
-    const updatedTx = transactions.map(tx => tx.id === rowId ? { ...tx, category } : tx);
-    setTransactions(updatedTx);
-    generateStats(updatedTx);
-  }
-
-  // Update VAT
-  function handleVAT(rowId, rate) {
-    if (locked) return;
-    const numericRate = toRate(rate);
-    if (!allowedVatRates.includes(numericRate)) {
-      alert("Invalid VAT rate. Allowed: 0, 5, 20");
-      return;
-    }
-    const updatedTx = transactions.map(tx => {
-      if (tx.id !== rowId) return tx;
-      const amt = toNumber(tx.amount);
-      const vatAmt = parseFloat((Math.abs(amt) * (numericRate / 100)).toFixed(2));
-      return { ...tx, vat_rate: numericRate, vat_amount: vatAmt, category: "vat" };
-    });
-    setTransactions(updatedTx);
-    generateStats(updatedTx);
-  }
-
-  // Verify CIS
-  async function verifyCIS(nino) {
-    const res = await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verifyCIS", clientId: session.user.clientId, nino }),
-    });
-    const data = await res.json();
-    setClient(prev => ({ ...prev, cis_registered: data.registered }));
-    generateStats(transactions);
   }
 
   // HMRC payload generator
   function generateHMRCJson() {
-    const vat = transactions.filter(t => t.category === "vat");
     const income = transactions.filter(t => t.category === "income");
     const corp = transactions.filter(t => t.category === "corp");
     const cis = transactions.filter(t => t.category === "cis");
 
-    const netSales = vat.reduce((a,r)=>a+Math.max(toNumber(r.amount),0),0);
-    const netPurchases = vat.reduce((a,r)=>a+Math.abs(Math.min(toNumber(r.amount),0)),0);
-    const vatDue = vat.reduce((a,r)=>a+(toNumber(r.vat_amount)||0),0);
-
     return {
-      vat: { period: vatPeriod, netSales, netPurchases, vatDue },
-      income: { income: income.reduce((a,r)=>a+toNumber(r.amount),0) },
-      cis: { deducted: cis.reduce((a,r)=>a+toNumber(r.amount),0) },
-      corporationTax: { profit: corp.reduce((a,r)=>a+toNumber(r.amount),0) },
+      vat: {
+        period: vatPeriod,
+        vatDue: transactions.reduce((a, r) => a + (r.vat_amount || 0), 0),
+      },
+      income: { income: income.reduce((a, r) => a + toNumber(r.amount), 0) },
+      cis: { deducted: cis.reduce((a, r) => a + toNumber(r.amount), 0) },
+      corporationTax: { profit: income.reduce((a, r) => a + toNumber(r.amount), 0) + corp.reduce((a, r) => a + toNumber(r.amount), 0) },
+      vatNumber,
       generatedAt: new Date().toISOString(),
     };
   }
@@ -170,10 +128,10 @@ export default function MTDDashboard() {
   const payload = generateHMRCJson();
 
   // Totals
-  const totalRevenue = useMemo(() => transactions.filter(t=>t.category==="income").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
-  const totalVAT = useMemo(() => transactions.reduce((sum,t)=>sum+(toNumber(t.vat_amount)||0),0), [transactions]);
-  const totalCorp = useMemo(() => transactions.filter(t=>t.category==="corp").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
-  const totalCIS = useMemo(() => transactions.filter(t=>t.category==="cis").reduce((sum,t)=>sum+toNumber(t.amount),0), [transactions]);
+  const totalRevenue = useMemo(() => transactions.filter(t => t.category === "income").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
+  const totalVAT = useMemo(() => transactions.reduce((sum, t) => sum + (toNumber(t.vat_amount) || 0), 0), [transactions]);
+  const totalCorp = useMemo(() => transactions.filter(t => t.category === "corp").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
+  const totalCIS = useMemo(() => transactions.filter(t => t.category === "cis").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
   const netProfit = totalRevenue - totalVAT - totalCorp;
 
   if (status === "loading") return <div>Loading…</div>;
@@ -183,6 +141,38 @@ export default function MTDDashboard() {
     <ResponsiveLayout currentPageName="MTD Dashboard">
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">MTD Dashboard</h1>
+
+        {/* Period Selection */}
+        <ResponsiveCard title="Period Selection">
+          <select value={periodType} onChange={e => setPeriodType(e.target.value)} className="border rounded px-2 py-1">
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+          </select>
+        </ResponsiveCard>
+
+        {/* VAT Number */}
+        <ResponsiveCard title="VAT Number">
+          <input
+            type="text"
+            value={vatNumber}
+            onChange={e => setVatNumber(e.target.value)}
+            className="border p-1 mr-2"
+            placeholder="Enter VAT Number"
+          />
+          <button
+            onClick={async () => {
+              await fetch("/api/clients", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ clientId: client?.id, vatNumber }),
+              });
+              alert("VAT number saved");
+            }}
+            className="bg-green-600 text-white px-3 py-1 rounded"
+          >
+            Save VAT Number
+          </button>
+        </ResponsiveCard>
 
         {/* Top Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -194,49 +184,28 @@ export default function MTDDashboard() {
           ))}
         </div>
 
-        {/* CIS Verification */}
-        <ResponsiveCard title="CIS Verification">
-          <input
-            defaultValue={client?.nino || ""}
-            onBlur={e => verifyCIS(e.target.value)}
-            className="border p-1 mr-2"
-          />
-                    {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
-        </ResponsiveCard>
-
         {/* Transactions Table */}
         <ResponsiveCard title="Transactions">
-          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Category"]}>
+          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT", "Category", "CIS"]}>
             {transactions.map(tx => (
               <tr key={tx.id}>
                 <td>{tx.date}</td>
                 <td>{tx.description}</td>
                 <td>£{toNumber(tx.amount).toFixed(2)}</td>
+                <td>{tx.vat_rate ? `${tx.vat_rate}% (£${(tx.vat_amount || 0).toFixed(2)})` : "-"}</td>
+                <td>{tx.category?.toUpperCase() || "Other"}</td>
                 <td>
-                  <select
-                    value={tx.vat_rate ?? ""}
-                    onChange={e => handleVAT(tx.id, e.target.value)}
-                    disabled={tx.category !== "vat"}
-                    className="border rounded px-1 py-0.5 w-full"
-                  >
-                    <option value="">-</option>
-                    <option value="0">0%</option>
-                    <option value="5">5%</option>
-                    <option value="20">20%</option>
-                  </select>
-                </td>
-                <td>
-                  <select
-                    value={tx.category || ""}
-                    onChange={e => handleCategoryChange(tx.id, e.target.value)}
-                    className="border rounded px-1 py-0.5 w-full"
-                  >
-                    <option value="">Select</option>
-                    <option value="income">Income</option>
-                    <option value="corp">Corporation Tax</option>
-                    <option value="cis">CIS</option>
-                    <option value="other">Other</option>
-                  </select>
+                  <input
+                    type="checkbox"
+                    checked={tx.category === "cis"}
+                    onChange={e => {
+                      const updatedTx = transactions.map(t =>
+                        t.id === tx.id ? { ...t, category: e.target.checked ? "cis" : t.category } : t
+                      );
+                      setTransactions(updatedTx);
+                      generateStats(updatedTx);
+                    }}
+                  />
                 </td>
               </tr>
             ))}
@@ -267,7 +236,18 @@ export default function MTDDashboard() {
             {["vat","income","corp","cis"].map(c => (
               <button
                 key={c}
-                onClick={() => submit(c)}
+                onClick={async () => {
+                  const key = `${client?.id}-${c}-${vatPeriod}`;
+                  setStatusMap(prev => ({ ...prev, [c]: "Submitting..." }));
+                  const res = await fetch("/api/submit-mtd", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientId: client?.id, category: c, payload, period: vatPeriod, idempotencyKey: key }),
+                  });
+                  const data = await res.json();
+                  setStatusMap(prev => ({ ...prev, [c]: data.success ? "Success" : "Failed" }));
+                  if (c === "vat" && data.success) setLocked(true);
+                }}
                 className="bg-blue-600 text-white px-4 py-2 rounded"
               >
                 Submit {c.toUpperCase()}
