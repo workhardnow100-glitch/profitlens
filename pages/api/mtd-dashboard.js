@@ -4,7 +4,7 @@ import path from "path";
 import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "xlsx";
-import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { supabaseAdmin } from "../../lib/supabase-admin";
 
 export const config = {
   api: { bodyParser: false },
