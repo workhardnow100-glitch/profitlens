@@ -21,6 +21,14 @@ export default async function handler(req, res) {
     }
 
     if (existing) {
+      // Audit duplicate attempt
+      await supabase.from("audit").insert({
+        client_id: clientId,
+        actor_email: req.headers["x-user-email"] || "unknown",
+        action: "mtd_duplicate_submission",
+        details: `Duplicate submission for ${category} period ${period}`,
+      });
+
       return res.json({ success: true, duplicate: true });
     }
 
@@ -31,15 +39,39 @@ export default async function handler(req, res) {
       payload,
       period,
       idempotency_key: idempotencyKey,
-      status: "success", // ✅ mark as success if insert worked
+      status: "success",
     });
 
     if (insertError) {
+      // Audit failure
+      await supabase.from("audit").insert({
+        client_id: clientId,
+        actor_email: req.headers["x-user-email"] || "unknown",
+        action: "mtd_submission_failed",
+        details: `Insert failed: ${insertError.message}`,
+      });
+
       return res.status(500).json({ success: false, error: insertError.message });
     }
 
+    // Audit success
+    await supabase.from("audit").insert({
+      client_id: clientId,
+      actor_email: req.headers["x-user-email"] || "unknown",
+      action: "mtd_submission_success",
+      details: `Submitted ${category} for period ${period}`,
+    });
+
     return res.json({ success: true });
   } catch (err) {
+    // Audit unexpected error
+    await supabase.from("audit").insert({
+      client_id: clientId,
+      actor_email: req.headers["x-user-email"] || "unknown",
+      action: "mtd_submission_error",
+      details: `Unexpected error: ${err.message}`,
+    });
+
     return res.status(500).json({ success: false, error: err.message });
   }
 }
