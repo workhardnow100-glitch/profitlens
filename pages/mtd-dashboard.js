@@ -1,5 +1,4 @@
-// pages/mtd-dashboard.js
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
@@ -12,6 +11,7 @@ export default function MTDDashboard() {
   const router = useRouter();
 
   const [transactions, setTransactions] = useState([]);
+  const [totals, setTotals] = useState({ vatDue: 0, income: 0, corp: 0 });
   const [locked, setLocked] = useState(false);
   const [statusMap, setStatusMap] = useState({});
 
@@ -43,8 +43,9 @@ export default function MTDDashboard() {
         })
       });
 
-      const { data } = await res.json();
+      const { data, totals } = await res.json();
       setTransactions(data || []);
+      setTotals(totals || { vatDue: 0, income: 0, corp: 0 });
 
       const lockRes = await fetch("/api/mtd-dashboard", {
         method: "POST",
@@ -62,27 +63,10 @@ export default function MTDDashboard() {
     load();
   }, [session]);
 
-  // 📊 Derived totals (authoritative)
-  const totals = useMemo(() => {
-    const vatTx = transactions.filter(t => t.category === "vat");
-    const income = transactions.filter(t => t.category === "income");
-    const corp = transactions.filter(t => t.category === "corp");
-
-    return {
-      vatDue: vatTx.reduce((s,t)=>s+t.vat_amount,0),
-      netSales: vatTx.filter(t=>t.amount>0).reduce((s,t)=>s+t.amount,0),
-      netPurchases: vatTx.filter(t=>t.amount<0).reduce((s,t)=>s+Math.abs(t.amount),0),
-      income: income.reduce((s,t)=>s+t.amount,0),
-      corp: corp.reduce((s,t)=>s+t.amount,0),
-    };
-  }, [transactions]);
-
-  // 🧮 HMRC payload
+  // 🧮 HMRC payload (now uses API totals)
   const hmrcPayload = {
     vat: {
       period: vatPeriod,
-      netSales: totals.netSales,
-      netPurchases: totals.netPurchases,
       vatDue: totals.vatDue,
     },
     income: { income: totals.income },
@@ -114,7 +98,6 @@ export default function MTDDashboard() {
   async function submitVAT() {
     setStatusMap({ vat: "Submitting…" });
 
-    // 🔐 Lock VAT period
     await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

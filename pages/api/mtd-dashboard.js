@@ -26,7 +26,7 @@ export default async function handler(req, res) {
       case "fetchTransactions": {
         const rows = await getTransactionsByClient(clientId);
 
-        // 🔹 Server-side VAT calculation (authoritative)
+        // 🔹 Server-side VAT calculation (authoritative per row)
         const data = rows.map(tx => {
           if (tx.category === "vat") {
             const rate = tx.vat_rate ?? 20;
@@ -39,7 +39,27 @@ export default async function handler(req, res) {
           return { ...tx, vat_amount: 0 };
         });
 
-        return res.json({ data });
+        // 🔹 Totals calculated server-side
+        const vatDue = data
+          .filter(t => t.category === "vat")
+          .reduce((s, t) => s + t.vat_amount, 0);
+
+        const incomeTotal = data
+          .filter(t => t.category === "income")
+          .reduce((s, t) => s + t.amount, 0);
+
+        const corpProfit = data
+          .filter(t => t.category === "corp")
+          .reduce((s, t) => s + t.amount, 0);
+
+        return res.json({
+          data,
+          totals: {
+            vatDue,
+            income: incomeTotal,
+            corp: corpProfit
+          }
+        });
       }
 
       case "updateCategory": {
