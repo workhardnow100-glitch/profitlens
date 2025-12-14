@@ -7,7 +7,12 @@ import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 
-// --- Numeric sanitizers ---
+const API = {
+  DASH: "/api/mtd-dashboards",
+  SUBMIT: "/api/submit-mtd",
+  CLIENT: "/api/clients",
+};
+
 function toNumber(val) {
   if (val == null) return 0;
   if (typeof val === "number") return val;
@@ -33,25 +38,21 @@ export default function MTDDashboard() {
       ? new Date().toISOString().slice(0, 7) // YYYY-MM
       : `${new Date().getFullYear()}-Q${Math.floor(new Date().getMonth() / 3) + 1}`;
 
-  // Access control
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) {
       router.replace("/login");
       return;
     }
-    const isAdmin = session.user.role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-    if (!(isAdmin || isSubscribedOrTrial)) router.replace("/upgrade");
   }, [session, status, router]);
 
-  // Fetch client info
+  // Fetch client (and existing VAT number)
   useEffect(() => {
     async function fetchClient() {
-      const res = await fetch("/api/clients");
+      const res = await fetch(API.CLIENT);
       const data = await res.json();
       setClient(data || {});
-      setVatNumber(data?.vatNumber || "");
+      setVatNumber(data?.vat_number || "");
     }
     fetchClient();
   }, []);
@@ -61,7 +62,7 @@ export default function MTDDashboard() {
     if (!session?.user) return;
 
     async function fetchTransactions() {
-      const res = await fetch("/api/mtd-dashboard", {
+      const res = await fetch(API.DASH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "fetchTransactions", clientId: session.user.clientId }),
@@ -77,7 +78,7 @@ export default function MTDDashboard() {
     }
 
     async function checkLock() {
-      const res = await fetch("/api/mtd-dashboard", {
+      const res = await fetch(API.DASH, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "checkLock", clientId: session.user.clientId }),
@@ -90,7 +91,6 @@ export default function MTDDashboard() {
     checkLock();
   }, [session]);
 
-  // Generate top stats
   function generateStats(txList) {
     const vatTotal = txList.reduce((a, r) => a + (r.vat_amount || 0), 0);
     const incomeTotal = txList.filter(t => t.category === "income").reduce((a, r) => a + toNumber(r.amount), 0);
@@ -100,38 +100,51 @@ export default function MTDDashboard() {
     const newStats = [
       { label: "VAT Total", value: vatTotal.toFixed(2) },
       { label: "Income Total", value: incomeTotal.toFixed(2) },
-      { label: "Corporation Tax Total", value: corpTotal.toFixed(2) },
+      { label: "Corporation Tax Profit", value: (incomeTotal + corpTotal).toFixed(2) },
       { label: "CIS Deducted", value: cisTotal.toFixed(2) },
     ];
     setStats(newStats);
   }
 
-  // HMRC payload generator
-  function generateHMRCJson() {
-    const income = transactions.filter(t => t.category === "income");
-    const corp = transactions.filter(t => t.category === "corp");
-    const cis = transactions.filter(t => t.category === "cis");
+  // Payloads for separate HMRC streams
+  function generatePayloads() {
+    const incomeRows = transactions.filter(t => t.category === "income");
+    const corpRows = transactions.filter(t => t.category === "corp");
+    const cisRows = transactions.filter(t => t.category === "cis");
+
+    const totalIncome = incomeRows.reduce((a, r) => a + toNumber(r.amount), 0);
+    const totalCorp = corpRows.reduce((a, r) => a + toNumber(r.amount), 0);
+    const totalCIS = cisRows.reduce((a, r) => a + toNumber(r.amount), 0);
+    const totalVAT = transactions.reduce((a, r) => a + (r.vat_amount || 0), 0);
+    const profit = totalIncome + totalCorp;
 
     return {
-      vat: {
-        period: vatPeriod,
-        vatDue: transactions.reduce((a, r) => a + (r.vat_amount || 0), 0),
-      },
-      income: { income: income.reduce((a, r) => a + toNumber(r.amount), 0) },
-      cis: { deducted: cis.reduce((a, r) => a + toNumber(r.amount), 0) },
-      corporationTax: { profit: income.reduce((a, r) => a + toNumber(r.amount), 0) + corp.reduce((a, r) => a + toNumber(r.amount), 0) },
-      vatNumber,
+      vat: { period: vatPeriod, vatNumber, vatDue: totalVAT },
+      cis: { period: vatPeriod, deducted: totalCIS },
+      corporationTax: { period: vatPeriod, profit },
+      selfAssessment: { period: vatPeriod, income: totalIncome, profit },
       generatedAt: new Date().toISOString(),
     };
   }
 
-  const payload = generateHMRCJson();
+  const payloads = generatePayloads();
 
-  // Totals
-  const totalRevenue = useMemo(() => transactions.filter(t => t.category === "income").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
-  const totalVAT = useMemo(() => transactions.reduce((sum, t) => sum + (toNumber(t.vat_amount) || 0), 0), [transactions]);
-  const totalCorp = useMemo(() => transactions.filter(t => t.category === "corp").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
-  const totalCIS = useMemo(() => transactions.filter(t => t.category === "cis").reduce((sum, t) => sum + toNumber(t.amount), 0), [transactions]);
+  const totalRevenue = useMemo(
+    () => transactions.filter(t => t.category === "income").reduce((sum, t) => sum + toNumber(t.amount), 0),
+    [transactions]
+  );
+  const totalVAT = useMemo(
+    () => transactions.reduce((sum, t) => sum + (toNumber(t.vat_amount) || 0), 0),
+    [transactions]
+  );
+  const totalCorp = useMemo(
+    () => transactions.filter(t => t.category === "corp").reduce((sum, t) => sum + toNumber(t.amount), 0),
+    [transactions]
+  );
+  const totalCIS = useMemo(
+    () => transactions.filter(t => t.category === "cis").reduce((sum, t) => sum + toNumber(t.amount), 0),
+    [transactions]
+  );
   const netProfit = totalRevenue - totalVAT - totalCorp;
 
   if (status === "loading") return <div>Loading…</div>;
@@ -143,7 +156,7 @@ export default function MTDDashboard() {
         <h1 className="text-3xl font-bold">MTD Dashboard</h1>
 
         {/* Period Selection */}
-        <ResponsiveCard title="Period Selection">
+        <ResponsiveCard title="Period selection">
           <select value={periodType} onChange={e => setPeriodType(e.target.value)} className="border rounded px-2 py-1">
             <option value="monthly">Monthly</option>
             <option value="quarterly">Quarterly</option>
@@ -151,7 +164,7 @@ export default function MTDDashboard() {
         </ResponsiveCard>
 
         {/* VAT Number */}
-        <ResponsiveCard title="VAT Number">
+        <ResponsiveCard title="VAT number">
           <input
             type="text"
             value={vatNumber}
@@ -161,10 +174,10 @@ export default function MTDDashboard() {
           />
           <button
             onClick={async () => {
-              await fetch("/api/clients", {
+              await fetch(API.DASH, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ clientId: client?.id, vatNumber }),
+                body: JSON.stringify({ action: "updateVATNumber", clientId: session.user.clientId, vatNumber }),
               });
               alert("VAT number saved");
             }}
@@ -193,14 +206,27 @@ export default function MTDDashboard() {
                 <td>{tx.description}</td>
                 <td>£{toNumber(tx.amount).toFixed(2)}</td>
                 <td>{tx.vat_rate ? `${tx.vat_rate}% (£${(tx.vat_amount || 0).toFixed(2)})` : "-"}</td>
-                <td>{tx.category?.toUpperCase() || "Other"}</td>
+                <td>{tx.category?.toUpperCase() || "OTHER"}</td>
                 <td>
                   <input
                     type="checkbox"
                     checked={tx.category === "cis"}
-                    onChange={e => {
+                    onChange={async e => {
+                      const nextCategory = e.target.checked ? "cis" : (tx.category === "cis" ? "other" : tx.category);
+                      // Persist change
+                      await fetch(API.DASH, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          action: "updateCategory",
+                          clientId: session.user.clientId,
+                          rowId: tx.id,
+                          category: nextCategory,
+                        }),
+                      });
+                      // Update local state
                       const updatedTx = transactions.map(t =>
-                        t.id === tx.id ? { ...t, category: e.target.checked ? "cis" : t.category } : t
+                        t.id === tx.id ? { ...t, category: nextCategory } : t
                       );
                       setTransactions(updatedTx);
                       generateStats(updatedTx);
@@ -217,6 +243,7 @@ export default function MTDDashboard() {
               <td>
                 Income £{totalRevenue.toFixed(2)} | Corp £{totalCorp.toFixed(2)} | CIS £{totalCIS.toFixed(2)} | Net £{netProfit.toFixed(2)}
               </td>
+              <td />
             </tr>
           </ResponsiveTable>
 
@@ -233,16 +260,22 @@ export default function MTDDashboard() {
         {/* Submit to HMRC */}
         <ResponsiveCard title="Submit to HMRC">
           <div className="flex gap-3 flex-wrap">
-            {["vat","income","corp","cis"].map(c => (
+            {["vat", "cis", "corporationTax", "selfAssessment"].map(c => (
               <button
                 key={c}
                 onClick={async () => {
-                  const key = `${client?.id}-${c}-${vatPeriod}`;
+                  const key = `${session.user.clientId}-${c}-${vatPeriod}`;
                   setStatusMap(prev => ({ ...prev, [c]: "Submitting..." }));
-                  const res = await fetch("/api/submit-mtd", {
+                  const res = await fetch(API.SUBMIT, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ clientId: client?.id, category: c, payload, period: vatPeriod, idempotencyKey: key }),
+                    body: JSON.stringify({
+                      clientId: session.user.clientId,
+                      category: c,
+                      payload: payloads[c],
+                      period: vatPeriod,
+                      idempotencyKey: key,
+                    }),
                   });
                   const data = await res.json();
                   setStatusMap(prev => ({ ...prev, [c]: data.success ? "Success" : "Failed" }));
@@ -255,16 +288,16 @@ export default function MTDDashboard() {
             ))}
           </div>
           <div className="mt-4">
-            {Object.entries(statusMap).map(([k,v]) => (
+            {Object.entries(statusMap).map(([k, v]) => (
               <p key={k}>{k.toUpperCase()}: {v}</p>
             ))}
           </div>
         </ResponsiveCard>
 
         {/* Payload Preview */}
-        <ResponsiveCard title="HMRC Payload">
+        <ResponsiveCard title="HMRC payloads">
           <pre className="text-xs bg-gray-100 p-4 overflow-x-auto">
-            {JSON.stringify(payload, null, 2)}
+            {JSON.stringify(payloads, null, 2)}
           </pre>
         </ResponsiveCard>
       </div>
