@@ -1,5 +1,5 @@
 // pages/mtd-dashboard.js
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
@@ -18,6 +18,7 @@ export default function MTDDashboard() {
   const [stats, setStats] = useState([]);
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
+  const categories = ["vat", "income", "corp", "cis"];
 
   // 🔑 Access control
   useEffect(() => {
@@ -34,7 +35,7 @@ export default function MTDDashboard() {
   // 🔹 Fetch client info
   useEffect(() => {
     async function fetchClient() {
-      const res = await fetch("/api/clients"); // or your existing clients API
+      const res = await fetch("/api/clients");
       const data = await res.json();
       setClient(data || {});
     }
@@ -49,10 +50,7 @@ export default function MTDDashboard() {
       const res = await fetch("/api/mtd-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          action: "fetchTransactions",
-          clientId: session.user.clientId
-        }),
+        body: JSON.stringify({ action: "fetchTransactions", clientId: session.user.clientId }),
       });
       const { data } = await res.json();
       setTransactions(data || []);
@@ -63,10 +61,7 @@ export default function MTDDashboard() {
       const res = await fetch("/api/mtd-dashboard", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          action: "checkLock",
-          clientId: session.user.clientId
-        }),
+        body: JSON.stringify({ action: "checkLock", clientId: session.user.clientId }),
       });
       const { locked } = await res.json();
       setLocked(locked);
@@ -94,37 +89,21 @@ export default function MTDDashboard() {
   }
 
   // 🔹 Update category
-  async function handleCategoryChange(row, category) {
+  function handleCategoryChange(rowId, category) {
     if (locked) return;
-    await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        action: "updateCategory", 
-        clientId: session.user.clientId,
-        rowId: row.id, 
-        category 
-      }),
-    });
-    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, category } : tx));
-    generateStats(transactions);
+    const updatedTx = transactions.map(tx => tx.id === rowId ? { ...tx, category } : tx);
+    setTransactions(updatedTx);
+    generateStats(updatedTx);
   }
 
   // 🔹 Update VAT
-  async function handleVAT(row, rate) {
+  function handleVAT(rowId, rate) {
     if (locked) return;
-    await fetch("/api/mtd-dashboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        action: "updateVAT", 
-        clientId: session.user.clientId,
-        rowId: row.id, 
-        vatRate: rate 
-      }),
-    });
-    setTransactions(prev => prev.map(tx => tx.id === row.id ? { ...tx, vat_rate: rate, vat_amount: tx.amount*(rate/100) } : tx));
-    generateStats(transactions);
+    const updatedTx = transactions.map(tx => 
+      tx.id === rowId ? { ...tx, vat_rate: rate, vat_amount: parseFloat((tx.amount*(rate/100)).toFixed(2)) } : tx
+    );
+    setTransactions(updatedTx);
+    generateStats(updatedTx);
   }
 
   // 🔹 Verify CIS
@@ -132,11 +111,7 @@ export default function MTDDashboard() {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ 
-        action: "verifyCIS", 
-        clientId: session.user.clientId,
-        nino 
-      }),
+      body: JSON.stringify({ action: "verifyCIS", clientId: session.user.clientId, nino }),
     });
     const data = await res.json();
     setClient(prev => ({ ...prev, cis_registered: data.registered }));
@@ -151,7 +126,12 @@ export default function MTDDashboard() {
     const cis = transactions.filter(t => t.category === "cis");
 
     return {
-      vat: { period: vatPeriod, netSales: vat.reduce((a,r)=>a+Math.max(r.amount,0),0), netPurchases: vat.reduce((a,r)=>a+Math.abs(Math.min(r.amount,0)),0), vatDue: vat.reduce((a,r)=>a+(r.vat_amount||0),0) },
+      vat: { 
+        period: vatPeriod, 
+        netSales: vat.reduce((a,r)=>a+Math.max(r.amount,0),0),
+        netPurchases: vat.reduce((a,r)=>a+Math.abs(Math.min(r.amount,0)),0),
+        vatDue: vat.reduce((a,r)=>a+(r.vat_amount||0),0) 
+      },
       income: { income: income.reduce((a,r)=>a+r.amount,0) },
       cis: { deducted: cis.reduce((a,r)=>a+r.amount,0) },
       corporationTax: { profit: corp.reduce((a,r)=>a+r.amount,0) },
@@ -160,8 +140,6 @@ export default function MTDDashboard() {
   }
 
   const payload = generateHMRCJson();
-  const categories = ["vat","income","corp"];
-  if (client?.cis_registered) categories.push("cis");
 
   // 🔹 Submit to HMRC
   async function submit(category) {
@@ -178,6 +156,12 @@ export default function MTDDashboard() {
     setStatusMap(prev => ({ ...prev, [category]: data.success ? "Success" : "Failed" }));
     if (category === "vat" && data.success) setLocked(true);
   }
+
+  // 🔹 Totals
+  const totalRevenue = useMemo(() => transactions.reduce((sum, t) => sum + (t.category==="income"?t.amount:0), 0), [transactions]);
+  const totalVAT = useMemo(() => transactions.reduce((sum, t) => sum + (t.vat_amount||0), 0), [transactions]);
+  const totalCorp = useMemo(() => transactions.reduce((sum, t) => sum + (t.category==="corp"?t.amount:0), 0), [transactions]);
+  const netProfit = totalRevenue - totalVAT - totalCorp;
 
   if (status === "loading") return <div>Loading…</div>;
   if (!session?.user) return null;
@@ -197,6 +181,7 @@ export default function MTDDashboard() {
           ))}
         </div>
 
+        {/* CIS Verification */}
         <ResponsiveCard title="CIS Verification">
           <input
             defaultValue={client?.nino || ""}
@@ -206,29 +191,48 @@ export default function MTDDashboard() {
           {client?.cis_registered ? "Registered ✅" : "Not Registered ❌"}
         </ResponsiveCard>
 
+        {/* Transactions Table */}
         <ResponsiveCard title="Transactions">
-          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Cat"]}>
-            {transactions.map(r => (
-              <tr key={r.id}>
-                <td>{r.date}</td>
-                <td>{r.description}</td>
-                <td>{r.amount}</td>
+          <ResponsiveTable headers={["Date", "Desc", "Amount", "VAT %", "Category"]}>
+            {transactions.map(tx => (
+              <tr key={tx.id}>
+                <td>{tx.date}</td>
+                <td>{tx.description}</td>
+                <td>£{tx.amount.toFixed(2)}</td>
                 <td>
-                  {r.category === "vat" ? (
-                    <input type="number" value={r.vat_rate || 0} onChange={e => handleVAT(r, +e.target.value)} className="w-16 border"/>
+                  {tx.category==="vat" ? (
+                    <input 
+                      type="number" 
+                      value={tx.vat_rate || 0} 
+                      onChange={e => handleVAT(tx.id, +e.target.value)}
+                      className="w-20 border rounded px-1 py-0.5 text-center"
+                    />
                   ) : "-"}
                 </td>
                 <td>
-                  <select value={r.category || ""} onChange={e => handleCategoryChange(r, e.target.value)}>
-                    <option />
-                    {categories.map(c => <option key={c}>{c}</option>)}
+                  <select
+                    value={tx.category || ""}
+                    onChange={e => handleCategoryChange(tx.id, e.target.value)}
+                    className="border rounded px-1 py-0.5 w-full"
+                  >
+                    <option value="">Select</option>
+                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </td>
               </tr>
             ))}
           </ResponsiveTable>
+
+          {/* Totals */}
+          <div className="mt-4 flex justify-end gap-6 text-right">
+            <div>Total Income: £{totalRevenue.toFixed(2)}</div>
+            <div>Total VAT: £{totalVAT.toFixed(2)}</div>
+            <div>Total Corp: £{totalCorp.toFixed(2)}</div>
+            <div>Net Profit: £{netProfit.toFixed(2)}</div>
+          </div>
         </ResponsiveCard>
 
+        {/* Submit to HMRC */}
         <ResponsiveCard title="Submit to HMRC">
           <div className="flex gap-3">
             {categories.map(c => (
@@ -242,6 +246,7 @@ export default function MTDDashboard() {
           </div>
         </ResponsiveCard>
 
+        {/* Payload Preview */}
         <ResponsiveCard title="HMRC Payload">
           <pre className="text-xs bg-gray-100 p-4">{JSON.stringify(payload, null, 2)}</pre>
         </ResponsiveCard>
