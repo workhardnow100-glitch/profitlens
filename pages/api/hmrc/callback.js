@@ -1,6 +1,6 @@
 // pages/api/hmrc/callback.js
 import fetch from "node-fetch";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../../lib/supabase";
 
 export default async function handler(req, res) {
   const { code, state } = req.query;
