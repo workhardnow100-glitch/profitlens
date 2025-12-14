@@ -19,8 +19,9 @@ export default function MTDDashboard() {
 
   const vatPeriod = new Date().toISOString().slice(0, 7);
   const categories = ["vat", "income", "corp", "cis"];
+  const allowedVatRates = [0, 5, 20];
 
-  // 🔑 Access control
+  // Access control
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) {
@@ -32,7 +33,7 @@ export default function MTDDashboard() {
     if (!(isAdmin || isSubscribedOrTrial)) router.replace("/upgrade");
   }, [session, status, router]);
 
-  // 🔹 Fetch client info
+  // Fetch client info
   useEffect(() => {
     async function fetchClient() {
       const res = await fetch("/api/clients");
@@ -42,7 +43,7 @@ export default function MTDDashboard() {
     fetchClient();
   }, []);
 
-  // 🔹 Fetch transactions & VAT lock
+  // Fetch transactions & VAT lock
   useEffect(() => {
     if (!session?.user) return;
 
@@ -71,7 +72,7 @@ export default function MTDDashboard() {
     checkLock();
   }, [session]);
 
-  // 🔹 Generate top stats
+  // Generate top stats
   function generateStats(txList) {
     const vatTotal = txList.filter(t => t.category === "vat").reduce((a,r)=>a+(r.vat_amount||0),0);
     const incomeTotal = txList.filter(t => t.category === "income").reduce((a,r)=>a+r.amount,0);
@@ -83,12 +84,11 @@ export default function MTDDashboard() {
       { label: "Income Total", value: incomeTotal.toFixed(2) },
       { label: "Corporation Tax Total", value: corpTotal.toFixed(2) },
     ];
-
     if (client?.cis_registered) newStats.push({ label: "CIS Deducted", value: cisTotal.toFixed(2) });
     setStats(newStats);
   }
 
-  // 🔹 Update category (local only — matches original)
+  // Update category
   function handleCategoryChange(rowId, category) {
     if (locked) return;
     const updatedTx = transactions.map(tx => tx.id === rowId ? { ...tx, category } : tx);
@@ -96,19 +96,24 @@ export default function MTDDashboard() {
     generateStats(updatedTx);
   }
 
-  // 🔹 Update VAT (local only — matches original)
+  // Update VAT
   function handleVAT(rowId, rate) {
     if (locked) return;
+    const numericRate = Number(rate);
+    if (!allowedVatRates.includes(numericRate)) {
+      alert("Invalid VAT rate. Allowed: 0, 5, 20");
+      return;
+    }
     const updatedTx = transactions.map(tx =>
       tx.id === rowId
-        ? { ...tx, vat_rate: rate, vat_amount: parseFloat((tx.amount*(rate/100)).toFixed(2)) }
+        ? { ...tx, vat_rate: numericRate, vat_amount: parseFloat((tx.amount*(numericRate/100)).toFixed(2)) }
         : tx
     );
     setTransactions(updatedTx);
     generateStats(updatedTx);
   }
 
-  // 🔹 Verify CIS
+  // Verify CIS
   async function verifyCIS(nino) {
     const res = await fetch("/api/mtd-dashboard", {
       method: "POST",
@@ -120,7 +125,7 @@ export default function MTDDashboard() {
     generateStats(transactions);
   }
 
-  // 🔹 HMRC payload generator
+  // HMRC payload generator
   function generateHMRCJson() {
     const vat = transactions.filter(t => t.category === "vat");
     const income = transactions.filter(t => t.category === "income");
@@ -143,35 +148,11 @@ export default function MTDDashboard() {
 
   const payload = generateHMRCJson();
 
-  // 🔹 Submit to HMRC
-  async function submit(category) {
-    const key = `${client?.id}-${category}-${vatPeriod}`;
-    setStatusMap(prev => ({ ...prev, [category]: "Submitting..." }));
-
-    const res = await fetch("/api/submit-mtd", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: client?.id, category, payload, period: vatPeriod, idempotencyKey: key }),
-    });
-
-    const data = await res.json();
-    setStatusMap(prev => ({ ...prev, [category]: data.success ? "Success" : "Failed" }));
-    if (category === "vat" && data.success) setLocked(true);
-  }
-
-  // 🔹 Totals
-  const totalRevenue = useMemo(
-    () => transactions.reduce((sum, t) => sum + (t.category==="income"?t.amount:0), 0),
-    [transactions]
-  );
-  const totalVAT = useMemo(
-    () => transactions.reduce((sum, t) => sum + (t.vat_amount||0), 0),
-    [transactions]
-  );
-  const totalCorp = useMemo(
-    () => transactions.reduce((sum, t) => sum + (t.category==="corp"?t.amount:0), 0),
-    [transactions]
-  );
+  // Totals
+  const totalRevenue = useMemo(() => transactions.filter(t=>t.category==="income").reduce((sum,t)=>sum+t.amount,0), [transactions]);
+  const totalVAT = useMemo(() => transactions.reduce((sum,t)=>sum+(t.vat_amount||0),0), [transactions]);
+  const totalCorp = useMemo(() => transactions.filter(t=>t.category==="corp").reduce((sum,t)=>sum+t.amount,0), [transactions]);
+  const totalCIS = useMemo(() => transactions.filter(t=>t.category==="cis").reduce((sum,t)=>sum+t.amount,0), [transactions]);
   const netProfit = totalRevenue - totalVAT - totalCorp;
 
   if (status === "loading") return <div>Loading…</div>;
@@ -183,7 +164,7 @@ export default function MTDDashboard() {
         <h1 className="text-3xl font-bold">MTD Dashboard</h1>
 
         {/* Top Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           {stats.map(s => (
             <ResponsiveCard key={s.label}>
               <div className="text-slate-500">{s.label}</div>
@@ -215,7 +196,7 @@ export default function MTDDashboard() {
                     <input
                       type="number"
                       value={tx.vat_rate || 0}
-                      onChange={e => handleVAT(tx.id, +e.target.value)}
+                      onChange={e => handleVAT(tx.id, e.target.value)}
                       className="w-20 border rounded px-1 py-0.5 text-center"
                     />
                   ) : "-"}
@@ -227,39 +208,61 @@ export default function MTDDashboard() {
                     className="border rounded px-1 py-0.5 w-full"
                   >
                     <option value="">Select</option>
-                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                    {categories.map(c => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
                   </select>
                 </td>
               </tr>
             ))}
+            {/* Footer row with subtotals */}
+            <tr className="font-bold bg-gray-50">
+              <td colSpan={2}>Totals</td>
+              <td>£{(totalRevenue + totalCorp + totalCIS).toFixed(2)}</td>
+              <td>£{totalVAT.toFixed(2)}</td>
+              <td>
+                Income £{totalRevenue.toFixed(2)} | Corp £{totalCorp.toFixed(2)} | CIS £{totalCIS.toFixed(2)}
+              </td>
+            </tr>
           </ResponsiveTable>
 
-          {/* Totals */}
-          <div className="mt-4 flex justify-end gap-6 text-right">
+          {/* Totals summary */}
+          <div className="mt-4 flex flex-wrap justify-end gap-6 text-right">
             <div>Total Income: £{totalRevenue.toFixed(2)}</div>
             <div>Total VAT: £{totalVAT.toFixed(2)}</div>
             <div>Total Corp: £{totalCorp.toFixed(2)}</div>
+            <div>Total CIS: £{totalCIS.toFixed(2)}</div>
             <div>Net Profit: £{netProfit.toFixed(2)}</div>
           </div>
         </ResponsiveCard>
 
         {/* Submit to HMRC */}
         <ResponsiveCard title="Submit to HMRC">
-          <div className="flex gap-3">
+          <div className="flex gap-3 flex-wrap">
             {categories.map(c => (
-              <button key={c} onClick={() => submit(c)} className="bg-blue-600 text-white px-4 py-2 rounded">
+              <button
+                key={c}
+                onClick={() => submit(c)}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+              >
                 Submit {c.toUpperCase()}
               </button>
             ))}
           </div>
           <div className="mt-4">
-            {Object.entries(statusMap).map(([k,v]) => <p key={k}>{k.toUpperCase()}: {v}</p>)}
+            {Object.entries(statusMap).map(([k,v]) => (
+              <p key={k}>{k.toUpperCase()}: {v}</p>
+            ))}
           </div>
         </ResponsiveCard>
 
         {/* Payload Preview */}
         <ResponsiveCard title="HMRC Payload">
-          <pre className="text-xs bg-gray-100 p-4">{JSON.stringify(payload, null, 2)}</pre>
+          <pre className="text-xs bg-gray-100 p-4 overflow-x-auto">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
         </ResponsiveCard>
       </div>
     </ResponsiveLayout>
