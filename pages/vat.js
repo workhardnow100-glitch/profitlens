@@ -19,6 +19,9 @@ export default function VATPage() {
   // ✅ VAT Stagger state
   const [vatStagger, setVatStagger] = useState(null);
 
+  // ✅ VAT adjustment draft state
+  const [newAdj, setNewAdj] = useState({ box: 1, amount: "", reason: "" });
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
@@ -47,8 +50,11 @@ export default function VATPage() {
   }, [session]);
 
   // ✅ Fetch VAT summary (uses new HMRC-shaped API)
-  async function fetchVAT() {
-    if (!from || !to) {
+  async function fetchVAT(customFrom, customTo) {
+    const start = customFrom || from;
+    const end = customTo || to;
+
+    if (!start || !end) {
       alert("Please select both start and end dates.");
       return;
     }
@@ -60,8 +66,8 @@ export default function VATPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           clientId: session.user.clientId,
-          periodStart: from,
-          periodEnd: to,
+          periodStart: start,
+          periodEnd: end,
         }),
       });
 
@@ -126,6 +132,42 @@ export default function VATPage() {
     }
   }
 
+  // ✅ Add VAT adjustment
+  async function addAdjustment() {
+    if (!result) return;
+    if (!newAdj.amount) {
+      alert("Enter an amount for the adjustment.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/vat/adjustment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: session.user.clientId,
+          vatPeriodId: result.vatPeriodId,
+          box: Number(newAdj.box),
+          amount: Number(newAdj.amount),
+          reason: newAdj.reason,
+          userId: session.user.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add adjustment");
+
+      // ✅ Re-fetch VAT summary to update boxes + adjustment list
+      await fetchVAT();
+
+      // Reset form
+      setNewAdj({ box: 1, amount: "", reason: "" });
+    } catch (err) {
+      console.error(err);
+      alert("Error adding adjustment: " + err.message);
+    }
+  }
+
   if (!session?.user) return null;
 
   const locked = result?.locked;
@@ -157,7 +199,7 @@ export default function VATPage() {
             />
             <div className="flex gap-2">
               <button
-                onClick={fetchVAT}
+                onClick={() => fetchVAT()}
                 className="bg-blue-600 text-white rounded px-4 py-2"
                 disabled={locked || loading}
               >
@@ -192,8 +234,57 @@ export default function VATPage() {
         {/* Results */}
         {result && (
           <>
+            {/* Draft VAT Return Snapshot (print-style summary) */}
             <ResponsiveCard
-              title={`VAT Boxes ${locked ? "(Locked)" : ""}`}
+              title={`Draft VAT Return Summary ${locked ? "(Locked)" : ""}`}
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p>
+                    <span className="font-semibold">Box 1 – VAT due on sales:</span>{" "}
+                    £{Number(result.boxes?.box1 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 2 – VAT due on acquisitions:</span>{" "}
+                    £{Number(result.boxes?.box2 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 3 – Total VAT due (1 + 2):</span>{" "}
+                    £{Number(result.boxes?.box3 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 4 – VAT reclaimed on purchases:</span>{" "}
+                    £{Number(result.boxes?.box4 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 5 – Net VAT to pay (3 − 4):</span>{" "}
+                    £{Number(result.boxes?.box5 || 0).toFixed(2)}
+                  </p>
+                </div>
+                <div>
+                  <p>
+                    <span className="font-semibold">Box 6 – Total sales (net):</span>{" "}
+                    £{Number(result.boxes?.box6 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 7 – Total purchases (net):</span>{" "}
+                    £{Number(result.boxes?.box7 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 8 – EU supplies (net):</span>{" "}
+                    £{Number(result.boxes?.box8 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">Box 9 – EU acquisitions (net):</span>{" "}
+                    £{Number(result.boxes?.box9 || 0).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </ResponsiveCard>
+
+            {/* Raw VAT Boxes Table (for detailed review) */}
+            <ResponsiveCard
+              title={`VAT Boxes Detail ${locked ? "(Locked)" : ""}`}
             >
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -215,6 +306,89 @@ export default function VATPage() {
               </table>
             </ResponsiveCard>
 
+            {/* ✅ VAT Adjustments (Collapsible Master Panel) */}
+            <ResponsiveCard title="VAT Adjustments">
+              <details className="group">
+                <summary className="cursor-pointer text-lg font-semibold text-blue-700 group-open:text-blue-900">
+                  Adjustments (click to expand)
+                </summary>
+
+                <div className="mt-4 space-y-4">
+                  {/* Add Adjustment Form */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                    <select
+                      value={newAdj.box}
+                      onChange={(e) =>
+                        setNewAdj((prev) => ({
+                          ...prev,
+                          box: Number(e.target.value),
+                        }))
+                      }
+                      className="border p-2 rounded"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((b) => (
+                        <option key={b} value={b}>
+                          Box {b}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newAdj.amount}
+                      onChange={(e) =>
+                        setNewAdj((prev) => ({
+                          ...prev,
+                          amount: e.target.value,
+                        }))
+                      }
+                      placeholder="Amount"
+                      className="border p-2 rounded"
+                    />
+
+                    <input
+                      type="text"
+                      value={newAdj.reason}
+                      onChange={(e) =>
+                        setNewAdj((prev) => ({
+                          ...prev,
+                          reason: e.target.value,
+                        }))
+                      }
+                      placeholder="Reason"
+                      className="border p-2 rounded"
+                    />
+
+                    <button
+                      onClick={addAdjustment}
+                      className="bg-green-600 text-white rounded px-4 py-2"
+                    >
+                      Add Adjustment
+                    </button>
+                  </div>
+
+                  {/* Adjustment List */}
+                  {result.adjustments && result.adjustments.length > 0 ? (
+                    <ResponsiveTable
+                      columns={[
+                        { header: "Box", accessor: "box" },
+                        { header: "Amount (£)", accessor: "amount" },
+                        { header: "Reason", accessor: "reason" },
+                        { header: "Created At", accessor: "created_at" },
+                      ]}
+                      data={result.adjustments}
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-600">
+                      No adjustments for this period.
+                    </p>
+                  )}
+                </div>
+              </details>
+            </ResponsiveCard>
+
+            {/* VAT Transactions */}
             <ResponsiveCard
               title={`Transactions Included ${locked ? "(Locked)" : ""}`}
             >
