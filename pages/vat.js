@@ -29,22 +29,29 @@ export default function VATPage() {
     async function loadStagger() {
       if (!session?.user) return;
 
-      const res = await fetch("/api/tax-hub/periods", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.clientId }),
-      });
+      try {
+        const res = await fetch("/api/tax-hub/periods", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId: session.user.clientId }),
+        });
 
-      const data = await res.json();
-      if (data.vatStagger) setVatStagger(data.vatStagger);
+        const data = await res.json();
+        if (data.vatStagger) setVatStagger(data.vatStagger);
+      } catch (err) {
+        console.error("Error loading VAT stagger:", err);
+      }
     }
 
     loadStagger();
   }, [session]);
 
-  // Fetch VAT summary
+  // ✅ Fetch VAT summary (uses new HMRC-shaped API)
   async function fetchVAT() {
-    if (!from || !to) return alert("Please select both start and end dates.");
+    if (!from || !to) {
+      alert("Please select both start and end dates.");
+      return;
+    }
     setLoading(true);
 
     try {
@@ -59,7 +66,12 @@ export default function VATPage() {
       });
 
       const data = await res.json();
-      setResult({ ...data, locked: false });
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to fetch VAT summary");
+      }
+
+      // ✅ Keep API's locked/submitted/status as source of truth
+      setResult(data);
     } catch (err) {
       console.error(err);
       alert("Error fetching VAT summary: " + err.message);
@@ -68,9 +80,12 @@ export default function VATPage() {
     }
   }
 
-  // Submit VAT to HMRC
+  // 🚧 Submit VAT to HMRC (placeholder until HMRC APIs wired)
   async function submitVAT() {
-    if (!from || !to) return alert("Please select both start and end dates.");
+    if (!from || !to) {
+      alert("Please select both start and end dates.");
+      return;
+    }
     if (!confirm("Submit this VAT period? This will lock the period.")) return;
 
     setLoading(true);
@@ -89,9 +104,19 @@ export default function VATPage() {
 
       if (data.success) {
         alert("VAT submitted successfully. Period locked.");
-        setResult({ ...result, locked: true, hmrcSubmission: data.hmrcResponse });
+        setResult((prev) =>
+          prev
+            ? {
+                ...prev,
+                locked: true,
+                submitted: true,
+                status: "filed",
+                hmrcSubmission: data.hmrcResponse || prev.hmrcSubmission,
+              }
+            : prev
+        );
       } else {
-        alert("Error submitting VAT: " + data.error);
+        alert("Error submitting VAT: " + (data.error || "Unknown error"));
       }
     } catch (err) {
       console.error(err);
@@ -102,6 +127,11 @@ export default function VATPage() {
   }
 
   if (!session?.user) return null;
+
+  const locked = result?.locked;
+  const statusLabel = result
+    ? `${result.status || "draft"}${result.submitted ? " (submitted)" : ""}`
+    : "";
 
   return (
     <ResponsiveLayout currentPageName="VAT Return">
@@ -116,24 +146,24 @@ export default function VATPage() {
               value={from}
               onChange={(e) => setFrom(e.target.value)}
               className="border p-2 rounded"
-              disabled={result?.locked}
+              disabled={locked}
             />
             <input
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
               className="border p-2 rounded"
-              disabled={result?.locked}
+              disabled={locked}
             />
             <div className="flex gap-2">
               <button
                 onClick={fetchVAT}
                 className="bg-blue-600 text-white rounded px-4 py-2"
-                disabled={result?.locked || loading}
+                disabled={locked || loading}
               >
                 {loading ? "Loading…" : "Get VAT Summary"}
               </button>
-              {result && !result.locked && (
+              {result && !locked && (
                 <button
                   onClick={submitVAT}
                   className="bg-green-600 text-white px-4 py-2 rounded"
@@ -144,6 +174,12 @@ export default function VATPage() {
               )}
             </div>
           </div>
+
+          {result && (
+            <p className="mt-2 text-sm text-gray-600">
+              Period: {result.period} • Status: {statusLabel}
+            </p>
+          )}
         </ResponsiveCard>
 
         {/* ✅ VAT STAGGER BADGE */}
@@ -156,7 +192,9 @@ export default function VATPage() {
         {/* Results */}
         {result && (
           <>
-            <ResponsiveCard title={`VAT Boxes ${result.locked ? "(Locked)" : ""}`}>
+            <ResponsiveCard
+              title={`VAT Boxes ${locked ? "(Locked)" : ""}`}
+            >
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr>
@@ -165,17 +203,21 @@ export default function VATPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(result.boxes).map(([box, value]) => (
+                  {Object.entries(result.boxes || {}).map(([box, value]) => (
                     <tr key={box}>
                       <td className="border p-2">{box}</td>
-                      <td className="border p-2">{Number(value).toFixed(2)}</td>
+                      <td className="border p-2">
+                        {Number(value || 0).toFixed(2)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </ResponsiveCard>
 
-            <ResponsiveCard title={`Transactions Included ${result.locked ? "(Locked)" : ""}`}>
+            <ResponsiveCard
+              title={`Transactions Included ${locked ? "(Locked)" : ""}`}
+            >
               <ResponsiveTable
                 columns={[
                   { header: "Date", accessor: "date" },
@@ -184,16 +226,22 @@ export default function VATPage() {
                   { header: "VAT Amount (£)", accessor: "vat_amount" },
                   { header: "VAT Rate (%)", accessor: "vat_rate" },
                 ]}
-                data={result.transactions}
+                data={result.transactions || []}
               />
             </ResponsiveCard>
 
-            {/* HMRC Submission Info */}
+            {/* HMRC Submission Info (future real integration) */}
             {result.hmrcSubmission && (
               <ResponsiveCard title="HMRC Submission">
                 <div className="space-y-2">
-                  <p><strong>Submission ID / Date:</strong> {result.hmrcSubmission.processingDate || "N/A"}</p>
-                  <p><strong>Status:</strong> {result.hmrcSubmission.status || "Submitted"}</p>
+                  <p>
+                    <strong>Submission date:</strong>{" "}
+                    {result.hmrcSubmission.processingDate || "N/A"}
+                  </p>
+                  <p>
+                    <strong>Status:</strong>{" "}
+                    {result.hmrcSubmission.status || "Submitted"}
+                  </p>
                   <pre className="bg-gray-100 p-2 rounded overflow-x-auto">
                     {JSON.stringify(result.hmrcSubmission, null, 2)}
                   </pre>
