@@ -158,7 +158,8 @@ export default function VATPage() {
       if (!res.ok) throw new Error(data.error || "Failed to add adjustment");
 
       // ✅ Re-fetch VAT summary to update boxes + adjustment list
-      await fetchVAT();
+      await fetchVAT(from, to);
+
 
       // Reset form
       setNewAdj({ box: 1, amount: "", reason: "" });
