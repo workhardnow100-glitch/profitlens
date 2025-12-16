@@ -1,5 +1,5 @@
 // pages/corp.js
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
@@ -16,21 +16,50 @@ export default function CorpPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  // ✅ Payment modal state
+  // CT payments (front-end view only; backend stores the truth)
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentDirection, setPaymentDirection] = useState("payment");
   const [paymentReference, setPaymentReference] = useState("");
+  const [paymentTotals, setPaymentTotals] = useState(null);
 
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
   }, [session, status, router]);
 
-  // ✅ Fetch Corporation Tax summary
+  // Derived drilldown groups from result.breakdown
+  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+    if (!result?.breakdown) {
+      return { incomeRows: [], allowableRows: [], disallowableRows: [], reviewRows: [] };
+    }
+
+    const incomeRows = [];
+    const allowableRows = [];
+    const disallowableRows = [];
+    const reviewRows = [];
+
+    for (const row of result.breakdown) {
+      if (row.ctType === "income") incomeRows.push(row);
+      else if (row.ctType === "allowable") allowableRows.push(row);
+      else if (row.ctType === "disallowable") disallowableRows.push(row);
+      else reviewRows.push(row);
+    }
+
+    return { incomeRows, allowableRows, disallowableRows, reviewRows };
+  }, [result]);
+
   async function fetchCorp(start = from, end = to) {
-    if (!start || !end) return alert("Please select both start and end dates.");
+    if (!start || !end) {
+      alert("Please select both start and end dates.");
+      return;
+    }
+    if (!session?.user?.clientId) {
+      alert("Missing client ID.");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/corp/summary", {
@@ -39,10 +68,14 @@ export default function CorpPage() {
         body: JSON.stringify({
           clientId: session.user.clientId,
           periodStart: start,
-          periodEnd: end
-        })
+          periodEnd: end,
+        }),
       });
       const data = await res.json();
+      if (!data.success) {
+        alert("Error fetching Corporation Tax summary: " + (data.error || "Unknown error"));
+        return;
+      }
       setResult({ ...data, locked: data.locked || false });
     } catch (err) {
       console.error(err);
@@ -52,9 +85,11 @@ export default function CorpPage() {
     }
   }
 
-  // ✅ Submit Corporation Tax period
   async function submitCorp() {
-    if (!from || !to) return alert("Please select both start and end dates.");
+    if (!from || !to) {
+      alert("Please select both start and end dates.");
+      return;
+    }
     if (!confirm("Submit this Corporation Tax period? This will lock it.")) return;
 
     setLoading(true);
@@ -65,15 +100,15 @@ export default function CorpPage() {
         body: JSON.stringify({
           clientId: session.user.clientId,
           periodStart: from,
-          periodEnd: to
-        })
+          periodEnd: to,
+        }),
       });
       const data = await res.json();
       if (data.success) {
         alert("Corporation Tax period locked successfully.");
-        setResult({ ...result, locked: true });
+        setResult((prev) => (prev ? { ...prev, locked: true } : prev));
       } else {
-        alert("Error submitting Corporation Tax: " + data.error);
+        alert("Error submitting Corporation Tax: " + (data.error || "Unknown error"));
       }
     } catch (err) {
       console.error(err);
@@ -83,7 +118,6 @@ export default function CorpPage() {
     }
   }
 
-  // ✅ Add CT payment
   async function submitPayment() {
     if (!paymentDate || !paymentAmount) {
       alert("Please enter date and amount.");
@@ -99,29 +133,33 @@ export default function CorpPage() {
           paymentDate,
           amount: paymentAmount,
           direction: paymentDirection,
-          reference: paymentReference
-        })
+          reference: paymentReference,
+        }),
       });
 
       const data = await res.json();
 
       if (!data.success) {
-        alert("Error adding payment: " + data.error);
+        alert("Error adding payment: " + (data.error || "Unknown error"));
         return;
       }
 
       alert("Payment added successfully.");
 
-      // ✅ Close modal + reset fields
       setShowPaymentModal(false);
       setPaymentDate("");
       setPaymentAmount("");
       setPaymentDirection("payment");
       setPaymentReference("");
 
-      // ✅ Refresh CT summary
-      fetchCorp(from, to);
+      // The API returns totals for all payments for this client
+      if (data.totals) {
+        setPaymentTotals(data.totals);
+      }
 
+      if (from && to) {
+        fetchCorp(from, to);
+      }
     } catch (err) {
       console.error(err);
       alert("Error: " + err.message);
@@ -130,40 +168,57 @@ export default function CorpPage() {
 
   if (!session?.user) return null;
 
+  const hasResult = !!result;
+
   return (
     <ResponsiveLayout currentPageName="Corporation Tax">
       <div className="p-6 space-y-6">
-        <h1 className="text-3xl font-bold">Corporation Tax</h1>
+        <h1 className="text-3xl font-bold text-slate-900">Corporation Tax</h1>
+        <p className="text-slate-600">
+          Cockpit view of trading income, allowable expenses, add‑backs, and Corporation Tax liability for your chosen accounting year.
+        </p>
 
-        {/* Controls */}
+        {/* Period controls */}
         <ResponsiveCard title="Select Accounting Year">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              className="border p-2 rounded"
-              disabled={result?.locked}
-            />
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              className="border p-2 rounded"
-              disabled={result?.locked}
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Period start
+              </label>
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="border p-2 rounded w-full"
+                disabled={result?.locked}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Period end
+              </label>
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="border p-2 rounded w-full"
+                disabled={result?.locked}
+              />
+            </div>
+
             <div className="flex gap-2">
               <button
                 onClick={() => fetchCorp()}
-                className="bg-blue-600 text-white rounded px-4 py-2"
+                className="bg-blue-600 text-white rounded px-4 py-2 w-full sm:w-auto"
                 disabled={result?.locked || loading}
               >
                 {loading ? "Loading…" : "Get Summary"}
               </button>
-              {result && !result.locked && (
+              {hasResult && !result.locked && (
                 <button
                   onClick={submitCorp}
-                  className="bg-green-600 text-white px-4 py-2 rounded"
+                  className="bg-green-600 text-white px-4 py-2 rounded w-full sm:w-auto"
                   disabled={loading}
                 >
                   {loading ? "Submitting…" : "Lock Period"}
@@ -173,56 +228,172 @@ export default function CorpPage() {
           </div>
         </ResponsiveCard>
 
-        {/* Results */}
-        {result && (
+        {/* Summary + KPIs */}
+        {hasResult && (
           <>
-            <ResponsiveCard title={`Summary ${result.locked ? "(Locked)" : ""}`}>
-              <p><strong>Total Income:</strong> £{result.totalIncome.toFixed(2)}</p>
-              <p><strong>Total Expenses:</strong> £{result.totalExpenses.toFixed(2)}</p>
-              <p><strong>Profit:</strong> £{result.profit.toFixed(2)}</p>
-              <p><strong>Estimated Tax (19%):</strong> £{result.taxLiability.toFixed(2)}</p>
-            </ResponsiveCard>
-
-            {/* ✅ CT Payments */}
-            <ResponsiveCard title="Corporation Tax Payments">
-              <p><strong>Total CT Due:</strong> £{result.totalCorpTaxDue.toFixed(2)}</p>
-              <p><strong>Total Paid:</strong> £{result.totalCtPaid.toFixed(2)}</p>
-              <p><strong>Balance:</strong> £{result.ctBalance.toFixed(2)}</p>
-
-              <div className="mt-4">
-                <button
-                  onClick={() => setShowPaymentModal(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded"
-                >
-                  Add Payment
-                </button>
+            <ResponsiveCard title={`Corporation Tax Summary ${result.locked ? "(Locked)" : ""}`}>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Trading income</p>
+                  <p className="text-xl font-semibold text-emerald-700">
+                    £{result.income.toFixed(2)}
+                  </p>
+                </div>
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Allowable expenses</p>
+                  <p className="text-xl font-semibold text-red-600">
+                    £{result.allowable.toFixed(2)}
+                  </p>
+                </div>
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Add‑backs (disallowable)</p>
+                  <p className="text-xl font-semibold text-amber-600">
+                    £{result.disallowable.toFixed(2)}
+                  </p>
+                </div>
               </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Profit</p>
+                  <p className="text-xl font-semibold text-slate-900">
+                    £{result.profit.toFixed(2)}
+                  </p>
+                </div>
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Adjusted profit</p>
+                  <p className="text-xl font-semibold text-slate-900">
+                    £{result.adjustedProfit.toFixed(2)}
+                  </p>
+                </div>
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Corporation Tax due</p>
+                  <p className="text-xl font-semibold text-indigo-700">
+                    £{result.corpTaxDue.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Effective rate: {result.effectiveRate.toFixed(2)}%
+                  </p>
+                </div>
+              </div>
+
+              {reviewRows.length > 0 && (
+                <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
+                  There are <strong>{reviewRows.length}</strong> transactions marked as{" "}
+                  <strong>review/uncategorised</strong>. These do not slot cleanly
+                  into HMRC‑aligned CT rules and should be checked before filing.
+                </div>
+              )}
             </ResponsiveCard>
 
-            <ResponsiveCard title={`Transactions ${result.locked ? "(Locked)" : ""}`}>
+            {/* Corporation Tax Payments */}
+            <ResponsiveCard title="Corporation Tax Payments">
+              <p className="text-sm text-slate-600 mb-2">
+                Track payments to and refunds from HMRC for this client. These records are stored
+                separately from transactions and used for reconciliation.
+              </p>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">CT due (this period)</p>
+                  <p className="text-lg font-semibold text-indigo-700">
+                    £{result.corpTaxDue.toFixed(2)}
+                  </p>
+                </div>
+
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Total paid (all time)</p>
+                  <p className="text-lg font-semibold text-emerald-700">
+                    £{paymentTotals?.totalPaid?.toFixed(2) ?? "0.00"}
+                  </p>
+                </div>
+
+                <div className="border rounded p-3 bg-slate-50">
+                  <p className="text-xs uppercase text-slate-500">Net paid (payments - refunds)</p>
+                  <p className="text-lg font-semibold text-slate-900">
+                    £{paymentTotals?.netPaid?.toFixed(2) ?? "0.00"}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowPaymentModal(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+              >
+                Add payment or refund
+              </button>
+            </ResponsiveCard>
+
+            {/* Drilldown: Income */}
+            <ResponsiveCard title="Trading income breakdown">
               <ResponsiveTable
                 columns={[
                   { header: "Date", accessor: "date" },
                   { header: "Description", accessor: "description" },
-                  { header: "Type", accessor: "type" },
+                  { header: "Category", accessor: "business_category" },
                   { header: "Amount (£)", accessor: "amount" },
                 ]}
-                data={result.transactions}
+                data={incomeRows}
               />
             </ResponsiveCard>
+
+            {/* Drilldown: Allowable */}
+            <ResponsiveCard title="Allowable expenses breakdown">
+              <ResponsiveTable
+                columns={[
+                  { header: "Date", accessor: "date" },
+                  { header: "Description", accessor: "description" },
+                  { header: "Category", accessor: "business_category" },
+                  { header: "Amount (£)", accessor: "amount" },
+                ]}
+                data={allowableRows}
+              />
+            </ResponsiveCard>
+
+            {/* Drilldown: Disallowable / add-backs */}
+            <ResponsiveCard title="Disallowable expenses (add‑backs)">
+              <ResponsiveTable
+                columns={[
+                  { header: "Date", accessor: "date" },
+                  { header: "Description", accessor: "description" },
+                  { header: "Category", accessor: "business_category" },
+                  { header: "Amount (£)", accessor: "amount" },
+                ]}
+                data={disallowableRows}
+              />
+            </ResponsiveCard>
+
+            {/* Drilldown: Review / uncategorised */}
+            {reviewRows.length > 0 && (
+              <ResponsiveCard title="Review / uncategorised transactions">
+                <p className="text-sm text-slate-600 mb-2">
+                  These rows are not clearly allowable or disallowable. Adjust their categories on
+                  the Transactions page to tidy your Corporation Tax position.
+                </p>
+                <ResponsiveTable
+                  columns={[
+                    { header: "Date", accessor: "date" },
+                    { header: "Description", accessor: "description" },
+                    { header: "Category", accessor: "business_category" },
+                    { header: "CT Type", accessor: "ctType" },
+                    { header: "Amount (£)", accessor: "amount" },
+                  ]}
+                  data={reviewRows}
+                />
+              </ResponsiveCard>
+            )}
           </>
         )}
       </div>
 
-      {/* ✅ Payment Modal */}
+      {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded shadow-lg w-full max-w-md space-y-4">
-
             <h2 className="text-xl font-bold">Add Corporation Tax Payment</h2>
 
             <div className="space-y-2">
-              <label className="block font-medium">Payment Date</label>
+              <label className="block font-medium text-sm">Payment date</label>
               <input
                 type="date"
                 value={paymentDate}
@@ -232,7 +403,7 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium">Amount (£)</label>
+              <label className="block font-medium text-sm">Amount (£)</label>
               <input
                 type="number"
                 value={paymentAmount}
@@ -242,7 +413,7 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium">Direction</label>
+              <label className="block font-medium text-sm">Direction</label>
               <select
                 value={paymentDirection}
                 onChange={(e) => setPaymentDirection(e.target.value)}
@@ -254,7 +425,7 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium">Reference (optional)</label>
+              <label className="block font-medium text-sm">Reference (optional)</label>
               <input
                 type="text"
                 value={paymentReference}
@@ -270,12 +441,11 @@ export default function CorpPage() {
               >
                 Cancel
               </button>
-
               <button
                 onClick={submitPayment}
                 className="px-4 py-2 bg-green-600 text-white rounded"
               >
-                Save Payment
+                Save payment
               </button>
             </div>
           </div>
