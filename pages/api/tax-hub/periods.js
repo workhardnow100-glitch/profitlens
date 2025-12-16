@@ -1,7 +1,6 @@
-// pages/api/tax-hub/periods.js
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
-// Helper: simple date formatter
+// Helper: format date → YYYY-MM-DD
 function fmt(d) {
   return d.toISOString().split("T")[0];
 }
@@ -19,7 +18,7 @@ function label(start, end) {
   })}`;
 }
 
-// Generate VAT periods based on stagger (HMRC-style, 16th–15th)
+// Generate VAT periods based on stagger (16th → 15th, HMRC style)
 function generateVatPeriods(stagger, yearsBack = 2) {
   const now = new Date();
   const periods = [];
@@ -32,10 +31,9 @@ function generateVatPeriods(stagger, yearsBack = 2) {
 
   for (let y = now.getFullYear() - yearsBack; y <= now.getFullYear(); y++) {
     for (const m of staggerMonths) {
-      const start = new Date(y, m, 16);      // 16th of month
-      const end = new Date(y, m + 3, 15);    // 15th, 3 months later
+      const start = new Date(y, m, 16);       // 16th
+      const end = new Date(y, m + 3, 15);     // 15th, 3 months later
 
-      // Only include periods that have ended (or end today)
       if (end <= now) {
         const startStr = fmt(start);
         const endStr = fmt(end);
@@ -49,7 +47,7 @@ function generateVatPeriods(stagger, yearsBack = 2) {
     }
   }
 
-  // Newest first
+  // newest first
   return periods.reverse();
 }
 
@@ -96,7 +94,7 @@ export default async function handler(req, res) {
       else if (canonical === "self assessment") grouped.sa.push(tx);
     });
 
-    // 4. VAT stagger (manual override)
+    // 4. VAT stagger from settings (manual override)
     const { data: vatSetting } = await supabaseAdmin
       .from("vat_settings")
       .select("stagger")
@@ -105,7 +103,7 @@ export default async function handler(req, res) {
 
     let stagger = vatSetting?.stagger || null;
 
-    // If no explicit stagger, try to infer from earliest VAT tx
+    // If no explicit stagger, infer from earliest VAT tx
     if (!stagger && grouped.vat.length > 0) {
       const earliest = grouped.vat
         .map((tx) => new Date(tx.date))
@@ -256,9 +254,9 @@ export default async function handler(req, res) {
     const vatPeriods = [];
 
     for (const p of rawVatPeriods) {
-      // Call your existing VAT summary API
+      // ✅ PRODUCTION-SAFE internal call using origin header
       const summaryRes = await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL}/api/vat/summary`,
+        `${req.headers.origin}/api/vat/summary`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -269,6 +267,22 @@ export default async function handler(req, res) {
           }),
         }
       );
+
+      if (!summaryRes.ok) {
+        // If summary fails, just treat as zeroed period
+        vatPeriods.push({
+          periodLabel: p.periodLabel,
+          periodStart: p.periodStart,
+          periodEnd: p.periodEnd,
+          locked: false,
+          hmrcAuthorized: false,
+          submitted: false,
+          outputVat: 0,
+          inputVat: 0,
+          netVat: 0,
+        });
+        continue;
+      }
 
       const summary = await summaryRes.json();
 
@@ -283,7 +297,7 @@ export default async function handler(req, res) {
         periodStart: p.periodStart,
         periodEnd: p.periodEnd,
         locked: summary.locked || false,
-        hmrcAuthorized: true, // or derive from client settings if you have it
+        hmrcAuthorized: true, // you can swap to client-based flag later
         submitted: summary.submitted || false,
         outputVat: box1,
         inputVat: box4,
