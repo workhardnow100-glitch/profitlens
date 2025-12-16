@@ -254,7 +254,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // ⬇️ Aggregation logic
+  // Aggregation logic
   const {
     totalIncome,
     totalExpenses,
@@ -288,7 +288,6 @@ export default function Transactions() {
       const merchant =
         (tx.description && tx.description.trim()) || "Unknown";
 
-      // For aggregation, treat CIS categories as their own category label
       const category =
         rawCategory === "cis_deducted"
           ? "CIS Deducted"
@@ -354,7 +353,6 @@ export default function Transactions() {
     };
   }, [filtered]);
 
-  // ⬇️ Chart options
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     if (!filtered.length) return "NO_DATA";
@@ -546,9 +544,11 @@ export default function Transactions() {
                 const rawCategory =
                   tx.category || inferCategory(tx.description);
 
-                // Friendly category label for CIS types
+                // Friendly category label
                 const displayCategory =
-                  rawCategory === "cis_deducted"
+                  rawCategory === "cis"
+                    ? "CIS"
+                    : rawCategory === "cis_deducted"
                     ? "CIS Deducted"
                     : rawCategory === "cis_suffered"
                     ? "CIS Suffered"
@@ -596,11 +596,11 @@ export default function Transactions() {
                   });
                 }
 
-                // ✅ CIS selection derived from category
+                // ✅ CIS selection derived from cis_type (not category)
                 const cisSelection =
-                  rawCategory === "cis_deducted"
+                  tx.cis_type === "deducted"
                     ? "deducted"
-                    : rawCategory === "cis_suffered"
+                    : tx.cis_type === "suffered"
                     ? "suffered"
                     : "none";
 
@@ -612,6 +612,7 @@ export default function Transactions() {
                     body: JSON.stringify({
                       id: tx.id,
                       cisType: newValue,
+                      amount: tx.amount, // ✅ REQUIRED for cis_amount
                     }),
                   });
                 }
