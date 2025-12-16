@@ -8,19 +8,19 @@ export default async function handler(req, res) {
 
   const { id, cisType, amount } = req.body;
 
-  if (!id || !cisType) {
+  if (!id || !cisType || amount === undefined) {
     return res.status(400).json({ error: "Missing fields" });
   }
 
   try {
-    // ✅ Determine CIS fields
+    // ✅ CIS rate is always 20%
     const cis_rate = 20;
+
+    // ✅ CIS amount = 20% of absolute amount
     const cis_amount = Math.abs(Number(amount)) * (cis_rate / 100);
 
-    // ✅ Map cisType to category
-    const category = cisType === "deducted" 
-      ? "cis_deducted" 
-      : "cis_suffered";
+    // ✅ Always use category = "cis"
+    const category = "cis";
 
     // ✅ Fetch CIS HMRC category UUID
     const { data: cisCat, error: catErr } = await supabaseAdmin
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     // ✅ Build update payload
     const updatePayload = {
       category,
-      cis_type: cisType,
+      cis_type: cisType,     // "suffered" or "deducted"
       cis_rate,
       cis_amount,
       hmrc_category_id,
