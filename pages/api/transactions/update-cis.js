@@ -6,36 +6,40 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { id, cisType } = req.body;
+  const { id, cisType, amount } = req.body;
 
-  if (!id) {
-    return res.status(400).json({ error: "Missing transaction ID" });
+  if (!id || !cisType) {
+    return res.status(400).json({ error: "Missing fields" });
   }
 
   try {
-    // ✅ Determine category + CIS mapping
-    let category = null;
-    if (cisType === "deducted") category = "cis_deducted";
-    if (cisType === "suffered") category = "cis_suffered";
+    // ✅ Determine CIS fields
+    const cis_rate = 20;
+    const cis_amount = Math.abs(Number(amount)) * (cis_rate / 100);
+
+    // ✅ Map cisType to category
+    const category = cisType === "deducted" 
+      ? "cis_deducted" 
+      : "cis_suffered";
 
     // ✅ Fetch CIS HMRC category UUID
-    let cisCategoryId = null;
+    const { data: cisCat, error: catErr } = await supabaseAdmin
+      .from("hmrc_categories")
+      .select("id")
+      .eq("canonical_name", "cis")
+      .maybeSingle();
 
-    if (category) {
-      const { data: cisCat, error: catErr } = await supabaseAdmin
-        .from("hmrc_categories")
-        .select("id")
-        .eq("canonical_name", "cis")
-        .maybeSingle();
+    if (catErr) throw catErr;
 
-      if (catErr) throw catErr;
-      cisCategoryId = cisCat?.id || null;
-    }
+    const hmrc_category_id = cisCat?.id || null;
 
     // ✅ Build update payload
     const updatePayload = {
-      category: category, // null if "none"
-      hmrc_category_id: cisCategoryId, // null if "none"
+      category,
+      cis_type: cisType,
+      cis_rate,
+      cis_amount,
+      hmrc_category_id,
     };
 
     // ✅ Update transaction
