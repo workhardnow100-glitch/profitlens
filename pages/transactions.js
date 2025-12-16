@@ -282,11 +282,19 @@ export default function Transactions() {
 
     filtered.forEach((tx) => {
       const amount = parseFloat(tx.amount) || 0;
-      const category =
+      const rawCategory =
         (tx.category && tx.category.trim()) ||
         inferCategory(tx.description);
       const merchant =
         (tx.description && tx.description.trim()) || "Unknown";
+
+      // For aggregation, treat CIS categories as their own category label
+      const category =
+        rawCategory === "cis_deducted"
+          ? "CIS Deducted"
+          : rawCategory === "cis_suffered"
+          ? "CIS Suffered"
+          : rawCategory;
 
       if (isIncome(amount)) {
         if (!excludedCategories.has(category)) {
@@ -498,7 +506,7 @@ export default function Transactions() {
               "Description",
               "Amount",
               "Category",
-              "VAT Rate",
+              "VAT / CIS",
               "VAT Amount",
             ]}
           >
@@ -535,8 +543,16 @@ export default function Transactions() {
             {data &&
               filtered.length > 0 &&
               filtered.map((tx) => {
-                const category =
+                const rawCategory =
                   tx.category || inferCategory(tx.description);
+
+                // Friendly category label for CIS types
+                const displayCategory =
+                  rawCategory === "cis_deducted"
+                    ? "CIS Deducted"
+                    : rawCategory === "cis_suffered"
+                    ? "CIS Suffered"
+                    : rawCategory;
 
                 // Default VAT logic (for display)
                 const defaultVatRate = (() => {
@@ -548,12 +564,12 @@ export default function Transactions() {
                       "Loan Repayment",
                       "Insurance Premium",
                       "Council Tax",
-                    ].includes(category)
+                    ].includes(displayCategory)
                   )
                     return 0;
                   if (
                     ["Groceries", "Books", "Education", "Childcare"].includes(
-                      category
+                      displayCategory
                     )
                   )
                     return 0;
@@ -580,6 +596,26 @@ export default function Transactions() {
                   });
                 }
 
+                // ✅ CIS selection derived from category
+                const cisSelection =
+                  rawCategory === "cis_deducted"
+                    ? "deducted"
+                    : rawCategory === "cis_suffered"
+                    ? "suffered"
+                    : "none";
+
+                async function updateCIS(newValue) {
+                  // newValue: "none" | "deducted" | "suffered"
+                  await fetch("/api/transactions/update-cis", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      id: tx.id,
+                      cisType: newValue,
+                    }),
+                  });
+                }
+
                 const effectiveVatAmount =
                   tx.vat_amount != null
                     ? Number(tx.vat_amount)
@@ -602,24 +638,48 @@ export default function Transactions() {
                         ? `+£${tx.amount.toFixed(2)}`
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
-                    <td>{category}</td>
 
-                    {/* VAT Rate */}
+                    {/* Category (friendly) */}
+                    <td>{displayCategory}</td>
+
+                    {/* VAT + CIS in one column */}
                     <td>
-                      <select
-                        className="border p-1 rounded"
-                        defaultValue={vatRate}
-                        onChange={(e) => updateVAT(e.target.value)}
-                      >
-                        <option value={20}>20% Standard</option>
-                        <option value={5}>5% Reduced</option>
-                        <option value={0}>0% Zero Rated</option>
-                        <option value={0}>Exempt</option>
-                        <option value={0}>Out of Scope</option>
-                      </select>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">
+                            VAT:
+                          </span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            defaultValue={vatRate}
+                            onChange={(e) => updateVAT(e.target.value)}
+                          >
+                            <option value={20}>20% Standard</option>
+                            <option value={5}>5% Reduced</option>
+                            <option value={0}>0% Zero Rated</option>
+                            <option value={0}>Exempt</option>
+                            <option value={0}>Out of Scope</option>
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">
+                            CIS:
+                          </span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            defaultValue={cisSelection}
+                            onChange={(e) => updateCIS(e.target.value)}
+                          >
+                            <option value="none">No CIS</option>
+                            <option value="deducted">CIS Deducted</option>
+                            <option value="suffered">CIS Suffered</option>
+                          </select>
+                        </div>
+                      </div>
                     </td>
 
-                    {/* VAT Amount */}
+                    {/* VAT Amount (for now, still just VAT) */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
                   </tr>
                 );
