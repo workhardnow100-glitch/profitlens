@@ -6,6 +6,46 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// ✅ Global, bank-agnostic code hints
+const EXPENSE_TYPE_HINTS = [
+  // Generic/bank codes
+  "DEB", "DR", "DB", "D",
+  "PAY", "POS", "CARD", "CPT",
+  "DD", "SO", "ATM", "CHG", "FEE",
+  "PUR", "WITHDRAWAL",
+];
+
+const INCOME_TYPE_HINTS = [
+  "CR", "CRD", "C",
+  "BGC", "FPI", "FPS",
+  "DEP", "REV", "REFUND",
+  "SAL", "INT",
+];
+
+// Codes that usually represent internal transfers / non-VATable flows
+const TRANSFER_TYPE_HINTS = [
+  "TFR", "TRANSFER", "TFR IN", "TFR OUT",
+];
+
+function classifyTransactionType(rawType, amount) {
+  const type = (rawType || "").toUpperCase().trim();
+  const gross = Number(amount || 0);
+
+  // 1️⃣ Transfer / neutral → ignore for VAT
+  if (TRANSFER_TYPE_HINTS.includes(type)) return "transfer";
+
+  // 2️⃣ Bank code hints
+  if (INCOME_TYPE_HINTS.includes(type)) return "income";
+  if (EXPENSE_TYPE_HINTS.includes(type)) return "expense";
+
+  // 3️⃣ Universal fallback: sign of amount
+  if (gross > 0) return "income";
+  if (gross < 0) return "expense";
+
+  // 4️⃣ Unknown / zero → ignore
+  return null;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -18,8 +58,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1️⃣ Optional: load VAT period record (lock + submitted)
-    const { data: vatPeriod, error: periodError } = await supabase
+    // 1️⃣ Optional: VAT period record (lock + submitted status)
+    const { data: vatPeriod } = await supabase
       .from("vat_periods")
       .select("*")
       .eq("client_id", clientId)
@@ -27,15 +67,11 @@ export default async function handler(req, res) {
       .eq("period_end", periodEnd)
       .maybeSingle();
 
-    if (periodError && periodError.code !== "PGRST116") {
-      throw periodError;
-    }
-
     const vatPeriodId = vatPeriod?.id ?? null;
     const locked = !!vatPeriod?.locked;
     const submitted = !!vatPeriod?.submitted;
 
-    // 2️⃣ Fetch VAT-relevant transactions for client + date range
+    // 2️⃣ Fetch VAT-relevant transactions
     const { data: transactions, error: txError } = await supabase
       .from("transactions")
       .select(
@@ -47,55 +83,57 @@ export default async function handler(req, res) {
       // VAT-relevant: has a rate or a non-zero VAT amount
       .or("vat_rate.not.is.null,vat_amount.not.eq.0");
 
-    if (txError) {
-      throw txError;
-    }
+    if (txError) throw txError;
 
     const vatTransactions = transactions || [];
 
-    // 3️⃣ Determine if all VAT transactions in this period are locked
+    // 3️⃣ Determine locked state
     const isLockedByTx =
       vatTransactions.length > 0 &&
       vatTransactions.every((tx) => tx.tax_locked === true);
 
     const effectiveLocked = locked || isLockedByTx;
 
-    // 4️⃣ Calculate VAT boxes from transactions
-    let box1 = 0; // VAT due on sales
-    let box2 = 0; // VAT due on acquisitions (kept 0 for now)
-    let box4 = 0; // VAT reclaimed on purchases
-    let box6 = 0; // Total sales (net)
-    let box7 = 0; // Total purchases (net)
-    let box8 = 0; // EU supplies (0 for now)
-    let box9 = 0; // EU acquisitions (0 for now)
+    // 4️⃣ VAT box totals
+    let box1 = 0; // VAT due on sales and other outputs
+    let box2 = 0; // VAT due on acquisitions (unused for now)
+    let box4 = 0; // VAT reclaimed on purchases and other inputs
+    let box6 = 0; // Total value of sales and all other outputs (net)
+    let box7 = 0; // Total value of purchases and all other inputs (net)
+    let box8 = 0; // EU supplies (unused for now)
+    let box9 = 0; // EU acquisitions (unused for now)
 
     for (const tx of vatTransactions) {
-      const gross = Number(tx.amount || 0);
-      const vat = Number(tx.vat_amount || 0);
+      const gross = Number(tx.amount || 0);   // may be negative
+      const vat = Number(tx.vat_amount || 0); // may be negative
       const net = gross - vat;
-      const type = tx.type; // "income" or "expense"
 
-      if (!type) continue;
+      const classification = classifyTransactionType(tx.type, gross);
 
-      if (type === "income") {
-        // Sales
-        box6 += net;
-        if (vat > 0) {
-          box1 += vat;
-        }
-      } else if (type === "expense") {
-        // Purchases
-        box7 += net;
-        if (vat > 0) {
-          box4 += vat;
-        }
+      // Ignore transfers / unknowns for VAT
+      if (!classification || classification === "transfer") continue;
+
+      // For VAT boxes, we want positive values
+      const netAbs = Math.abs(net);
+      const vatAbs = Math.abs(vat);
+
+      if (classification === "income") {
+        // Sales / outputs
+        box6 += netAbs;
+        if (vatAbs > 0) box1 += vatAbs;
+      }
+
+      if (classification === "expense") {
+        // Purchases / inputs
+        box7 += netAbs;
+        if (vatAbs > 0) box4 += vatAbs;
       }
     }
 
     let box3 = box1 + box2;
     let box5 = box3 - box4;
 
-    // 5️⃣ Load VAT adjustments for this client + period (by vat_period_id if available, else by date range)
+    // 5️⃣ Load VAT adjustments
     let adjustments = [];
     if (vatPeriodId) {
       const { data: adjData, error: adjError } = await supabase
@@ -103,7 +141,6 @@ export default async function handler(req, res) {
         .select("*")
         .eq("client_id", clientId)
         .eq("vat_period_id", vatPeriodId);
-
       if (adjError) throw adjError;
       adjustments = adjData || [];
     } else {
@@ -113,12 +150,11 @@ export default async function handler(req, res) {
         .eq("client_id", clientId)
         .gte("created_at", periodStart)
         .lte("created_at", periodEnd);
-
       if (adjError) throw adjError;
       adjustments = adjData || [];
     }
 
-    // 6️⃣ Apply adjustments per box
+    // 6️⃣ Apply adjustments
     for (const adj of adjustments) {
       const amt = Number(adj.amount || 0);
       switch (adj.box) {
@@ -154,11 +190,10 @@ export default async function handler(req, res) {
       }
     }
 
-    // Recalculate dependent boxes to keep everything consistent
+    // 7️⃣ Recalculate dependent boxes
     box3 = box1 + box2;
     box5 = box3 - box4;
 
-    // 7️⃣ Return HMRC-style summary + raw data
     return res.status(200).json({
       period: `${periodStart} → ${periodEnd}`,
       locked: effectiveLocked,
