@@ -40,6 +40,7 @@ export default function TaxHub() {
 
   const [vatStagger, setVatStagger] = useState(1);
   const [showOlderVatPeriods, setShowOlderVatPeriods] = useState(false);
+  const [showOlderCisPeriods, setShowOlderCisPeriods] = useState(false);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -84,7 +85,7 @@ export default function TaxHub() {
         totalCtPaid: data.totalCtPaid || 0,
         ctBalance: data.ctBalance || 0,
 
-        // SA summary fields – if you compute these later in backend, they’ll land here
+        // SA summary fields
         totalSaIncome: data.totalSaIncome || 0,
         totalSaExpenses: data.totalSaExpenses || 0,
         saProfit: data.saProfit || 0,
@@ -142,6 +143,31 @@ export default function TaxHub() {
   const activeVatPeriods = vatPeriods.slice(0, 4);
   const olderVatPeriods = vatPeriods.slice(4);
 
+  // ✅ Derived CIS period lists + summary for cockpit
+  const cisPeriods = periods.cis || [];
+  const activeCisPeriods = cisPeriods.slice(0, 4);
+  const olderCisPeriods = cisPeriods.slice(4);
+
+  const totalCisDeducted = cisPeriods.reduce(
+    (sum, p) => sum + (p.cisDeducted || 0),
+    0
+  );
+  const totalCisSuffered = cisPeriods.reduce(
+    (sum, p) => sum + (p.cisSuffered || 0),
+    0
+  );
+
+  const totalNetCis = cisPeriods.reduce((sum, p) => {
+    if (typeof p.netCis === "number") return sum + p.netCis;
+    const deducted = p.cisDeducted || 0;
+    const suffered = p.cisSuffered || 0;
+    return sum + (deducted - suffered);
+  }, 0);
+
+  const overdueCisCount = cisPeriods.filter(
+    (p) => p.status === "Overdue"
+  ).length;
+
   return (
     <ResponsiveLayout currentPageName="Tax Hub">
       <div className="p-6 space-y-6">
@@ -150,7 +176,8 @@ export default function TaxHub() {
         {needsHMRCAuth && !loading && (
           <div className="mb-4">
             <p className="text-yellow-600 mb-2">
-              HMRC account not connected. You must authorize to submit VAT/CIS periods.
+              HMRC account not connected. You must authorize to submit VAT/CIS
+              periods.
             </p>
             <a
               href="/api/hmrc/auth"
@@ -204,7 +231,8 @@ export default function TaxHub() {
                       <div className="p-3 rounded bg-yellow-100 border border-yellow-300 text-sm">
                         <p className="font-semibold text-yellow-800">
                           You have {periods.overdueVatCount} overdue VAT return
-                          {periods.overdueVatCount > 1 ? "s" : ""} that must be filed in order.
+                          {periods.overdueVatCount > 1 ? "s" : ""} that must be
+                          filed in order.
                         </p>
                       </div>
                     )}
@@ -248,20 +276,32 @@ export default function TaxHub() {
                         How to file late VAT returns
                       </summary>
                       <div className="mt-2 space-y-1">
-                        <p>1. Start with the oldest overdue VAT period in the list.</p>
-                        <p>2. Click “View” to review the VAT return for that period.</p>
-                        <p>3. When you are happy, click “Submit” to send it to HMRC.</p>
+                        <p>
+                          1. Start with the oldest overdue VAT period in the
+                          list.
+                        </p>
+                        <p>
+                          2. Click “View” to review the VAT return for that
+                          period.
+                        </p>
+                        <p>
+                          3. When you are happy, click “Submit” to send it to
+                          HMRC.
+                        </p>
                         <p>4. Repeat for the next oldest overdue period.</p>
                         <p className="mt-1 text-xs text-gray-600">
-                          HMRC requires VAT returns to be filed in chronological order.
-                          Newer periods may be blocked until older ones are submitted.
+                          HMRC requires VAT returns to be filed in
+                          chronological order. Newer periods may be blocked
+                          until older ones are submitted.
                         </p>
                       </div>
                     </details>
 
                     {/* VAT Payments */}
                     <div>
-                      <h3 className="text-lg font-semibold mb-2">VAT Payments</h3>
+                      <h3 className="text-lg font-semibold mb-2">
+                        VAT Payments
+                      </h3>
 
                       <div className="mb-4">
                         <p className="font-medium">
@@ -334,9 +374,13 @@ export default function TaxHub() {
                             const amount =
                               document.getElementById("vatPaymentAmount").value;
                             const direction =
-                              document.getElementById("vatPaymentDirection").value;
+                              document.getElementById(
+                                "vatPaymentDirection"
+                              ).value;
                             const reference =
-                              document.getElementById("vatPaymentReference").value;
+                              document.getElementById(
+                                "vatPaymentReference"
+                              ).value;
 
                             if (!paymentDate || !amount) {
                               alert("Please enter a date and amount.");
@@ -532,7 +576,7 @@ export default function TaxHub() {
                   </div>
                 )}
 
-                {/* VAT period list (cockpit) vs generic period list for others */}
+                {/* VAT cockpit, CIS cockpit, generic list for Corp / SA */}
                 {tax.key === "vat" ? (
                   <>
                     {/* View latest VAT return */}
@@ -614,7 +658,6 @@ export default function TaxHub() {
                                     >
                                       View
                                     </button>
-
                                     <button
                                       className={`px-2 py-1 rounded text-white ${
                                         canSubmit
@@ -665,7 +708,8 @@ export default function TaxHub() {
                                         } catch (err) {
                                           console.error(err);
                                           alert(
-                                            "Submission error: " + err.message
+                                            "Submission error: " +
+                                              err.message
                                           );
                                         }
                                       }}
@@ -754,8 +798,314 @@ export default function TaxHub() {
                       <p className="mt-4">No VAT periods available.</p>
                     )}
                   </>
+                ) : tax.key === "cis" ? (
+                  <>
+                    {/* ✅ CIS cockpit summary + help + periods */}
+
+                    {/* Overdue CIS warning */}
+                    {overdueCisCount > 0 && (
+                      <div className="mt-4 p-3 rounded bg-yellow-100 border border-yellow-300 text-sm">
+                        <p className="font-semibold text-yellow-800">
+                          You have {overdueCisCount} overdue CIS return
+                          {overdueCisCount > 1 ? "s" : ""} that should be filed
+                          in order.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* CIS activity summary */}
+                    <div className="mt-4 p-3 rounded bg-white border text-sm space-y-1">
+                      <h4 className="font-semibold mb-1">
+                        CIS Summary (Last 5 Years)
+                      </h4>
+                      <p>
+                        CIS Deducted:{" "}
+                        <span className="font-semibold text-blue-700">
+                          £{totalCisDeducted.toFixed(2)}
+                        </span>
+                      </p>
+                      <p>
+                        CIS Suffered:{" "}
+                        <span className="font-semibold text-green-700">
+                          £{totalCisSuffered.toFixed(2)}
+                        </span>
+                      </p>
+                      <p>
+                        Net CIS:{" "}
+                        <span
+                          className={
+                            totalNetCis > 0
+                              ? "font-semibold text-red-700"
+                              : totalNetCis < 0
+                              ? "font-semibold text-blue-700"
+                              : "font-semibold text-gray-700"
+                          }
+                        >
+                          £{totalNetCis.toFixed(2)}
+                        </span>
+                      </p>
+                    </div>
+
+                    {/* How to manage CIS returns */}
+                    <details className="mt-3 p-3 rounded bg-white border text-sm">
+                      <summary className="font-semibold cursor-pointer">
+                        How to manage CIS returns
+                      </summary>
+                      <div className="mt-2 space-y-1">
+                        <p>
+                          1. Start with the oldest overdue CIS period in the
+                          list.
+                        </p>
+                        <p>2. Click “View” to review that CIS return.</p>
+                        <p>
+                          3. When you are happy, click “Submit” to send it to
+                          HMRC.
+                        </p>
+                        <p>4. Repeat for the next oldest overdue period.</p>
+                        <p className="mt-1 text-xs text-gray-600">
+                          HMRC expects returns to be kept up to date. If
+                          multiple CIS periods are overdue, file them in
+                          chronological order so the ledger stays clean.
+                        </p>
+                      </div>
+                    </details>
+
+                    {/* View latest CIS return */}
+                    {cisPeriods.length > 0 && (
+                      <button
+                        className="mt-4 mb-2 bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                        onClick={() =>
+                          router.push(
+                            `/cis?from=${cisPeriods[0].periodStart}&to=${cisPeriods[0].periodEnd}`
+                          )
+                        }
+                      >
+                        View Latest CIS Return
+                      </button>
+                    )}
+
+                    {cisPeriods.length > 0 ? (
+                      <div className="mt-2 space-y-4">
+                        {/* Active / recent CIS periods */}
+                        <div>
+                          <h4 className="font-semibold mb-2">
+                            Active CIS Periods
+                          </h4>
+                          <ul className="space-y-2 text-sm">
+                            {activeCisPeriods.map((p) => {
+                              const hasUnsubmittedOlder = cisPeriods.some(
+                                (other) =>
+                                  new Date(other.periodEnd) <
+                                    new Date(p.periodEnd) && !other.submitted
+                              );
+
+                              const canSubmit =
+                                !p.locked &&
+                                p.hmrcAuthorized &&
+                                !hasUnsubmittedOlder;
+
+                              const netCis =
+                                typeof p.netCis === "number"
+                                  ? p.netCis
+                                  : (p.cisDeducted || 0) -
+                                    (p.cisSuffered || 0);
+
+                              return (
+                                <li
+                                  key={p.periodStart}
+                                  className="flex justify-between items-center border p-2 rounded"
+                                >
+                                  <div>
+                                    <div>{p.periodLabel}</div>
+                                    <div className="text-xs text-gray-600">
+                                      Net CIS:{" "}
+                                      <span
+                                        className={
+                                          netCis > 0
+                                            ? "text-red-600 font-semibold"
+                                            : netCis < 0
+                                            ? "text-blue-600 font-semibold"
+                                            : "text-gray-700 font-semibold"
+                                        }
+                                      >
+                                        £{netCis.toFixed(2)}
+                                      </span>
+                                      {" • "}
+                                      <span
+                                        className={
+                                          p.status === "Overdue"
+                                            ? "text-red-600 font-semibold"
+                                            : p.status === "Submitted"
+                                            ? "text-green-700 font-semibold"
+                                            : "text-gray-800 font-semibold"
+                                        }
+                                      >
+                                        {p.status}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-center">
+                                    <button
+                                      className="bg-blue-600 text-white px-2 py-1 rounded"
+                                      onClick={() =>
+                                        router.push(
+                                          `/cis?from=${p.periodStart}&to=${p.periodEnd}`
+                                        )
+                                      }
+                                    >
+                                      View
+                                    </button>
+
+                                    <button
+                                      className={`px-2 py-1 rounded text-white ${
+                                        canSubmit
+                                          ? "bg-green-600"
+                                          : "bg-gray-400 cursor-not-allowed"
+                                      }`}
+                                      disabled={!canSubmit}
+                                      onClick={async () => {
+                                        if (!canSubmit) return;
+                                        if (
+                                          !confirm(
+                                            `Submit CIS period ${p.periodLabel} to HMRC?`
+                                          )
+                                        )
+                                          return;
+
+                                        try {
+                                          const res = await fetch(
+                                            `/api/cis/submit`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                clientId:
+                                                  session.user.clientId,
+                                                periodStart: p.periodStart,
+                                                periodEnd: p.periodEnd,
+                                              }),
+                                            }
+                                          );
+
+                                          const data = await res.json();
+
+                                          if (data.success) {
+                                            alert(
+                                              `CIS period submitted and locked successfully.`
+                                            );
+                                            fetchPeriods();
+                                          } else {
+                                            alert(
+                                              "Submission failed: " +
+                                                data.error
+                                            );
+                                          }
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert(
+                                            "Submission error: " +
+                                              err.message
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Submit
+                                    </button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+
+                        {/* Older CIS periods (collapsible) */}
+                        {olderCisPeriods.length > 0 && (
+                          <div>
+                            <button
+                              className="text-sm text-blue-700 underline"
+                              onClick={() =>
+                                setShowOlderCisPeriods((prev) => !prev)
+                              }
+                            >
+                              {showOlderCisPeriods
+                                ? "Hide older CIS periods"
+                                : `Show older CIS periods (${olderCisPeriods.length})`}
+                            </button>
+
+                            {showOlderCisPeriods && (
+                              <ul className="space-y-2 mt-2 text-sm">
+                                {olderCisPeriods.map((p) => {
+                                  const netCis =
+                                    typeof p.netCis === "number"
+                                      ? p.netCis
+                                      : (p.cisDeducted || 0) -
+                                        (p.cisSuffered || 0);
+
+                                  return (
+                                    <li
+                                      key={p.periodStart}
+                                      className="flex justify-between items-center border p-2 rounded"
+                                    >
+                                      <div>
+                                        <div>{p.periodLabel}</div>
+                                        <div className="text-xs text-gray-600">
+                                          Net CIS:{" "}
+                                          <span
+                                            className={
+                                              netCis > 0
+                                                ? "text-red-600 font-semibold"
+                                                : netCis < 0
+                                                ? "text-blue-600 font-semibold"
+                                                : "text-gray-700 font-semibold"
+                                            }
+                                          >
+                                            £{netCis.toFixed(2)}
+                                          </span>
+                                          {" • "}
+                                          <span
+                                            className={
+                                              p.status === "Overdue"
+                                                ? "text-red-600 font-semibold"
+                                                : p.status === "Submitted"
+                                                ? "text-green-700 font-semibold"
+                                                : "text-gray-800 font-semibold"
+                                            }
+                                          >
+                                            {p.status}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex gap-2 items-center">
+                                        <button
+                                          className="bg-blue-600 text-white px-2 py-1 rounded"
+                                          onClick={() =>
+                                            router.push(
+                                              `/cis?from=${p.periodStart}&to=${p.periodEnd}`
+                                            )
+                                          }
+                                        >
+                                          View
+                                        </button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-4">No CIS periods available.</p>
+                    )}
+                  </>
                 ) : (
-                  // Generic period list for CIS / Corp / SA
+                  // Generic period list for Corporation Tax / SA
                   (periods[tax.key] || []).length > 0 ? (
                     <ul className="space-y-2 mt-4">
                       {(periods[tax.key] || []).map((p) => (
@@ -785,65 +1135,7 @@ export default function TaxHub() {
                             >
                               View
                             </button>
-
-                            {!p.locked &&
-                              (tax.key === "vat" || tax.key === "cis") && (
-                                <button
-                                  className={`px-2 py-1 rounded text-white ${
-                                    p.hmrcAuthorized
-                                      ? "bg-green-600"
-                                      : "bg-gray-400 cursor-not-allowed"
-                                  }`}
-                                  disabled={!p.hmrcAuthorized}
-                                  onClick={async () => {
-                                    if (!p.hmrcAuthorized) return;
-                                    if (
-                                      !confirm(
-                                        `Submit ${tax.name} period ${p.periodLabel} to HMRC?`
-                                      )
-                                    )
-                                      return;
-
-                                    try {
-                                      const res = await fetch(
-                                        `/api/${tax.key}/submit`,
-                                        {
-                                          method: "POST",
-                                          headers: {
-                                            "Content-Type":
-                                              "application/json",
-                                          },
-                                          body: JSON.stringify({
-                                            clientId: session.user.clientId,
-                                            periodStart: p.periodStart,
-                                            periodEnd: p.periodEnd,
-                                          }),
-                                        }
-                                      );
-
-                                      const data = await res.json();
-
-                                      if (data.success) {
-                                        alert(
-                                          `${tax.name} period submitted and locked successfully.`
-                                        );
-                                        fetchPeriods();
-                                      } else {
-                                        alert(
-                                          "Submission failed: " + data.error
-                                        );
-                                      }
-                                    } catch (err) {
-                                      console.error(err);
-                                      alert(
-                                        "Submission error: " + err.message
-                                      );
-                                    }
-                                  }}
-                                >
-                                  Submit
-                                </button>
-                              )}
+                            {/* Generic submit left only for future extension if you ever wire CT/SA to HMRC */}
                           </div>
                         </li>
                       ))}
