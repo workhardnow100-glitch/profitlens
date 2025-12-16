@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// --- Expanded inferCategory ---
+// --- Legacy inferCategory (fallback only) ---
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
   const desc = description?.toLowerCase?.() || "";
@@ -211,7 +211,7 @@ function filterByDateWindow(transactions, from, to) {
   });
 }
 
-// ✅ Unified computeSummary with exclusions
+// ✅ Unified computeSummary using business_category (HMRC-aligned categories)
 function computeSummary(transactions) {
   let income = 0;
   let expenses = 0;
@@ -220,14 +220,19 @@ function computeSummary(transactions) {
   const excludedCategories = new Set([
     "Asset Disposal",
     "Insurance Payout",
-    "Internal Transfer",
+    "Internal Transfers",
+    "Transfers",
     "Returned Direct Debit",
-    "Transfer Between Accounts",
+    "Refunds Received",
   ]);
 
   transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
-    const category = tx.category || "Uncategorised";
+
+    const category =
+      (tx.business_category && tx.business_category.trim()) ||
+      inferCategory(tx.type, tx.description) ||
+      "Uncategorised";
 
     if (amount > 0) {
       if (!excludedCategories.has(category)) {
@@ -257,11 +262,12 @@ export default async function handler(req, res) {
   }
 
   const isFounder = session.user.role === "admin";
-const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-if (!(isFounder || isSubscribedOrTrial)) {
-  return res.status(403).json({ error: "Upgrade required" });
-}
-
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
 
   const clientId = session.user.clientId;
   if (!clientId || clientId === "unknown-client") {
@@ -282,13 +288,15 @@ if (!(isFounder || isSubscribedOrTrial)) {
       return res.status(500).json({ error: error.message });
     }
 
+    // ✅ Enrich with business_category, using legacy inferCategory ONLY as fallback
     const enriched = (data || []).map((tx) => {
-      const category =
-        tx.category?.trim() || inferCategory(tx.type, tx.description);
+      const business_category =
+        (tx.business_category && tx.business_category.trim()) ||
+        inferCategory(tx.type, tx.description);
 
       return {
         ...tx,
-        category,
+        business_category,
       };
     });
 

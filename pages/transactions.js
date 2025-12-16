@@ -9,50 +9,178 @@ import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
+// Canonical ProfitLens business categories (HMRC-aligned shape)
+const BUSINESS_CATEGORIES = [
+  // Income
+  "Sales",
+  "Other Income",
+  "Refunds Received",
+
+  // Allowable expenses
+  "Materials",
+  "Subcontractors",
+  "Tools & Equipment",
+  "Fuel",
+  "Motor Expenses",
+  "Travel & Subsistence",
+  "Rent",
+  "Utilities",
+  "Phone & Internet",
+  "Bank Charges",
+  "Insurance",
+  "Advertising & Marketing",
+  "Repairs & Maintenance",
+  "Professional Fees",
+  "Software & Subscriptions",
+  "Office Supplies",
+
+  // Disallowable / personal
+  "Clothing",
+  "Groceries",
+  "Entertainment",
+  "Personal Spending",
+  "Cash Withdrawals",
+  "Gifts",
+  "Fines & Penalties",
+  "Loan Repayments",
+  "Credit Card Payments",
+
+  // Other / system
+  "Transfers",
+  "Internal Transfers",
+  "Returned Direct Debit",
+  "Uncategorised",
+];
+
+// Legacy inference — used only as a fallback until users explicitly choose
 function inferCategory(description = "") {
   const desc = description.toLowerCase();
-  if (desc.includes("salary") || desc.includes("payroll") || desc.includes("wages")) return "Salary";
-  if (desc.includes("dividend")) return "Dividends";
-  if (desc.includes("interest")) return "Interest Income";
-  if (desc.includes("rental")) return "Rental Income";
-  if (desc.includes("grant")) return "Grant";
-  if (desc.includes("refund")) return "Refund";
-  if (desc.includes("rebate")) return "Rebate";
-  if (desc.includes("pension")) return "Pension";
-  if (desc.includes("benefit")) return "Benefits";
-  if (desc.includes("loan received") || desc.includes("drafty") || desc.includes("loan disbursement")) return "Loan Received";
-  if (desc.includes("hmrc") || desc.includes("tax")) return "Tax Payment";
-  if (desc.includes("savethechange")) return "Savings Deposit";
-  if (desc.includes("transfer")) return "Transfer Between Accounts";
-  if (desc.includes("standing order")) return "Standing Order";
-  if (desc.includes("direct debit") || desc.includes("dd")) return "Direct Debit";
-  if (desc.includes("returned dd") || desc.includes("rddp")) return "Returned Direct Debit";
-  if (desc.includes("jaja") || desc.includes("zable") || desc.includes("credit")) return "Credit Card Payment";
-  if (desc.includes("loan repayment") || desc.includes("zopa") || desc.includes("drafty repayment")) return "Loan Repayment";
-  if (desc.includes("overdraft")) return "Overdraft Repayment";
-  if (desc.includes("car finance") || desc.includes("vehicle loan")) return "Car Loan Repayment";
-  if (desc.includes("council") || desc.includes("local authority")) return "Council Tax";
-  if (desc.includes("insurance")) return "Insurance Premium";
-  if (desc.includes("mortgage")) return "Mortgage";
+
+  // Income-like
+  if (desc.includes("dividend")) return "Other Income";
+  if (desc.includes("interest")) return "Other Income";
+  if (desc.includes("rental")) return "Sales";
+  if (desc.includes("grant")) return "Other Income";
+  if (desc.includes("refund") || desc.includes("rebate")) return "Refunds Received";
+  if (desc.includes("loan received") || desc.includes("drafty") || desc.includes("loan disbursement"))
+    return "Other Income";
+
+  // Taxes / HMRC / fees
+  if (desc.includes("hmrc") || desc.includes("tax")) return "Professional Fees";
+
+  // Transfers / internal movements
+  if (desc.includes("savethechange")) return "Transfers";
+  if (desc.includes("transfer")) return "Internal Transfers";
+  if (desc.includes("standing order")) return "Internal Transfers";
+  if (desc.includes("returned dd") || desc.includes("rddp") || desc.includes("returned d/d"))
+    return "Returned Direct Debit";
+
+  // Debt / finance
+  if (desc.includes("jaja") || desc.includes("zable") || desc.includes("credit"))
+    return "Credit Card Payments";
+  if (desc.includes("loan repayment") || desc.includes("zopa") || desc.includes("drafty repayment"))
+    return "Loan Repayments";
+  if (desc.includes("overdraft")) return "Bank Charges";
+  if (desc.includes("car finance") || desc.includes("vehicle loan"))
+    return "Loan Repayments";
+
+  // Bills / housing / utilities
+  if (desc.includes("council") || desc.includes("local authority"))
+    return "Professional Fees";
+  if (desc.includes("insurance")) return "Insurance";
+  if (desc.includes("mortgage")) return "Rent";
   if (desc.includes("rent")) return "Rent";
-  if (desc.includes("utilities") || desc.includes("gas") || desc.includes("electric") || desc.includes("severn trent")) return "Utilities";
-  if (desc.includes("mobile") || desc.includes("vodafone") || desc.includes("o2") || desc.includes("giffgaff") || desc.includes("internet")) return "Mobile & Internet";
-  if (desc.includes("amazon") || desc.includes("argos") || desc.includes("shopping")) return "Shopping";
-  if (desc.includes("spotify") || desc.includes("netflix") || desc.includes("prime") || desc.includes("disney") || desc.includes("apple")) return "Subscriptions";
-  if (desc.includes("tesco") || desc.includes("sainsbury") || desc.includes("aldi") || desc.includes("asda") || desc.includes("lidl")) return "Groceries";
-  if (desc.includes("uber") || desc.includes("trainline") || desc.includes("tfl") || desc.includes("stagecoach") || desc.includes("national express")) return "Transport";
-  if (desc.includes("fuel") || desc.includes("shell") || desc.includes("bp") || desc.includes("esso")) return "Fuel";
-  if (desc.includes("restaurant") || desc.includes("takeaway") || desc.includes("just eat") || desc.includes("deliveroo") || desc.includes("ubereats")) return "Dining & Takeaway";
-  if (desc.includes("nhs") || desc.includes("clinic") || desc.includes("dentist") || desc.includes("optical") || desc.includes("boots")) return "Healthcare";
-  if (desc.includes("school") || desc.includes("tuition") || desc.includes("course") || desc.includes("exam")) return "Education";
-  if (desc.includes("childcare") || desc.includes("nursery") || desc.includes("kids club")) return "Childcare";
-  if (desc.includes("charity") || desc.includes("donation")) return "Charity";
-  if (desc.includes("gift")) return "Gift";
-  if (desc.includes("notemachine") || desc.includes("atm")) return "Cash Withdrawal";
-  if (desc.includes("bingo") || desc.includes("casino") || desc.includes("bet")) return "Gambling";
-  if (desc.includes("easyjet") || desc.includes("ryanair") || desc.includes("jet2") || desc.includes("airbnb") || desc.includes("booking.com")) return "Travel";
-  if (desc.includes("ig.com") || desc.includes("trading") || desc.includes("etoro") || desc.includes("shares")) return "Investment Purchase";
-  if (desc.includes("sheehy")) return "Family";
+  if (
+    desc.includes("utilities") ||
+    desc.includes("gas") ||
+    desc.includes("electric") ||
+    desc.includes("severn trent")
+  )
+    return "Utilities";
+  if (
+    desc.includes("mobile") ||
+    desc.includes("vodafone") ||
+    desc.includes("o2") ||
+    desc.includes("giffgaff") ||
+    desc.includes("internet")
+  )
+    return "Phone & Internet";
+
+  // Shopping / groceries / subscriptions
+  if (desc.includes("amazon") || desc.includes("argos") || desc.includes("shopping"))
+    return "Groceries";
+  if (
+    desc.includes("spotify") ||
+    desc.includes("netflix") ||
+    desc.includes("prime") ||
+    desc.includes("disney") ||
+    desc.includes("apple")
+  )
+    return "Software & Subscriptions";
+  if (["tesco", "sainsbury", "aldi", "asda", "lidl"].some((k) => desc.includes(k)))
+    return "Groceries";
+
+  // Travel / fuel / eating out
+  if (
+    desc.includes("uber") ||
+    desc.includes("trainline") ||
+    desc.includes("tfl") ||
+    desc.includes("stagecoach") ||
+    desc.includes("national express")
+  )
+    return "Travel & Subsistence";
+  if (desc.includes("fuel") || desc.includes("shell") || desc.includes("bp") || desc.includes("esso"))
+    return "Fuel";
+  if (
+    desc.includes("restaurant") ||
+    desc.includes("takeaway") ||
+    desc.includes("just eat") ||
+    desc.includes("deliveroo") ||
+    desc.includes("ubereats")
+  )
+    return "Entertainment";
+
+  // Personal / misc
+  if (
+    desc.includes("nhs") ||
+    desc.includes("clinic") ||
+    desc.includes("dentist") ||
+    desc.includes("optical") ||
+    desc.includes("boots")
+  )
+    return "Personal Spending";
+  if (
+    desc.includes("school") ||
+    desc.includes("tuition") ||
+    desc.includes("course") ||
+    desc.includes("exam")
+  )
+    return "Personal Spending";
+  if (desc.includes("childcare") || desc.includes("nursery") || desc.includes("kids club"))
+    return "Personal Spending";
+  if (desc.includes("charity") || desc.includes("donation")) return "Gifts";
+  if (desc.includes("gift")) return "Gifts";
+  if (desc.includes("notemachine") || desc.includes("atm")) return "Cash Withdrawals";
+  if (desc.includes("bingo") || desc.includes("casino") || desc.includes("bet"))
+    return "Entertainment";
+  if (
+    desc.includes("easyjet") ||
+    desc.includes("ryanair") ||
+    desc.includes("jet2") ||
+    desc.includes("airbnb") ||
+    desc.includes("booking.com")
+  )
+    return "Travel & Subsistence";
+  if (
+    desc.includes("ig.com") ||
+    desc.includes("trading") ||
+    desc.includes("etoro") ||
+    desc.includes("shares")
+  )
+    return "Investment Purchase";
+  if (desc.includes("sheehy") || desc.includes("wages") || desc.includes("salary") || desc.includes("payroll"))
+    return "Personal Spending";
+
   return "Uncategorised";
 }
 
@@ -206,7 +334,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // ✅ Auto-save default VAT on any transaction missing vat_rate
+  // Auto-save default VAT on any transaction missing vat_rate
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -214,17 +342,16 @@ export default function Transactions() {
       if (tx.vat_rate != null) return;
 
       const category =
-        (tx.category && tx.category.trim()) ||
+        (tx.business_category && tx.business_category.trim()) ||
         inferCategory(tx.description);
 
       const defaultVatRate = (() => {
         if (
           [
             "Rent",
-            "Wages",
-            "Salary",
-            "Loan Repayment",
-            "Insurance Premium",
+            "Loan Repayments",
+            "Insurance",
+            "Professional Fees",
             "Council Tax",
           ].includes(category)
         )
@@ -274,26 +401,21 @@ export default function Transactions() {
     const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
-      "Internal Transfer",
+      "Internal Transfers",
+      "Transfers",
       "Returned Direct Debit",
-      "Transfer Between Accounts",
-      "Refund",
+      "Refunds Received",
     ]);
 
     filtered.forEach((tx) => {
       const amount = parseFloat(tx.amount) || 0;
       const rawCategory =
-        (tx.category && tx.category.trim()) ||
+        (tx.business_category && tx.business_category.trim()) ||
         inferCategory(tx.description);
       const merchant =
         (tx.description && tx.description.trim()) || "Unknown";
 
-      const category =
-        rawCategory === "cis_deducted"
-          ? "CIS Deducted"
-          : rawCategory === "cis_suffered"
-          ? "CIS Suffered"
-          : rawCategory;
+      const category = rawCategory;
 
       if (isIncome(amount)) {
         if (!excludedCategories.has(category)) {
@@ -412,6 +534,45 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
+  async function updateBusinessCategory(id, newCategory) {
+    await fetch("/api/transactions/update-category", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        business_category: newCategory,
+      }),
+    });
+  }
+
+  async function updateVATForTx(tx, newRate) {
+    const rate = Number(newRate);
+    const gross = Number(tx.amount);
+    const vatAmount = rate > 0 ? gross * (rate / 100) : 0;
+
+    await fetch("/api/transactions/update-vat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: tx.id,
+        vat_rate: rate,
+        vat_amount: vatAmount,
+      }),
+    });
+  }
+
+  async function updateCISForTx(tx, newValue) {
+    await fetch("/api/transactions/update-cis", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: tx.id,
+        cisType: newValue,
+        amount: tx.amount,
+      }),
+    });
+  }
+
   return (
     <ResponsiveLayout>
       <div className="p-8">
@@ -463,10 +624,7 @@ export default function Transactions() {
                 <li className="text-slate-500">No income in this period</li>
               )}
               {topIncomePayers.map((row, idx) => (
-                <li
-                  key={row.name + idx}
-                  className="flex justify-between"
-                >
+                <li key={row.name + idx} className="flex justify-between">
                   <span className="text-slate-700">{row.name}</span>
                   <span className="font-medium text-green-600">
                     £{row.amount.toFixed(2)}
@@ -482,10 +640,7 @@ export default function Transactions() {
                 <li className="text-slate-500">No expenses in this period</li>
               )}
               {topExpenseMerchants.map((row, idx) => (
-                <li
-                  key={row.name + idx}
-                  className="flex justify-between"
-                >
+                <li key={row.name + idx} className="flex justify-between">
                   <span className="text-slate-700">{row.name}</span>
                   <span className="font-medium text-red-600">
                     £{row.amount.toFixed(2)}
@@ -510,30 +665,21 @@ export default function Transactions() {
           >
             {error && (
               <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-2 text-red-500"
-                >
+                <td colSpan={6} className="px-4 py-2 text-red-500">
                   Failed to load transactions
                 </td>
               </tr>
             )}
             {!data && !error && (
               <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-2 text-slate-500"
-                >
+                <td colSpan={6} className="px-4 py-2 text-slate-500">
                   Loading transactions...
                 </td>
               </tr>
             )}
             {data && filtered.length === 0 && !error && (
               <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-2 text-slate-500"
-                >
+                <td colSpan={6} className="px-4 py-2 text-slate-500">
                   No transactions in this period.
                 </td>
               </tr>
@@ -541,35 +687,25 @@ export default function Transactions() {
             {data &&
               filtered.length > 0 &&
               filtered.map((tx) => {
-                const rawCategory =
-                  tx.category || inferCategory(tx.description);
+                const inferredCategory = inferCategory(tx.description);
+                const businessCategory =
+                  (tx.business_category && tx.business_category.trim()) ||
+                  inferredCategory;
 
-                // Friendly category label
-                const displayCategory =
-                  rawCategory === "cis"
-                    ? "CIS"
-                    : rawCategory === "cis_deducted"
-                    ? "CIS Deducted"
-                    : rawCategory === "cis_suffered"
-                    ? "CIS Suffered"
-                    : rawCategory;
-
-                // Default VAT logic (for display)
                 const defaultVatRate = (() => {
                   if (
                     [
                       "Rent",
-                      "Wages",
-                      "Salary",
-                      "Loan Repayment",
-                      "Insurance Premium",
+                      "Loan Repayments",
+                      "Insurance",
+                      "Professional Fees",
                       "Council Tax",
-                    ].includes(displayCategory)
+                    ].includes(businessCategory)
                   )
                     return 0;
                   if (
                     ["Groceries", "Books", "Education", "Childcare"].includes(
-                      displayCategory
+                      businessCategory
                     )
                   )
                     return 0;
@@ -579,43 +715,12 @@ export default function Transactions() {
                 const vatRate =
                   tx.vat_rate != null ? tx.vat_rate : defaultVatRate;
 
-                async function updateVAT(newRate) {
-                  const rate = Number(newRate);
-                  const gross = Number(tx.amount);
-                  const vatAmount =
-                    rate > 0 ? gross * (rate / 100) : 0;
-
-                  await fetch("/api/transactions/update-vat", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      id: tx.id,
-                      vat_rate: rate,
-                      vat_amount: vatAmount,
-                    }),
-                  });
-                }
-
-                // ✅ CIS selection derived from cis_type (not category)
                 const cisSelection =
                   tx.cis_type === "deducted"
                     ? "deducted"
                     : tx.cis_type === "suffered"
                     ? "suffered"
                     : "none";
-
-                async function updateCIS(newValue) {
-                  // newValue: "none" | "deducted" | "suffered"
-                  await fetch("/api/transactions/update-cis", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      id: tx.id,
-                      cisType: newValue,
-                      amount: tx.amount, // ✅ REQUIRED for cis_amount
-                    }),
-                  });
-                }
 
                 const effectiveVatAmount =
                   tx.vat_amount != null
@@ -640,8 +745,22 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* Category (friendly) */}
-                    <td>{displayCategory}</td>
+                    {/* Category (dropdown, auto-save) */}
+                    <td>
+                      <select
+                        className="border p-1 rounded text-sm"
+                        defaultValue={businessCategory}
+                        onChange={(e) =>
+                          updateBusinessCategory(tx.id, e.target.value)
+                        }
+                      >
+                        {BUSINESS_CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
 
                     {/* VAT + CIS in one column */}
                     <td>
@@ -653,7 +772,9 @@ export default function Transactions() {
                           <select
                             className="border p-1 rounded text-sm"
                             defaultValue={vatRate}
-                            onChange={(e) => updateVAT(e.target.value)}
+                            onChange={(e) =>
+                              updateVATForTx(tx, e.target.value)
+                            }
                           >
                             <option value={20}>20% Standard</option>
                             <option value={5}>5% Reduced</option>
@@ -670,7 +791,9 @@ export default function Transactions() {
                           <select
                             className="border p-1 rounded text-sm"
                             defaultValue={cisSelection}
-                            onChange={(e) => updateCIS(e.target.value)}
+                            onChange={(e) =>
+                              updateCISForTx(tx, e.target.value)
+                            }
                           >
                             <option value="none">No CIS</option>
                             <option value="deducted">CIS Deducted</option>
@@ -680,7 +803,7 @@ export default function Transactions() {
                       </div>
                     </td>
 
-                    {/* VAT Amount (for now, still just VAT) */}
+                    {/* VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
                   </tr>
                 );
