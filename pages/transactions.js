@@ -396,18 +396,72 @@ return true;
               </tr>
             )}
             {data && filtered.length > 0 &&
-              filtered.map((tx) => (
-                <tr key={tx.id} className="border-t">
-                  <td>{safeDate(tx.date)?.toLocaleDateString() ?? "—"}</td>
-                  <td>{tx.description}</td>
-                  <td className={tx.amount >= 0 ? "text-green-600" : "text-red-600"}>
-                    {tx.amount >= 0
-                      ? `+£${tx.amount.toFixed(2)}`
-                      : `−£${Math.abs(tx.amount).toFixed(2)}`}
-                  </td>
-                  <td>{tx.category || inferCategory(tx.description)}</td>
-                </tr>
-              ))}
+  filtered.map((tx) => {
+    const category = tx.category || inferCategory(tx.description);
+
+    // ✅ Default VAT logic
+    const defaultVatRate = (() => {
+      if (["Rent", "Wages", "Salary", "Loan Repayment", "Insurance Premium", "Council Tax"].includes(category))
+        return 0;
+      if (["Groceries", "Books", "Education", "Childcare"].includes(category))
+        return 0;
+      return 20; // default standard rate
+    })();
+
+    const vatRate = tx.vat_rate ?? defaultVatRate;
+
+    async function updateVAT(newRate) {
+      const rate = Number(newRate);
+      const gross = Number(tx.amount);
+      const vatAmount = rate > 0 ? gross * (rate / 100) : 0;
+
+      await fetch("/api/transactions/update-vat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: tx.id,
+          vat_rate: rate,
+          vat_amount: vatAmount,
+        }),
+      });
+    }
+
+    return (
+      <tr key={tx.id} className="border-t">
+        <td>{safeDate(tx.date)?.toLocaleDateString() ?? "—"}</td>
+        <td>{tx.description}</td>
+
+        <td className={tx.amount >= 0 ? "text-green-600" : "text-red-600"}>
+          {tx.amount >= 0
+            ? `+£${tx.amount.toFixed(2)}`
+            : `−£${Math.abs(tx.amount).toFixed(2)}`}
+        </td>
+
+        <td>{category}</td>
+
+        {/* ✅ VAT Rate Dropdown */}
+        <td>
+          <select
+            className="border p-1 rounded"
+            defaultValue={vatRate}
+            onChange={(e) => updateVAT(e.target.value)}
+          >
+            <option value={20}>20% Standard</option>
+            <option value={5}>5% Reduced</option>
+            <option value={0}>0% Zero Rated</option>
+            <option value={0}>Exempt</option>
+            <option value={0}>Out of Scope</option>
+          </select>
+        </td>
+
+        {/* ✅ VAT Amount */}
+        <td>
+          £{(tx.vat_amount ?? (tx.amount * (vatRate / 100))).toFixed(2)}
+        </td>
+      </tr>
+    );
+  })}
+
           </ResponsiveTable>
         </ResponsiveCard>
       </div>
