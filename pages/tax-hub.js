@@ -20,13 +20,16 @@ export default function TaxHub() {
     totalVatOwed: 0,
     totalVatPaid: 0,
     vatBalance: 0,
+    totalVatOutput: 0,
+    totalVatInput: 0,
+    overdueVatCount: 0,
 
     ctPayments: [],
     totalCorpTaxDue: 0,
     totalCtPaid: 0,
     ctBalance: 0,
 
-    // ✅ SA summary fields
+    // SA summary fields
     totalSaIncome: 0,
     totalSaExpenses: 0,
     saProfit: 0,
@@ -36,6 +39,7 @@ export default function TaxHub() {
   });
 
   const [vatStagger, setVatStagger] = useState(1);
+  const [showOlderVatPeriods, setShowOlderVatPeriods] = useState(false);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -71,13 +75,16 @@ export default function TaxHub() {
         totalVatOwed: data.totalVatOwed || 0,
         totalVatPaid: data.totalVatPaid || 0,
         vatBalance: data.vatBalance || 0,
+        totalVatOutput: data.totalVatOutput || 0,
+        totalVatInput: data.totalVatInput || 0,
+        overdueVatCount: data.overdueVatCount || 0,
 
         ctPayments: data.ctPayments || [],
         totalCorpTaxDue: data.totalCorpTaxDue || 0,
         totalCtPaid: data.totalCtPaid || 0,
         ctBalance: data.ctBalance || 0,
 
-        // ✅ SA summary fields
+        // SA summary fields – if you compute these later in backend, they’ll land here
         totalSaIncome: data.totalSaIncome || 0,
         totalSaExpenses: data.totalSaExpenses || 0,
         saProfit: data.saProfit || 0,
@@ -87,11 +94,32 @@ export default function TaxHub() {
       });
 
       if (data.vatStagger) setVatStagger(data.vatStagger);
-
     } catch (err) {
       console.error("Tax Hub periods error:", err);
       alert("Error fetching tax periods: " + err.message);
-      setPeriods({ vat: [], cis: [], corp: [], sa: [] });
+      setPeriods({
+        vat: [],
+        cis: [],
+        corp: [],
+        sa: [],
+        vatPayments: [],
+        totalVatOwed: 0,
+        totalVatPaid: 0,
+        vatBalance: 0,
+        totalVatOutput: 0,
+        totalVatInput: 0,
+        overdueVatCount: 0,
+        ctPayments: [],
+        totalCorpTaxDue: 0,
+        totalCtPaid: 0,
+        ctBalance: 0,
+        totalSaIncome: 0,
+        totalSaExpenses: 0,
+        saProfit: 0,
+        saTax: 0,
+        saLocked: false,
+        saLatestYear: null,
+      });
     } finally {
       setLoading(false);
     }
@@ -99,7 +127,7 @@ export default function TaxHub() {
 
   if (!session?.user) return null;
 
-  // ✅ ORDER: VAT → CIS → CT → SA
+  // ORDER: VAT → CIS → CT → SA
   const taxTypes = [
     { key: "vat", name: "VAT", path: "/vat" },
     { key: "cis", name: "CIS", path: "/cis" },
@@ -107,7 +135,12 @@ export default function TaxHub() {
     { key: "sa", name: "Self Assessment", path: "/sa" },
   ];
 
-  const needsHMRCAuth = !((periods.vat || []).some((p) => p.hmrcAuthorized));
+  const needsHMRCAuth = !(periods.vat || []).some((p) => p.hmrcAuthorized);
+
+  // Derived VAT period lists for cockpit
+  const vatPeriods = periods.vat || [];
+  const activeVatPeriods = vatPeriods.slice(0, 4);
+  const olderVatPeriods = vatPeriods.slice(4);
 
   return (
     <ResponsiveLayout currentPageName="Tax Hub">
@@ -134,8 +167,7 @@ export default function TaxHub() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {taxTypes.map((tax) => (
               <ResponsiveCard key={tax.key} title={tax.name}>
-
-                {/* ✅ VAT STAGGER */}
+                {/* VAT STAGGER */}
                 {tax.key === "vat" && (
                   <div className="mb-4 flex items-center gap-2">
                     <label className="text-sm font-medium">VAT Stagger:</label>
@@ -164,123 +196,222 @@ export default function TaxHub() {
                   </div>
                 )}
 
-                {/* ✅ VAT PAYMENTS */}
+                {/* VAT cockpit summary + help + payments */}
                 {tax.key === "vat" && (
-                  <div className="mt-4 p-4 border rounded bg-gray-50">
-                    <h3 className="text-lg font-semibold mb-2">VAT Payments</h3>
+                  <div className="mt-4 p-4 border rounded bg-gray-50 space-y-4">
+                    {/* Overdue warning */}
+                    {periods.overdueVatCount > 0 && (
+                      <div className="p-3 rounded bg-yellow-100 border border-yellow-300 text-sm">
+                        <p className="font-semibold text-yellow-800">
+                          You have {periods.overdueVatCount} overdue VAT return
+                          {periods.overdueVatCount > 1 ? "s" : ""} that must be filed in order.
+                        </p>
+                      </div>
+                    )}
 
-                    <div className="mb-4">
-                      <p className="font-medium">
-                        Total VAT Owed:{" "}
-                        <span className="text-red-600">
+                    {/* VAT activity summary */}
+                    <div className="p-3 rounded bg-white border text-sm">
+                      <h4 className="font-semibold mb-1">
+                        VAT Summary (Last 5 Years)
+                      </h4>
+                      <p>
+                        Output VAT:{" "}
+                        <span className="font-semibold text-blue-700">
+                          £{periods.totalVatOutput.toFixed(2)}
+                        </span>
+                      </p>
+                      <p>
+                        Input VAT:{" "}
+                        <span className="font-semibold text-green-700">
+                          £{periods.totalVatInput.toFixed(2)}
+                        </span>
+                      </p>
+                      <p>
+                        Net VAT:{" "}
+                        <span
+                          className={
+                            periods.totalVatOwed > 0
+                              ? "font-semibold text-red-700"
+                              : periods.totalVatOwed < 0
+                              ? "font-semibold text-blue-700"
+                              : "font-semibold text-gray-700"
+                          }
+                        >
                           £{periods.totalVatOwed.toFixed(2)}
                         </span>
                       </p>
-                      <p className="font-medium">
-                        Total VAT Paid:{" "}
-                        <span className="text-green-600">
-                          £{periods.totalVatPaid.toFixed(2)}
-                        </span>
-                      </p>
-                      <p className="font-bold mt-2">
-                        VAT Balance:{" "}
-                        <span
-                          className={
-                            periods.vatBalance > 0
-                              ? "text-red-600"
-                              : periods.vatBalance < 0
-                              ? "text-blue-600"
-                              : "text-green-600"
-                          }
-                        >
-                          £{periods.vatBalance.toFixed(2)}
-                        </span>
-                      </p>
                     </div>
 
-                    {/* Add VAT Payment */}
-                    <div className="mb-4 p-3 border rounded bg-white">
-                      <h4 className="font-semibold mb-2">
-                        Add VAT Payment / Refund
-                      </h4>
+                    {/* How to file late returns */}
+                    <details className="p-3 rounded bg-white border text-sm">
+                      <summary className="font-semibold cursor-pointer">
+                        How to file late VAT returns
+                      </summary>
+                      <div className="mt-2 space-y-1">
+                        <p>1. Start with the oldest overdue VAT period in the list.</p>
+                        <p>2. Click “View” to review the VAT return for that period.</p>
+                        <p>3. When you are happy, click “Submit” to send it to HMRC.</p>
+                        <p>4. Repeat for the next oldest overdue period.</p>
+                        <p className="mt-1 text-xs text-gray-600">
+                          HMRC requires VAT returns to be filed in chronological order.
+                          Newer periods may be blocked until older ones are submitted.
+                        </p>
+                      </div>
+                    </details>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                        <input type="date" className="border p-2 rounded" id="vatPaymentDate" />
-                        <input type="number" step="0.01" className="border p-2 rounded" placeholder="Amount (£)" id="vatPaymentAmount" />
-                        <select className="border p-2 rounded" id="vatPaymentDirection">
-                          <option value="payment">Payment to HMRC</option>
-                          <option value="refund">Refund from HMRC</option>
-                        </select>
-                        <input type="text" className="border p-2 rounded" placeholder="Reference (optional)" id="vatPaymentReference" />
+                    {/* VAT Payments */}
+                    <div>
+                      <h3 className="text-lg font-semibold mb-2">VAT Payments</h3>
+
+                      <div className="mb-4">
+                        <p className="font-medium">
+                          Total VAT Owed:{" "}
+                          <span className="text-red-600">
+                            £{periods.totalVatOwed.toFixed(2)}
+                          </span>
+                        </p>
+                        <p className="font-medium">
+                          Total VAT Paid:{" "}
+                          <span className="text-green-600">
+                            £{periods.totalVatPaid.toFixed(2)}
+                          </span>
+                        </p>
+                        <p className="font-bold mt-2">
+                          VAT Balance:{" "}
+                          <span
+                            className={
+                              periods.vatBalance > 0
+                                ? "text-red-600"
+                                : periods.vatBalance < 0
+                                ? "text-blue-600"
+                                : "text-green-600"
+                            }
+                          >
+                            £{periods.vatBalance.toFixed(2)}
+                          </span>
+                        </p>
                       </div>
 
-                      <button
-                        className="mt-3 bg-blue-600 text-white px-4 py-2 rounded"
-                        onClick={async () => {
-                          const paymentDate = document.getElementById("vatPaymentDate").value;
-                          const amount = document.getElementById("vatPaymentAmount").value;
-                          const direction = document.getElementById("vatPaymentDirection").value;
-                          const reference = document.getElementById("vatPaymentReference").value;
+                      {/* Add VAT Payment */}
+                      <div className="mb-4 p-3 border rounded bg-white">
+                        <h4 className="font-semibold mb-2">
+                          Add VAT Payment / Refund
+                        </h4>
 
-                          if (!paymentDate || !amount) {
-                            alert("Please enter a date and amount.");
-                            return;
-                          }
-
-                          const res = await fetch("/api/vat/add-payment", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              clientId: session.user.clientId,
-                              paymentDate,
-                              amount,
-                              direction,
-                              reference,
-                            }),
-                          });
-
-                          const data = await res.json();
-                          if (data.success) {
-                            alert("VAT payment recorded.");
-                            fetchPeriods();
-                          } else {
-                            alert("Error: " + data.error);
-                          }
-                        }}
-                      >
-                        Add Payment
-                      </button>
-                    </div>
-
-                    {/* VAT Payment History */}
-                    <h4 className="font-semibold mb-2">Payment History</h4>
-
-                    {periods.vatPayments.length > 0 ? (
-                      <ul className="space-y-2">
-                        {periods.vatPayments.map((p) => (
-                          <li
-                            key={p.id}
-                            className="flex justify-between items-center border p-2 rounded bg-white"
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                          <input
+                            type="date"
+                            className="border p-2 rounded"
+                            id="vatPaymentDate"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="border p-2 rounded"
+                            placeholder="Amount (£)"
+                            id="vatPaymentAmount"
+                          />
+                          <select
+                            className="border p-2 rounded"
+                            id="vatPaymentDirection"
                           >
-                            <span>{p.payment_date}</span>
-                            <span className={p.direction === "payment" ? "text-red-600" : "text-blue-600"}>
-                              {p.direction === "payment" ? "Paid to HMRC" : "Refund from HMRC"}
-                            </span>
-                            <span className="font-semibold">£{p.amount.toFixed(2)}</span>
-                            <span className="text-gray-500">{p.reference || ""}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p>No VAT payments recorded yet.</p>
-                    )}
+                            <option value="payment">Payment to HMRC</option>
+                            <option value="refund">Refund from HMRC</option>
+                          </select>
+                          <input
+                            type="text"
+                            className="border p-2 rounded"
+                            placeholder="Reference (optional)"
+                            id="vatPaymentReference"
+                          />
+                        </div>
+
+                        <button
+                          className="mt-3 bg-blue-600 text-white px-4 py-2 rounded"
+                          onClick={async () => {
+                            const paymentDate =
+                              document.getElementById("vatPaymentDate").value;
+                            const amount =
+                              document.getElementById("vatPaymentAmount").value;
+                            const direction =
+                              document.getElementById("vatPaymentDirection").value;
+                            const reference =
+                              document.getElementById("vatPaymentReference").value;
+
+                            if (!paymentDate || !amount) {
+                              alert("Please enter a date and amount.");
+                              return;
+                            }
+
+                            const res = await fetch("/api/vat/add-payment", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                clientId: session.user.clientId,
+                                paymentDate,
+                                amount,
+                                direction,
+                                reference,
+                              }),
+                            });
+
+                            const data = await res.json();
+                            if (data.success) {
+                              alert("VAT payment recorded.");
+                              fetchPeriods();
+                            } else {
+                              alert("Error: " + data.error);
+                            }
+                          }}
+                        >
+                          Add Payment
+                        </button>
+                      </div>
+
+                      {/* VAT Payment History */}
+                      <h4 className="font-semibold mb-2">Payment History</h4>
+
+                      {periods.vatPayments.length > 0 ? (
+                        <ul className="space-y-2">
+                          {periods.vatPayments.map((p) => (
+                            <li
+                              key={p.id}
+                              className="flex justify-between items-center border p-2 rounded bg-white"
+                            >
+                              <span>{p.payment_date}</span>
+                              <span
+                                className={
+                                  p.direction === "payment"
+                                    ? "text-red-600"
+                                    : "text-blue-600"
+                                }
+                              >
+                                {p.direction === "payment"
+                                  ? "Paid to HMRC"
+                                  : "Refund from HMRC"}
+                              </span>
+                              <span className="font-semibold">
+                                £{p.amount.toFixed(2)}
+                              </span>
+                              <span className="text-gray-500">
+                                {p.reference || ""}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p>No VAT payments recorded yet.</p>
+                      )}
+                    </div>
                   </div>
                 )}
 
-                {/* ✅ CORPORATION TAX SUMMARY */}
+                {/* CORPORATION TAX SUMMARY */}
                 {tax.key === "corp" && (
                   <div className="mt-4 p-4 border rounded bg-gray-50">
-                    <h3 className="text-lg font-semibold mb-2">Corporation Tax Summary</h3>
+                    <h3 className="text-lg font-semibold mb-2">
+                      Corporation Tax Summary
+                    </h3>
 
                     <p className="font-medium">
                       Latest Period: {periods.corp[0]?.periodLabel || "—"}
@@ -333,14 +464,15 @@ export default function TaxHub() {
                   </div>
                 )}
 
-                {/* ✅ ✅ ✅ SELF ASSESSMENT CARD (NEW) */}
+                {/* SELF ASSESSMENT CARD */}
                 {tax.key === "sa" && (
                   <div className="mt-4 p-4 border rounded bg-gray-50">
-                    <h3 className="text-lg font-semibold mb-2">Self Assessment Summary</h3>
+                    <h3 className="text-lg font-semibold mb-2">
+                      Self Assessment Summary
+                    </h3>
 
                     <p className="font-medium">
-                      Latest Tax Year:{" "}
-                      {periods.saLatestYear || "—"}
+                      Latest Tax Year: {periods.saLatestYear || "—"}
                     </p>
 
                     <p className="font-medium">
@@ -373,7 +505,11 @@ export default function TaxHub() {
 
                     <p className="mt-2 font-semibold">
                       Status:{" "}
-                      <span className={periods.saLocked ? "text-red-600" : "text-green-600"}>
+                      <span
+                        className={
+                          periods.saLocked ? "text-red-600" : "text-green-600"
+                        }
+                      >
                         {periods.saLocked ? "Locked" : "Open"}
                       </span>
                     </p>
@@ -396,73 +532,325 @@ export default function TaxHub() {
                   </div>
                 )}
 
-                {/* ✅ PERIOD LIST */}
-                {(periods[tax.key] || []).length > 0 ? (
-                  <ul className="space-y-2 mt-4">
-                    {(periods[tax.key] || []).map((p) => (
-                      <li
-                        key={p.periodStart}
-                        className="flex justify-between items-center border p-2 rounded"
+                {/* VAT period list (cockpit) vs generic period list for others */}
+                {tax.key === "vat" ? (
+                  <>
+                    {/* View latest VAT return */}
+                    {vatPeriods.length > 0 && (
+                      <button
+                        className="mt-4 mb-2 bg-blue-700 text-white px-3 py-1 rounded text-sm"
+                        onClick={() =>
+                          router.push(
+                            `/vat?from=${vatPeriods[0].periodStart}&to=${vatPeriods[0].periodEnd}`
+                          )
+                        }
                       >
-                        <span>{p.periodLabel}</span>
-                        <span className={p.locked ? "text-red-600 font-semibold" : "text-green-600 font-semibold"}>
-                          {p.locked ? "Locked" : "Open"}
-                        </span>
+                        View Latest VAT Return
+                      </button>
+                    )}
 
-                        <div className="flex gap-2">
-                          <button
-                            className="bg-blue-600 text-white px-2 py-1 rounded"
-                            onClick={() =>
-                              router.push(`${tax.path}?from=${p.periodStart}&to=${p.periodEnd}`)
+                    {vatPeriods.length > 0 ? (
+                      <div className="mt-2 space-y-4">
+                        {/* Active / recent VAT periods */}
+                        <div>
+                          <h4 className="font-semibold mb-2">
+                            Active VAT Periods
+                          </h4>
+                          <ul className="space-y-2">
+                            {activeVatPeriods.map((p) => {
+                              const hasUnsubmittedOlder = vatPeriods.some(
+                                (other) =>
+                                  new Date(other.periodEnd) <
+                                    new Date(p.periodEnd) && !other.submitted
+                              );
+                              const canSubmit =
+                                !p.locked &&
+                                p.hmrcAuthorized &&
+                                !hasUnsubmittedOlder;
+
+                              return (
+                                <li
+                                  key={p.periodStart}
+                                  className="flex justify-between items-center border p-2 rounded"
+                                >
+                                  <div>
+                                    <div>{p.periodLabel}</div>
+                                    <div className="text-xs text-gray-600">
+                                      Net VAT:{" "}
+                                      <span
+                                        className={
+                                          p.netVat > 0
+                                            ? "text-red-600 font-semibold"
+                                            : p.netVat < 0
+                                            ? "text-blue-600 font-semibold"
+                                            : "text-gray-700 font-semibold"
+                                        }
+                                      >
+                                        £{p.netVat.toFixed(2)}
+                                      </span>
+                                      {" • "}
+                                      <span
+                                        className={
+                                          p.status === "Overdue"
+                                            ? "text-red-600 font-semibold"
+                                            : p.status === "Submitted"
+                                            ? "text-green-700 font-semibold"
+                                            : "text-gray-800 font-semibold"
+                                        }
+                                      >
+                                        {p.status}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex gap-2 items-center">
+                                    <button
+                                      className="bg-blue-600 text-white px-2 py-1 rounded"
+                                      onClick={() =>
+                                        router.push(
+                                          `/vat?from=${p.periodStart}&to=${p.periodEnd}`
+                                        )
+                                      }
+                                    >
+                                      View
+                                    </button>
+
+                                    <button
+                                      className={`px-2 py-1 rounded text-white ${
+                                        canSubmit
+                                          ? "bg-green-600"
+                                          : "bg-gray-400 cursor-not-allowed"
+                                      }`}
+                                      disabled={!canSubmit}
+                                      onClick={async () => {
+                                        if (!canSubmit) return;
+                                        if (
+                                          !confirm(
+                                            `Submit VAT period ${p.periodLabel} to HMRC?`
+                                          )
+                                        )
+                                          return;
+
+                                        try {
+                                          const res = await fetch(
+                                            `/api/vat/submit`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                clientId:
+                                                  session.user.clientId,
+                                                periodStart: p.periodStart,
+                                                periodEnd: p.periodEnd,
+                                              }),
+                                            }
+                                          );
+
+                                          const data = await res.json();
+
+                                          if (data.success) {
+                                            alert(
+                                              `VAT period submitted and locked successfully.`
+                                            );
+                                            fetchPeriods();
+                                          } else {
+                                            alert(
+                                              "Submission failed: " +
+                                                data.error
+                                            );
+                                          }
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert(
+                                            "Submission error: " + err.message
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      Submit
+                                    </button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+
+                        {/* Older VAT periods (collapsible) */}
+                        {olderVatPeriods.length > 0 && (
+                          <div>
+                            <button
+                              className="text-sm text-blue-700 underline"
+                              onClick={() =>
+                                setShowOlderVatPeriods((prev) => !prev)
+                              }
+                            >
+                              {showOlderVatPeriods
+                                ? "Hide older VAT periods"
+                                : `Show older VAT periods (${olderVatPeriods.length})`}
+                            </button>
+
+                            {showOlderVatPeriods && (
+                              <ul className="space-y-2 mt-2 text-sm">
+                                {olderVatPeriods.map((p) => (
+                                  <li
+                                    key={p.periodStart}
+                                    className="flex justify-between items-center border p-2 rounded"
+                                  >
+                                    <div>
+                                      <div>{p.periodLabel}</div>
+                                      <div className="text-xs text-gray-600">
+                                        Net VAT:{" "}
+                                        <span
+                                          className={
+                                            p.netVat > 0
+                                              ? "text-red-600 font-semibold"
+                                              : p.netVat < 0
+                                              ? "text-blue-600 font-semibold"
+                                              : "text-gray-700 font-semibold"
+                                          }
+                                        >
+                                          £{p.netVat.toFixed(2)}
+                                        </span>
+                                        {" • "}
+                                        <span
+                                          className={
+                                            p.status === "Overdue"
+                                              ? "text-red-600 font-semibold"
+                                              : p.status === "Submitted"
+                                              ? "text-green-700 font-semibold"
+                                              : "text-gray-800 font-semibold"
+                                          }
+                                        >
+                                          {p.status}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex gap-2 items-center">
+                                      <button
+                                        className="bg-blue-600 text-white px-2 py-1 rounded"
+                                        onClick={() =>
+                                          router.push(
+                                            `/vat?from=${p.periodStart}&to=${p.periodEnd}`
+                                          )
+                                        }
+                                      >
+                                        View
+                                      </button>
+                                      {/* You can add submit here with same blocking logic if desired */}
+                                    </div>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="mt-4">No VAT periods available.</p>
+                    )}
+                  </>
+                ) : (
+                  // Generic period list for CIS / Corp / SA
+                  (periods[tax.key] || []).length > 0 ? (
+                    <ul className="space-y-2 mt-4">
+                      {(periods[tax.key] || []).map((p) => (
+                        <li
+                          key={p.periodStart}
+                          className="flex justify-between items-center border p-2 rounded"
+                        >
+                          <span>{p.periodLabel}</span>
+                          <span
+                            className={
+                              p.locked
+                                ? "text-red-600 font-semibold"
+                                : "text-green-600 font-semibold"
                             }
                           >
-                            View
-                          </button>
+                            {p.locked ? "Locked" : "Open"}
+                          </span>
 
-                          {!p.locked && (tax.key === "vat" || tax.key === "cis") && (
+                          <div className="flex gap-2">
                             <button
-                              className={`px-2 py-1 rounded text-white ${
-                                p.hmrcAuthorized ? "bg-green-600" : "bg-gray-400 cursor-not-allowed"
-                              }`}
-                              disabled={!p.hmrcAuthorized}
-                              onClick={async () => {
-                                if (!p.hmrcAuthorized) return;
-                                if (!confirm(`Submit ${tax.name} period ${p.periodLabel} to HMRC?`)) return;
-
-                                try {
-                                  const res = await fetch(`/api/${tax.key}/submit`, {
-                                    method: "POST",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      clientId: session.user.clientId,
-                                      periodStart: p.periodStart,
-                                      periodEnd: p.periodEnd,
-                                    }),
-                                  });
-
-                                  const data = await res.json();
-
-                                  if (data.success) {
-                                    alert(`${tax.name} period submitted and locked successfully.`);
-                                    fetchPeriods();
-                                  } else {
-                                    alert("Submission failed: " + data.error);
-                                  }
-                                } catch (err) {
-                                  console.error(err);
-                                  alert("Submission error: " + err.message);
-                                }
-                              }}
+                              className="bg-blue-600 text-white px-2 py-1 rounded"
+                              onClick={() =>
+                                router.push(
+                                  `${tax.path}?from=${p.periodStart}&to=${p.periodEnd}`
+                                )
+                              }
                             >
-                              Submit
+                              View
                             </button>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p>No periods available.</p>
+
+                            {!p.locked &&
+                              (tax.key === "vat" || tax.key === "cis") && (
+                                <button
+                                  className={`px-2 py-1 rounded text-white ${
+                                    p.hmrcAuthorized
+                                      ? "bg-green-600"
+                                      : "bg-gray-400 cursor-not-allowed"
+                                  }`}
+                                  disabled={!p.hmrcAuthorized}
+                                  onClick={async () => {
+                                    if (!p.hmrcAuthorized) return;
+                                    if (
+                                      !confirm(
+                                        `Submit ${tax.name} period ${p.periodLabel} to HMRC?`
+                                      )
+                                    )
+                                      return;
+
+                                    try {
+                                      const res = await fetch(
+                                        `/api/${tax.key}/submit`,
+                                        {
+                                          method: "POST",
+                                          headers: {
+                                            "Content-Type":
+                                              "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            clientId: session.user.clientId,
+                                            periodStart: p.periodStart,
+                                            periodEnd: p.periodEnd,
+                                          }),
+                                        }
+                                      );
+
+                                      const data = await res.json();
+
+                                      if (data.success) {
+                                        alert(
+                                          `${tax.name} period submitted and locked successfully.`
+                                        );
+                                        fetchPeriods();
+                                      } else {
+                                        alert(
+                                          "Submission failed: " + data.error
+                                        );
+                                      }
+                                    } catch (err) {
+                                      console.error(err);
+                                      alert(
+                                        "Submission error: " + err.message
+                                      );
+                                    }
+                                  }}
+                                >
+                                  Submit
+                                </button>
+                              )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>No periods available.</p>
+                  )
                 )}
               </ResponsiveCard>
             ))}

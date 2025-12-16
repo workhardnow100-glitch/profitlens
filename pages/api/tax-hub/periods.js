@@ -19,7 +19,8 @@ function label(start, end) {
 }
 
 // Generate VAT periods based on stagger (16th → 15th, HMRC style)
-function generateVatPeriods(stagger, yearsBack = 2) {
+// Now covering up to 5 years back
+function generateVatPeriods(stagger, yearsBack = 5) {
   const now = new Date();
   const periods = [];
 
@@ -34,6 +35,7 @@ function generateVatPeriods(stagger, yearsBack = 2) {
       const start = new Date(y, m, 16);       // 16th
       const end = new Date(y, m + 3, 15);     // 15th, 3 months later
 
+      // Only include completed periods
       if (end <= now) {
         const startStr = fmt(start);
         const endStr = fmt(end);
@@ -251,10 +253,14 @@ export default async function handler(req, res) {
     const rawVatPeriods = generateVatPeriods(stagger);
 
     let totalVatOwed = 0;
+    let totalVatOutput = 0;
+    let totalVatInput = 0;
     const vatPeriods = [];
 
+    const now = new Date();
+
     for (const p of rawVatPeriods) {
-      // ✅ PRODUCTION-SAFE internal call using origin header
+      // PRODUCTION-SAFE internal call using origin header
       const summaryRes = await fetch(
         `${req.headers.origin}/api/vat/summary`,
         {
@@ -268,40 +274,57 @@ export default async function handler(req, res) {
         }
       );
 
-      if (!summaryRes.ok) {
-        // If summary fails, just treat as zeroed period
-        vatPeriods.push({
-          periodLabel: p.periodLabel,
-          periodStart: p.periodStart,
-          periodEnd: p.periodEnd,
-          locked: false,
-          hmrcAuthorized: false,
-          submitted: false,
-          outputVat: 0,
-          inputVat: 0,
-          netVat: 0,
-        });
-        continue;
+      let box1 = 0;
+      let box4 = 0;
+      let box5 = 0;
+      let locked = false;
+      let submitted = false;
+
+      if (summaryRes.ok) {
+        const summary = await summaryRes.json();
+        box1 = summary.boxes?.box1 || 0;
+        box4 = summary.boxes?.box4 || 0;
+        box5 = summary.boxes?.box5 || 0; // net VAT to pay/refund
+        locked = summary.locked || false;
+        submitted = summary.submitted || false;
       }
 
-      const summary = await summaryRes.json();
-
-      const box1 = summary.boxes?.box1 || 0;
-      const box4 = summary.boxes?.box4 || 0;
-      const box5 = summary.boxes?.box5 || 0; // net VAT to pay/refund
-
       totalVatOwed += box5;
+      totalVatOutput += box1;
+      totalVatInput += box4;
+
+      const endDate = new Date(p.periodEnd);
+      const hasActivity =
+        Math.abs(box1) > 0 ||
+        Math.abs(box4) > 0 ||
+        Math.abs(box5) !== 0;
+
+      let status = "Draft";
+
+      if (submitted) {
+        status = "Submitted";
+      } else if (endDate < now && hasActivity) {
+        status = "Overdue";
+      } else if (hasActivity) {
+        status = "Ready to Submit";
+      } else if (endDate < now && !hasActivity) {
+        status = "Draft (No Activity)";
+      }
+
+      const overdue = !submitted && endDate < now && hasActivity;
 
       vatPeriods.push({
         periodLabel: p.periodLabel,
         periodStart: p.periodStart,
         periodEnd: p.periodEnd,
-        locked: summary.locked || false,
-        hmrcAuthorized: true, // you can swap to client-based flag later
-        submitted: summary.submitted || false,
+        locked,
+        hmrcAuthorized: true, // later you can tie this to actual HMRC auth
+        submitted,
         outputVat: box1,
         inputVat: box4,
         netVat: box5,
+        status,
+        overdue,
       });
     }
 
@@ -336,6 +359,8 @@ export default async function handler(req, res) {
 
     const ctBalance = totalCorpTaxDue - totalCtPaid;
 
+    const overdueVatCount = vatPeriods.filter((p) => p.overdue).length;
+
     // 11. Return clean JSON for Tax Hub
     return res.status(200).json({
       vat: vatPeriods,
@@ -349,6 +374,9 @@ export default async function handler(req, res) {
       totalVatOwed,
       totalVatPaid,
       vatBalance,
+      totalVatOutput,
+      totalVatInput,
+      overdueVatCount,
 
       ctPayments,
       totalCorpTaxDue,
