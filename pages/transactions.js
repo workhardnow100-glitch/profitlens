@@ -245,7 +245,7 @@ export default function Transactions() {
       if (period === "month") {
         return (
           d.getMonth() === today.getMonth() &&
-          d.getFullFullYear() === today.getFullYear()
+          d.getFullYear() === today.getFullYear()
         );
       }
       if (period === "quarter") {
