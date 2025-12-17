@@ -10,16 +10,17 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
 import { CATEGORIES } from "../lib/constants/categories";
-import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
 
-const BUSINESS_CATEGORIES = [
-  ...CATEGORIES.income,
-  ...CATEGORIES.allowable,
-  ...CATEGORIES.disallowable,
-  ...CATEGORIES.dla,
-  ...CATEGORIES.tax,
-  ...SYSTEM_CATEGORIES,
-].sort((a, b) => a.localeCompare(b));
+const BUSINESS_CATEGORIES = Array.from(
+  new Set([
+    ...CATEGORIES.income,
+    ...CATEGORIES.allowable,
+    ...CATEGORIES.disallowable,
+    ...CATEGORIES.dla,
+    ...CATEGORIES.tax,
+  ])
+).sort((a, b) => a.localeCompare(b));
+
 
 // Legacy inference — used only as a fallback until users explicitly choose
 function inferCategory(description = "") {
