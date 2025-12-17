@@ -1,51 +1,12 @@
-// pages/api/corp/submit.js
 import { createClient } from "@supabase/supabase-js";
+import { CT_MAP } from "@/lib/constants/ctMap";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ HMRC Corporation Tax mapping
-const CT_MAP = {
-  "Sales": "income",
-  "Other Income": "income",
-  "Refunds Received": "income",
-
-  "Materials": "allowable",
-  "Subcontractors": "allowable",
-  "Tools & Equipment": "allowable",
-  "Fuel": "allowable",
-  "Motor Expenses": "allowable",
-  "Travel & Subsistence": "allowable",
-  "Rent": "allowable",
-  "Utilities": "allowable",
-  "Phone & Internet": "allowable",
-  "Bank Charges": "allowable",
-  "Insurance": "allowable",
-  "Advertising & Marketing": "allowable",
-  "Repairs & Maintenance": "allowable",
-  "Professional Fees": "allowable",
-  "Software & Subscriptions": "allowable",
-  "Office Supplies": "allowable",
-
-  "Clothing": "disallowable",
-  "Groceries": "disallowable",
-  "Entertainment": "disallowable",
-  "Personal Spending": "disallowable",
-  "Cash Withdrawals": "disallowable",
-  "Gifts": "disallowable",
-  "Fines & Penalties": "disallowable",
-  "Loan Repayments": "disallowable",
-  "Credit Card Payments": "disallowable",
-
-  "Transfers": "ignore",
-  "Internal Transfers": "ignore",
-  "Returned Direct Debit": "ignore",
-  "Uncategorised": "review"
-};
-
-// ✅ Marginal relief calculator
+// ✅ Marginal relief calculator (kept exactly as before)
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
 
@@ -60,7 +21,6 @@ function calculateCorporationTax(profit) {
     return { tax: profit * mainRate, rate: 25 };
   }
 
-  // ✅ Marginal relief formula
   const marginalRelief = ((250000 - profit) / 200000) * (0.25 - 0.19);
   const effectiveRate = 0.25 - marginalRelief;
 
@@ -99,16 +59,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ 2. Compute CT categories
+    // ✅ 2. Prepare totals
     let income = 0;
     let allowable = 0;
     let disallowable = 0;
 
     const breakdown = [];
 
+    // ✅ Flatten CT_MAP for fast lookup
+    const map = {
+      income: new Set(CT_MAP.income),
+      allowable: new Set(CT_MAP.allowable),
+      disallowable: new Set(CT_MAP.disallowable),
+      ignore: new Set(CT_MAP.ignore),
+    };
+
+    // ✅ 3. Classify transactions using constants
     txs.forEach((tx) => {
       const cat = tx.business_category || "Uncategorised";
-      const ctType = CT_MAP[cat] || "review";
+      let ctType = "review";
+
+      if (map.income.has(cat)) ctType = "income";
+      else if (map.allowable.has(cat)) ctType = "allowable";
+      else if (map.disallowable.has(cat)) ctType = "disallowable";
+      else if (map.ignore.has(cat)) ctType = "ignore";
+
       const amount = Number(tx.amount || 0);
 
       breakdown.push({
@@ -120,28 +95,20 @@ export default async function handler(req, res) {
         ctType
       });
 
-      if (ctType === "income") {
-        if (amount > 0) income += amount;
-      }
-
-      if (ctType === "allowable") {
-        if (amount < 0) allowable += Math.abs(amount);
-      }
-
-      if (ctType === "disallowable") {
-        if (amount < 0) disallowable += Math.abs(amount);
-      }
+      if (ctType === "income" && amount > 0) income += amount;
+      if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
+      if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
     });
 
-    // ✅ 3. Compute profit + adjusted profit
+    // ✅ 4. Compute profit + adjusted profit
     const profit = income - allowable;
     const adjustedProfit = profit + disallowable;
 
-    // ✅ 4. Compute Corporation Tax
+    // ✅ 5. Compute Corporation Tax
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // ✅ 5. Lock transactions
+    // ✅ 6. Lock transactions for this period
     await supabase
       .from("transactions")
       .update({ tax_locked: true })
@@ -149,7 +116,7 @@ export default async function handler(req, res) {
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
-    // ✅ 6. Insert CT submission record
+    // ✅ 7. Insert CT submission record
     const { data: submission, error: insertError } = await supabase
       .from("corp_submissions")
       .insert([
@@ -172,7 +139,7 @@ export default async function handler(req, res) {
 
     if (insertError) throw new Error(insertError.message);
 
-    // ✅ 7. Return cockpit-grade CT summary
+    // ✅ 8. Return cockpit-grade CT submission response
     return res.status(200).json({
       success: true,
       income,

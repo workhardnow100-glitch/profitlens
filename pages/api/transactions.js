@@ -2,114 +2,67 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { SYSTEM_CATEGORIES } from "@/lib/constants/systemCategories";
 
-// --- Legacy inferCategory (fallback only) ---
-function inferCategory(type = "", description = "") {
-  const normalized = type?.trim().toUpperCase() || "";
+// --- New inferSystemCategory (MTD-safe, system-only) ---
+function inferSystemCategory(type = "", description = "") {
+  const normalizedType = type?.trim().toUpperCase() || "";
   const desc = description?.toLowerCase?.() || "";
 
-  // Banking codes
-  if (normalized === "FPO") return "Payment";
-  if (normalized === "TFR") return "Transfer Between Accounts";
-  if (normalized === "CHG") return "Bank Fees";
-  if (normalized === "DEB") return "Debit";
-  if (normalized === "DD") return "Direct Debit";
-  if (normalized === "SO") return "Standing Order";
-  if (normalized === "INT") return "Interest Income";
-  if (normalized === "FPI") return "Transfer In";
-  if (normalized === "BP") return "Savings";
-  if (normalized === "DEP") return "Bank Charge Waived";
-  if (normalized === "PAY") return "Charges";
-  if (normalized === "FEE") return "Bank Account Fee";
-  if (normalized === "CPT") return "Cash Withdrawl";
+  // ✅ Banking codes → system movements
+  if (normalizedType === "TFR") return "Transfers";
+  if (normalizedType === "FPI" || normalizedType === "FPO") {
+    // Can't reliably know direction from code alone ⇒ treat as generic transfer
+    return "Transfers";
+  }
+  if (normalizedType === "DD") return "Returned Direct Debit"; // if bank flags as returned, handled by desc
+  if (normalizedType === "SO") return "Internal Transfers";
+  if (normalizedType === "CPT") return "Cash Deposit";
+  if (normalizedType === "CHG" || normalizedType === "FEE") return "Bank Charges";
 
-  // Regex keyword rules
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bUBER|TRAINLINE|TFL|LYFT|TAXI|NATIONAL\s*RAIL\b/i, category: "Transport" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i, category: "Utilities" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Mobile & Internet" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO\b/i, category: "Dining & Takeaway" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Tax Payment" },
-    { regex: /\bLOAN\b/i, category: "Loan Received" },
-    { regex: /\bOVERDRAFT\b/i, category: "Overdraft Repayment" },
-    { regex: /\bCASH\s*WITHDRAWAL|ATM|NOTEMACHINE\b/i, category: "Cash Withdrawal" },
-    { regex: /\bINVESTMENT|TRADING|IG\.COM|ETORO\b/i, category: "Investment Purchase" },
-    { regex: /\bCHARITY|DONATION\b/i, category: "Charity" },
-    { regex: /\bPENSION\b/i, category: "Pension" },
-    { regex: /\bBENEFIT\b/i, category: "Benefits" },
-    { regex: /\bSCHOOL|TUITION\b/i, category: "Education" },
-    { regex: /\bCHILDCARE|NURSERY\b/i, category: "Childcare" },
-    { regex: /\bCOUNCIL|LOCAL\s*AUTHORITY\b/i, category: "Council Tax" },
-    { regex: /\bINSURANCE\b/i, category: "Insurance Premium" },
-    { regex: /\bRENT\b/i, category: "Rent" },
-    { regex: /\bMORTGAGE\b/i, category: "Mortgage" },
-    { regex: /\bHEALTHCARE|NHS|CLINIC|DENTIST|MEDICAL|VISION|DENTAL\b/i, category: "Healthcare" },
-    { regex: /\bENTERTAINMENT|CINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
-    { regex: /\bSUBSCRIPTION\b/i, category: "Subscriptions" },
-    { regex: /\bPROFESSIONAL\s*SERVICES|BUSINESS\b/i, category: "Professional Services" },
-    { regex: /\bGAMBLING|CASINO|BINGO|BET\b/i, category: "Gambling" },
-    { regex: /\bLOAN\s*REPAYMENT\b/i, category: "Loan Repayment" },
-    { regex: /\bCREDIT\s*CARD\b/i, category: "Credit Card Payment" },
-    { regex: /\bTAX\s*PAYMENT\b/i, category: "Tax Payment" },
-    { regex: /\bPROPERTY\s*DEPOSIT\b/i, category: "Property Deposit" },
-    { regex: /\bPROPERTY\s*COMPLETION\b/i, category: "Property Completion Payment" },
-    { regex: /\bPROPERTY\s*LOAN\s*REPAYMENT\b/i, category: "Property Loan Repayment" },
-    { regex: /\bPROPERTY\s*LOAN\s*SETTLEMENT\b/i, category: "Property Loan Settlement" },
-    { regex: /\bPROPERTY\s*LOAN\s*DISBURSEMENT\b/i, category: "Property Loan Disbursement" },
-    { regex: /\bPROPERTY\s*LOAN\s*REFINANCING\b/i, category: "Property Loan Refinancing" },
-    { regex: /\bPROPERTY\s*INSURANCE\b/i, category: "Property Insurance" },
-    { regex: /\bBUILDING\s*MAINTENANCE\b/i, category: "Building Maintenance" },
-    { regex: /\bSAVINGS\s*DEPOSIT\b/i, category: "Savings Deposit" },
-    { regex: /\bRETURNED\s*DIRECT\s*DEBIT\b/i, category: "Returned Direct Debit" },
-    { regex: /\bSTANDING\s*ORDER\b/i, category: "Standing Order" },
-    { regex: /\bTRUST\s*FUND\s*TRANSFER\b/i, category: "Trust Fund Transfer" },
-    { regex: /\bCHARITY\s*PAYMENT\b/i, category: "Charity Payment" },
-    { regex: /\bGOVERNMENT\s*PAYMENT\b/i, category: "Government Payment" },
-    { regex: /\bCOMPENSATION\s*PAYMENT\b/i, category: "Compensation Payment" },
-    { regex: /\bE-?PAYMENT\s*RETURN\b/i, category: "E-Payment Return" },
-    { regex: /\bACCOUNT\s*MANAGEMENT\b/i, category: "Account Management" },
-    { regex: /\bCASH\s*MANAGEMENT\s*TRANSFER\b/i, category: "Cash Management Transfer" },
-    { regex: /\bINTRA\s*COMPANY\s*PAYMENT\b/i, category: "Intra Company Payment" },
-    { regex: /\bINTRA\s*PARTY\s*PAYMENT\b/i, category: "Intra Party Payment" },
-    { regex: /\bSECURITIES\s*BUY\/SELL\b/i, category: "Securities Buy/Sell" },
-    { regex: /\bSWAP\s*CONTRACT\s*PAYMENT\b/i, category: "Swap Contract Payment" },
-    { regex: /\bFORWARD\s*FOREIGN\s*EXCHANGE\b/i, category: "Forward Foreign Exchange" },
-    { regex: /\bFOREIGN\s*EXCHANGE\s*NETTING\b/i, category: "Foreign Exchange Netting" },
-    { regex: /\bTREASURY\s*PAYMENT\b/i, category: "Treasury Payment" },
-    { regex: /\bBOND\s*FORWARD\s*NETTING\b/i, category: "Bond Forward Netting" },
-    { regex: /\bDERIVATIVES\b/i, category: "Derivatives" },
-    { regex: /\bCOPYRIGHT\b/i, category: "Copyright" },
-    { regex: /\bLICENSE\s*FEE\b/i, category: "License Fee" },
-    { regex: /\bROYALTIES\b/i, category: "Royalties" },
-    { regex: /\bCONSUMER\s*THIRD\s*PARTY\s*PAYMENT\b/i, category: "Consumer Third Party Payment" },
-    { regex: /\bCAR\s*LOAN\s*REPAYMENT\b/i, category: "Car Loan Repayment" },
-    { regex: /\bDENTAL\s*SERVICES\b/i, category: "Dental Services" },
-    { regex: /\bMEDICAL\s*SERVICES\b/i, category: "Medical Services" },
-    { regex: /\bVISION\s*CARE\b/i, category: "Vision Care" },
-    { regex: /\bLONG\s*TERM\s*CARE\s*FACILITY\b/i, category: "Long Term Care Facility" },
-    { regex: /\bLABOUR\s*INSURANCE\b/i, category: "Labour Insurance" },
-    { regex: /\bLIFE\s*INSURANCE\b/i, category: "Life Insurance" },
-    { regex: /\bINSTALMENT\b/i, category: "Instalment" },
-    { regex: /\bLOTTERY\b/i, category: "Lottery" },
-    { regex: /\bGIFT\b/i, category: "Gift" },
-  ];
+  // ✅ Description-based, but only for system/tax/DLA-safe categories
+  if (/\bRETURNED\s*DIRECT\s*DEBIT\b/i.test(description)) {
+    return "Returned Direct Debit";
+  }
 
-  for (const rule of rules) {
-    if (rule.regex.test(description)) {
-      return rule.category;
+  if (/\bTRANSFER\b/i.test(description)) {
+    return "Transfers";
+  }
+
+  if (/\bCASH\s*(WITHDRAWAL|DEPOSIT|ATM)\b/i.test(description)) {
+    return "Cash Deposit";
+  }
+
+  if (/\bCARD\s*PAYMENT\b/i.test(description)) {
+    return "Card Payment";
+  }
+
+  if (/\bHMRC\b/i.test(description)) {
+    if (/\bVAT\b/i.test(description)) return "VAT Paid";
+    if (/\bCIS\b/i.test(description)) return "CIS Suffered";
+    if (/\bCORP(ORATION)?\s*TAX\b/i.test(description)) return "Corporation Tax Payment";
+    if (/\bSELF\s*ASSESSMENT\b/i.test(description) || /\bSA\b/i.test(description)) {
+      return "SA Payment";
+    }
+    // Generic HMRC payment → treat as tax payment movement, not expense
+    return "SA Payment";
+  }
+
+  if (/\bDIRECTOR\b/i.test(description) && /\bLOAN\b/i.test(description)) {
+    if (/\bDRAW(ING)?S?\b/i.test(description)) return "Director Loan – Drawings";
+    if (/\bREPAY(MENT)?S?\b/i.test(description)) return "Director Loan – Repayments";
+    if (/\bINTEREST\b/i.test(description) && /\bCHARGED\b/i.test(description)) {
+      return "Director Loan – Interest Charged";
+    }
+    if (/\bINTEREST\b/i.test(description) && /\bPAID\b/i.test(description)) {
+      return "Director Loan – Interest Paid";
     }
   }
 
-  if (desc.includes("salary") || desc.includes("payroll")) return "Salary";
-
-  return "Uncategorised";
+  // ✅ If we can't safely say it's a system/tax/DLA movement, don't guess
+  return null;
 }
-// --- End inferCategory ---
+// --- End inferSystemCategory ---
 
 function startOfDay(d) {
   const date = new Date(d);
@@ -217,33 +170,26 @@ function computeSummary(transactions) {
   let expenses = 0;
   const categories = {};
 
+  // ✅ Exclude all system movements from P&L-style summary
   const excludedCategories = new Set([
-    "Asset Disposal",
-    "Insurance Payout",
-    "Internal Transfers",
-    "Transfers",
-    "Returned Direct Debit",
-    "Refunds Received",
+    ...SYSTEM_CATEGORIES,
+    // You can add any extra exclusions here if needed
   ]);
 
   transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
+    const category = (tx.business_category && tx.business_category.trim()) || "Uncategorised";
 
-    const category =
-      (tx.business_category && tx.business_category.trim()) ||
-      inferCategory(tx.type, tx.description) ||
-      "Uncategorised";
+    if (excludedCategories.has(category)) {
+      return;
+    }
 
     if (amount > 0) {
-      if (!excludedCategories.has(category)) {
-        income += amount;
-      }
+      income += amount;
     } else if (amount < 0) {
-      if (!excludedCategories.has(category)) {
-        const out = Math.abs(amount);
-        expenses += out;
-        categories[category] = (categories[category] || 0) + out;
-      }
+      const out = Math.abs(amount);
+      expenses += out;
+      categories[category] = (categories[category] || 0) + out;
     }
   });
 
@@ -288,11 +234,21 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    // ✅ Enrich with business_category, using legacy inferCategory ONLY as fallback
+    // ✅ Enrich with business_category:
+    // - If already set → respect it
+    // - Else, if we can safely infer a SYSTEM category → use it
+    // - Else → "Uncategorised" (MTD-safe)
     const enriched = (data || []).map((tx) => {
-      const business_category =
-        (tx.business_category && tx.business_category.trim()) ||
-        inferCategory(tx.type, tx.description);
+      let business_category = (tx.business_category && tx.business_category.trim()) || null;
+
+      if (!business_category) {
+        const systemCat = inferSystemCategory(tx.type, tx.description);
+        if (systemCat && SYSTEM_CATEGORIES.includes(systemCat)) {
+          business_category = systemCat;
+        } else {
+          business_category = "Uncategorised";
+        }
+      }
 
       return {
         ...tx,

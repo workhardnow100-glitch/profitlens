@@ -1,57 +1,48 @@
-// pages/api/transactions/update-category.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
-import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { NextResponse } from "next/server";
+import { CATEGORIES } from "@/lib/constants/categories";
+import { SYSTEM_CATEGORIES } from "@/lib/constants/systemCategories";
+import { createClient } from "@/utils/supabase/server";
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const isFounder = session.user.role === "admin";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
-  );
-
-  if (!(isFounder || isSubscribedOrTrial)) {
-    return res.status(403).json({ error: "Upgrade required" });
-  }
-
-  const { id, business_category } = req.body;
-
-  if (!id || !business_category) {
-    return res.status(400).json({
-      error: "Missing required fields: id, business_category",
-    });
-  }
-
+export async function POST(req) {
   try {
-    const { error } = await supabaseAdmin
-      .from("transactions")
-      .update({
-        business_category: business_category.trim(),
-      })
-      .eq("id", id);
+    const supabase = createClient();
+    const { transactionId, category } = await req.json();
 
-    if (error) {
-      console.error("❌ Supabase update error:", error.message);
-      return res.status(500).json({ error: error.message });
+    // ✅ Validate category exists in our constants
+    const allCategories = [
+      ...CATEGORIES.income,
+      ...CATEGORIES.allowable,
+      ...CATEGORIES.disallowable,
+      ...CATEGORIES.dla,
+      ...CATEGORIES.system,
+      ...CATEGORIES.tax,
+    ];
+
+    if (!allCategories.includes(category)) {
+      return NextResponse.json(
+        { error: "Invalid category" },
+        { status: 400 }
+      );
     }
 
-    return res.status(200).json({
-      success: true,
-      id,
-      business_category,
-    });
+    // ✅ Update transaction
+    const { error } = await supabase
+      .from("transactions")
+      .update({ business_category: category })
+      .eq("id", transactionId);
+
+    if (error) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("❌ Update-category API error:", err.message || err);
-    return res.status(500).json({
-      error: "Failed to update business category",
-    });
+    return NextResponse.json(
+      { error: err.message },
+      { status: 500 }
+    );
   }
 }
