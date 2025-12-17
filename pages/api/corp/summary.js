@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Marginal relief calculator (kept from your original file)
+// ✅ Marginal relief calculator
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
 
@@ -66,23 +66,26 @@ export default async function handler(req, res) {
 
     const breakdown = [];
 
-    // ✅ Flatten CT_MAP for fast lookup
+    // ✅ 3. Normalise CT_MAP into lowercase sets
     const map = {
-      income: new Set(CT_MAP.income),
-      allowable: new Set(CT_MAP.allowable),
-      disallowable: new Set(CT_MAP.disallowable),
-      ignore: new Set(CT_MAP.ignore),
+      income: new Set(CT_MAP.income.map(c => c.toLowerCase())),
+      allowable: new Set(CT_MAP.allowable.map(c => c.toLowerCase())),
+      disallowable: new Set(CT_MAP.disallowable.map(c => c.toLowerCase())),
+      ignore: new Set(CT_MAP.ignore.map(c => c.toLowerCase())),
     };
 
-    // ✅ 3. Classify transactions
+    // ✅ 4. Classify transactions
     txs.forEach((tx) => {
-      const cat = tx.business_category || "Uncategorised";
+      const rawCat = tx.business_category || "Uncategorised";
+      const cat = rawCat.trim();
+      const normalised = cat.toLowerCase();
+
       let ctType = "review";
 
-      if (map.income.has(cat)) ctType = "income";
-      else if (map.allowable.has(cat)) ctType = "allowable";
-      else if (map.disallowable.has(cat)) ctType = "disallowable";
-      else if (map.ignore.has(cat)) ctType = "ignore";
+      if (map.income.has(normalised)) ctType = "income";
+      else if (map.allowable.has(normalised)) ctType = "allowable";
+      else if (map.disallowable.has(normalised)) ctType = "disallowable";
+      else if (map.ignore.has(normalised)) ctType = "ignore";
 
       const amount = Number(tx.amount || 0);
 
@@ -100,18 +103,18 @@ export default async function handler(req, res) {
       if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
     });
 
-    // ✅ 4. Compute profit + adjusted profit
+    // ✅ 5. Compute profit + adjusted profit
     const profit = income - allowable;
     const adjustedProfit = profit + disallowable;
 
-    // ✅ 5. Compute Corporation Tax
+    // ✅ 6. Compute Corporation Tax
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // ✅ 6. Determine locked state
+    // ✅ 7. Determine locked state
     const locked = txs.some((tx) => tx.tax_locked === true);
 
-    // ✅ 7. Return cockpit-grade CT summary
+    // ✅ 8. Return cockpit-grade CT summary
     return res.status(200).json({
       success: true,
       periodStart,
