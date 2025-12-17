@@ -30,6 +30,49 @@ function calculateCorporationTax(profit) {
   };
 }
 
+// ✅ Unified category normalisation layer
+function normaliseCategory(cat) {
+  if (!cat) return "uncategorised";
+
+  const c = cat.trim().toLowerCase();
+
+  const synonyms = {
+    "council tax": "professional fees",
+    "books": "office supplies",
+    "education": "professional fees",
+    "childcare": "personal spending",
+    "loan repayment": "loan repayments",
+    "credit card payment": "credit card payments",
+    "insurance payout": "insurance payouts",
+    "refund": "refunds received",
+    "refunds": "refunds received",
+    "groceries": "groceries",
+    "fuel": "fuel",
+    "travel": "travel & subsistence",
+    "internet": "phone & internet",
+    "mobile": "phone & internet",
+    "software": "software & subscriptions",
+    "subscriptions": "software & subscriptions",
+    "rent": "rent",
+    "insurance": "insurance",
+    "utilities": "utilities",
+    "bank charge": "bank charges",
+    "bank charges": "bank charges",
+    "entertainment": "entertainment",
+    "gifts": "gifts",
+    "personal": "personal spending",
+    "personal spending": "personal spending",
+    "internal transfer": "internal transfers",
+    "returned dd": "returned direct debit",
+    "returned direct debit": "returned direct debit",
+    "refunds received": "refunds received",
+    "sales": "sales",
+    "other income": "other income",
+  };
+
+  return synonyms[c] || c;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -77,7 +120,7 @@ export default async function handler(req, res) {
     // ✅ 4. Classify transactions
     txs.forEach((tx) => {
       const rawCat = tx.business_category || "Uncategorised";
-      const cat = rawCat.trim();
+      const cat = normaliseCategory(rawCat);
       const normalised = cat.toLowerCase();
 
       let ctType = "review";
