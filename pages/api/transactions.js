@@ -1,41 +1,34 @@
-// pages/api/transactions.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+import { CT_MAP } from "../../lib/constants/ctMap";
 
-// --- New inferSystemCategory (MTD-safe, system-only) ---
+// ✅ Build a single unified allowed category list
+const ALLOWED_BUSINESS_CATEGORIES = new Set([
+  ...SYSTEM_CATEGORIES,
+  ...CT_MAP.income,
+  ...CT_MAP.allowable,
+  ...CT_MAP.disallowable,
+  ...CT_MAP.ignore,
+]);
+
+// ✅ System-only inference (safe)
 function inferSystemCategory(type = "", description = "") {
   const normalizedType = type?.trim().toUpperCase() || "";
   const desc = description?.toLowerCase?.() || "";
 
-  // ✅ Banking codes → system movements
   if (normalizedType === "TFR") return "Transfers";
-  if (normalizedType === "FPI" || normalizedType === "FPO") {
-    // Can't reliably know direction from code alone ⇒ treat as generic transfer
-    return "Transfers";
-  }
-  if (normalizedType === "DD") return "Returned Direct Debit"; // if bank flags as returned, handled by desc
+  if (normalizedType === "FPI" || normalizedType === "FPO") return "Transfers";
+  if (normalizedType === "DD") return "Returned Direct Debit";
   if (normalizedType === "SO") return "Internal Transfers";
   if (normalizedType === "CPT") return "Cash Deposit";
   if (normalizedType === "CHG" || normalizedType === "FEE") return "Bank Charges";
 
-  // ✅ Description-based, but only for system/tax/DLA-safe categories
-  if (/\bRETURNED\s*DIRECT\s*DEBIT\b/i.test(description)) {
-    return "Returned Direct Debit";
-  }
-
-  if (/\bTRANSFER\b/i.test(description)) {
-    return "Transfers";
-  }
-
-  if (/\bCASH\s*(WITHDRAWAL|DEPOSIT|ATM)\b/i.test(description)) {
-    return "Cash Deposit";
-  }
-
-  if (/\bCARD\s*PAYMENT\b/i.test(description)) {
-    return "Card Payment";
-  }
+  if (/\bRETURNED\s*DIRECT\s*DEBIT\b/i.test(description)) return "Returned Direct Debit";
+  if (/\bTRANSFER\b/i.test(description)) return "Transfers";
+  if (/\bCASH\s*(WITHDRAWAL|DEPOSIT|ATM)\b/i.test(description)) return "Cash Deposit";
+  if (/\bCARD\s*PAYMENT\b/i.test(description)) return "Card Payment";
 
   if (/\bHMRC\b/i.test(description)) {
     if (/\bVAT\b/i.test(description)) return "VAT Paid";
@@ -44,25 +37,20 @@ function inferSystemCategory(type = "", description = "") {
     if (/\bSELF\s*ASSESSMENT\b/i.test(description) || /\bSA\b/i.test(description)) {
       return "SA Payment";
     }
-    // Generic HMRC payment → treat as tax payment movement, not expense
     return "SA Payment";
   }
 
   if (/\bDIRECTOR\b/i.test(description) && /\bLOAN\b/i.test(description)) {
     if (/\bDRAW(ING)?S?\b/i.test(description)) return "Director Loan – Drawings";
     if (/\bREPAY(MENT)?S?\b/i.test(description)) return "Director Loan – Repayments";
-    if (/\bINTEREST\b/i.test(description) && /\bCHARGED\b/i.test(description)) {
+    if (/\bINTEREST\b/i.test(description) && /\bCHARGED\b/i.test(description))
       return "Director Loan – Interest Charged";
-    }
-    if (/\bINTEREST\b/i.test(description) && /\bPAID\b/i.test(description)) {
+    if (/\bINTEREST\b/i.test(description) && /\bPAID\b/i.test(description))
       return "Director Loan – Interest Paid";
-    }
   }
 
-  // ✅ If we can't safely say it's a system/tax/DLA movement, don't guess
   return null;
 }
-// --- End inferSystemCategory ---
 
 function startOfDay(d) {
   const date = new Date(d);
@@ -76,7 +64,6 @@ function endOfDay(d) {
   return date;
 }
 
-// Compute date window for a given period + optional custom from/to
 function computeDateWindow(period, customFrom, customTo) {
   const now = new Date();
   const today = startOfDay(now);
@@ -143,10 +130,6 @@ function computeDateWindow(period, customFrom, customTo) {
       to = customTo ? endOfDay(customTo) : null;
       break;
     }
-    default: {
-      from = null;
-      to = null;
-    }
   }
 
   return { from, to };
@@ -164,25 +147,19 @@ function filterByDateWindow(transactions, from, to) {
   });
 }
 
-// ✅ Unified computeSummary using business_category (HMRC-aligned categories)
+// ✅ Summary uses only HMRC categories (CT_MAP) and excludes system categories
 function computeSummary(transactions) {
   let income = 0;
   let expenses = 0;
   const categories = {};
 
-  // ✅ Exclude all system movements from P&L-style summary
-  const excludedCategories = new Set([
-    ...SYSTEM_CATEGORIES,
-    // You can add any extra exclusions here if needed
-  ]);
+  const excluded = new Set([...SYSTEM_CATEGORIES]);
 
   transactions.forEach((tx) => {
     const amount = Number(tx.amount) || 0;
-    const category = (tx.business_category && tx.business_category.trim()) || "Uncategorised";
+    const category = tx.business_category || "Uncategorised";
 
-    if (excludedCategories.has(category)) {
-      return;
-    }
+    if (excluded.has(category)) return;
 
     if (amount > 0) {
       income += amount;
@@ -234,25 +211,28 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    // ✅ Enrich with business_category:
-    // - If already set → respect it
-    // - Else, if we can safely infer a SYSTEM category → use it
-    // - Else → "Uncategorised" (MTD-safe)
+    // ✅ Enrich with HMRC-aligned categories only
     const enriched = (data || []).map((tx) => {
-      let business_category = (tx.business_category && tx.business_category.trim()) || null;
+      let category = tx.business_category?.trim() || null;
 
-      if (!business_category) {
-        const systemCat = inferSystemCategory(tx.type, tx.description);
-        if (systemCat && SYSTEM_CATEGORIES.includes(systemCat)) {
-          business_category = systemCat;
+      // ✅ If user set a category, enforce it must be allowed
+      if (category && !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
+        category = "Uncategorised";
+      }
+
+      // ✅ If no category, infer system category only
+      if (!category) {
+        const sys = inferSystemCategory(tx.type, tx.description);
+        if (sys && SYSTEM_CATEGORIES.includes(sys)) {
+          category = sys;
         } else {
-          business_category = "Uncategorised";
+          category = "Uncategorised";
         }
       }
 
       return {
         ...tx,
-        business_category,
+        business_category: category,
       };
     });
 

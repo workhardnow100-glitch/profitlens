@@ -9,149 +9,17 @@ import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
-import { CATEGORIES } from "../lib/constants/categories";
+import { CT_MAP } from "../lib/constants/ctMap";
 
-const BUSINESS_CATEGORIES = Array.from(
+// ✅ Single unified category list from CT_MAP (HMRC aligned)
+const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
-    ...CATEGORIES.income,
-    ...CATEGORIES.allowable,
-    ...CATEGORIES.disallowable,
-    ...CATEGORIES.dla,
-    ...CATEGORIES.tax,
+    ...CT_MAP.income,
+    ...CT_MAP.allowable,
+    ...CT_MAP.disallowable,
+    ...CT_MAP.ignore,
   ])
-).sort((a, b) => a.localeCompare(b));
-
-// Legacy inference — used only as a fallback until users explicitly choose
-function inferCategory(description = "") {
-  const desc = description.toLowerCase();
-
-  // Income-like
-  if (desc.includes("dividend")) return "Other Income";
-  if (desc.includes("interest")) return "Other Income";
-  if (desc.includes("rental")) return "Sales";
-  if (desc.includes("grant")) return "Other Income";
-  if (desc.includes("refund") || desc.includes("rebate")) return "Refunds Received";
-  if (desc.includes("loan received") || desc.includes("drafty") || desc.includes("loan disbursement"))
-    return "Other Income";
-
-  // Taxes / HMRC / fees
-  if (desc.includes("hmrc") || desc.includes("tax")) return "Professional Fees";
-
-  // Transfers / internal movements
-  if (desc.includes("savethechange")) return "Transfers";
-  if (desc.includes("transfer")) return "Internal Transfers";
-  if (desc.includes("standing order")) return "Internal Internal Transfers";
-  if (desc.includes("returned dd") || desc.includes("rddp") || desc.includes("returned d/d"))
-    return "Returned Direct Debit";
-
-  // Debt / finance
-  if (desc.includes("jaja") || desc.includes("zable") || desc.includes("credit"))
-    return "Credit Card Payments";
-  if (desc.includes("loan repayment") || desc.includes("zopa") || desc.includes("drafty repayment"))
-    return "Loan Repayments";
-  if (desc.includes("overdraft")) return "Bank Charges";
-  if (desc.includes("car finance") || desc.includes("vehicle loan"))
-    return "Loan Repayments";
-
-  // Bills / housing / utilities
-  if (desc.includes("council") || desc.includes("local authority"))
-    return "Professional Fees";
-  if (desc.includes("insurance")) return "Insurance";
-  if (desc.includes("mortgage")) return "Rent";
-  if (desc.includes("rent")) return "Rent";
-  if (
-    desc.includes("utilities") ||
-    desc.includes("gas") ||
-    desc.includes("electric") ||
-    desc.includes("severn trent")
-  )
-    return "Utilities";
-  if (
-    desc.includes("mobile") ||
-    desc.includes("vodafone") ||
-    desc.includes("o2") ||
-    desc.includes("giffgaff") ||
-    desc.includes("internet")
-  )
-    return "Phone & Internet";
-
-  // Shopping / groceries / subscriptions
-  if (desc.includes("amazon") || desc.includes("argos") || desc.includes("shopping"))
-    return "Groceries";
-  if (
-    desc.includes("spotify") ||
-    desc.includes("netflix") ||
-    desc.includes("prime") ||
-    desc.includes("disney") ||
-    desc.includes("apple")
-  )
-    return "Software & Subscriptions";
-  if (["tesco", "sainsbury", "aldi", "asda", "lidl"].some((k) => desc.includes(k)))
-    return "Groceries";
-
-  // Travel / fuel / eating out
-  if (
-    desc.includes("uber") ||
-    desc.includes("trainline") ||
-    desc.includes("tfl") ||
-    desc.includes("stagecoach") ||
-    desc.includes("national express")
-  )
-    return "Travel & Subsistence";
-  if (desc.includes("fuel") || desc.includes("shell") || desc.includes("bp") || desc.includes("esso"))
-    return "Fuel";
-  if (
-    desc.includes("restaurant") ||
-    desc.includes("takeaway") ||
-    desc.includes("just eat") ||
-    desc.includes("deliveroo") ||
-    desc.includes("ubereats")
-  )
-    return "Entertainment";
-
-  // Personal / misc
-  if (
-    desc.includes("nhs") ||
-    desc.includes("clinic") ||
-    desc.includes("dentist") ||
-    desc.includes("optical") ||
-    desc.includes("boots")
-  )
-    return "Personal Spending";
-  if (
-    desc.includes("school") ||
-    desc.includes("tuition") ||
-    desc.includes("course") ||
-    desc.includes("exam")
-  )
-    return "Personal Spending";
-  if (desc.includes("childcare") || desc.includes("nursery") || desc.includes("kids club"))
-    return "Personal Spending";
-  if (desc.includes("charity") || desc.includes("donation")) return "Gifts";
-  if (desc.includes("gift")) return "Gifts";
-  if (desc.includes("notemachine") || desc.includes("atm")) return "Cash Withdrawals";
-  if (desc.includes("bingo") || desc.includes("casino") || desc.includes("bet"))
-    return "Entertainment";
-  if (
-    desc.includes("easyjet") ||
-    desc.includes("ryanair") ||
-    desc.includes("jet2") ||
-    desc.includes("airbnb") ||
-    desc.includes("booking.com")
-  )
-    return "Travel & Subsistence";
-  if (
-    desc.includes("ig.com") ||
-    desc.includes("trading") ||
-    desc.includes("etoro") ||
-    desc.includes("shares")
-  )
-    return "Investment Purchase";
-  if (desc.includes("sheehy") || desc.includes("wages") || desc.includes("salary") || desc.includes("payroll"))
-    return "Personal Spending";
-
-  return "Uncategorised";
-}
+).sort();
 
 function safeDate(value) {
   if (!value) return null;
@@ -303,7 +171,8 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // Auto-save default VAT on any transaction missing vat_rate
+  // ✅ Auto-save default VAT on any transaction missing vat_rate,
+  // using the stored HMRC-aligned business_category only
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -312,7 +181,7 @@ export default function Transactions() {
 
       const category =
         (tx.business_category && tx.business_category.trim()) ||
-        inferCategory(tx.description);
+        "Uncategorised";
 
       const defaultVatRate = (() => {
         if (
@@ -350,7 +219,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // Aggregation logic
+  // ✅ Aggregation logic — uses the same stored category, no inference
   const {
     totalIncome,
     totalExpenses,
@@ -378,13 +247,11 @@ export default function Transactions() {
 
     filtered.forEach((tx) => {
       const amount = parseFloat(tx.amount) || 0;
-      const rawCategory =
+      const category =
         (tx.business_category && tx.business_category.trim()) ||
-        inferCategory(tx.description);
+        "Uncategorised";
       const merchant =
         (tx.description && tx.description.trim()) || "Unknown";
-
-      const category = rawCategory;
 
       if (isIncome(amount)) {
         if (!excludedCategories.has(category)) {
@@ -502,7 +369,7 @@ export default function Transactions() {
     { key: "thisTimeLastYear", label: "This Time Last Year" },
     { key: "custom", label: "Custom" },
   ];
-  // ✅ FIXED FUNCTION — correct payload
+
   async function updateBusinessCategory(id, newCategory) {
     await fetch("/api/transactions/update-category", {
       method: "POST",
@@ -659,10 +526,9 @@ export default function Transactions() {
             {data &&
               filtered.length > 0 &&
               filtered.map((tx) => {
-                const inferredCategory = inferCategory(tx.description);
                 const businessCategory =
                   (tx.business_category && tx.business_category.trim()) ||
-                  inferredCategory;
+                  "Uncategorised";
 
                 const defaultVatRate = (() => {
                   if (
@@ -717,16 +583,17 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* Category dropdown */}
+                    {/* ✅ Category dropdown — CT_MAP constants only */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
-                        defaultValue={businessCategory}
+                        value={businessCategory}
                         onChange={(e) =>
                           updateBusinessCategory(tx.id, e.target.value)
                         }
                       >
-                        {BUSINESS_CATEGORIES.map((cat) => (
+                        <option value="Uncategorised">Uncategorised</option>
+                        {CT_CATEGORY_OPTIONS.map((cat) => (
                           <option key={cat} value={cat}>
                             {cat}
                           </option>
@@ -741,7 +608,7 @@ export default function Transactions() {
                           <span className="text-xs text-slate-500">VAT:</span>
                           <select
                             className="border p-1 rounded text-sm"
-                            defaultValue={vatRate}
+                            value={vatRate}
                             onChange={(e) =>
                               updateVATForTx(tx, e.target.value)
                             }
@@ -758,7 +625,7 @@ export default function Transactions() {
                           <span className="text-xs text-slate-500">CIS:</span>
                           <select
                             className="border p-1 rounded text-sm"
-                            defaultValue={cisSelection}
+                            value={cisSelection}
                             onChange={(e) =>
                               updateCISForTx(tx, e.target.value)
                             }
