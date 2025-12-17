@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo } from "react";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ForecastSimulator from "../components/ForecastSimulator";
+
 import {
   Chart as ChartJS,
   LineElement,
@@ -14,6 +15,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
+
 import { Line, Bar } from "react-chartjs-2";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -31,47 +33,76 @@ ChartJS.register(
 
 export default function Forecasts() {
   const [forecast, setForecast] = useState([]);
-  const [series, setSeries] = useState({ months: [], revenue: [], expenses: [], net: [] });
+  const [series, setSeries] = useState({
+    months: [],
+    revenue: [],
+    expenses: [],
+    net: [],
+  });
   const [error, setError] = useState(null);
 
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // 🔑 Access check
+  // ✅ Access control
   useEffect(() => {
     if (status === "loading") return;
-    if (session?.user) {
-      const isAdmin = session.user.role === "admin";
-      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-      if (!(isAdmin || isSubscribedOrTrial)) router.replace("/upgrade");
-    } else {
+
+    if (!session?.user) {
       router.replace("/login");
+      return;
+    }
+
+    const isAdmin = session.user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
+
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
     }
   }, [session, status, router]);
 
+  // ✅ Fetch forecast data
   useEffect(() => {
+    if (!session?.user) return;
+
     const fetchForecastData = async () => {
       try {
-        const res = await fetch("/api/forecasts");
+        const res = await fetch("/api/forecasts", {
+          credentials: "include",
+        });
+
         const json = await res.json();
-        if (!res.ok) throw new Error(json.error || "Failed to fetch forecast");
+
+        if (!res.ok || json.error) {
+          throw new Error(json.error || "Failed to fetch forecast");
+        }
+
         setForecast(json.forecast || []);
-        setSeries(json.series || { months: [], revenue: [], expenses: [], net: [] });
+        setSeries(
+          json.series || { months: [], revenue: [], expenses: [], net: [] }
+        );
       } catch (err) {
-        setError(err.message);
+        setError(err.message || "Failed to load forecast");
       }
     };
-    if (session?.user) fetchForecastData();
+
+    fetchForecastData();
   }, [session]);
 
+  // ✅ Parse projections safely
   const revenueProjection = forecast[0]?.value
-    ? parseFloat(forecast[0].value.replace(/[£,]/g, "")) || 0
+    ? parseFloat(String(forecast[0].value).replace(/[£,]/g, "")) || 0
     : 0;
+
   const expenseProjection = forecast[1]?.value
-    ? parseFloat(forecast[1].value.replace(/[£,]/g, "")) || 0
+    ? parseFloat(String(forecast[1].value).replace(/[£,]/g, "")) || 0
     : 0;
+
   const netProfit = revenueProjection - expenseProjection;
 
+  // ✅ Simulated trends
   const revenueTrend = useMemo(() => {
     const base = revenueProjection;
     return [base * 0.9, base, base * 1.1, base * 1.2];
@@ -86,7 +117,9 @@ export default function Forecasts() {
   }, [expenseProjection]);
 
   const netTrend = useMemo(() => {
-    return revenueTrend.map((r, i) => r - expenseProjection * (1 + i * 0.05));
+    return revenueTrend.map(
+      (r, i) => r - expenseProjection * (1 + i * 0.05)
+    );
   }, [revenueTrend, expenseProjection]);
 
   return (
@@ -94,28 +127,41 @@ export default function Forecasts() {
       <div className="p-8 space-y-8">
         <h2 className="text-3xl font-bold text-slate-900">Forecasts</h2>
         <p className="text-slate-600 mt-1">
-          Predict future performance based on historical transaction data. Visualize revenue, expenses, and profitability trends.
+          Predict future performance based on historical transaction data.
+          Visualize revenue, expenses, and profitability trends.
         </p>
 
         {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ResponsiveCard title="Revenue Projection">
-            <p className="text-2xl font-bold text-green-600">£{revenueProjection.toFixed(2)}</p>
+            <p className="text-2xl font-bold text-green-600">
+              £{revenueProjection.toFixed(2)}
+            </p>
             <p className="text-sm text-slate-500 mt-2">
               Forecast next quarter’s income based on current trends.
             </p>
           </ResponsiveCard>
+
           <ResponsiveCard title="Expense Forecast">
-            <p className="text-2xl font-bold text-red-600">£{expenseProjection.toFixed(2)}</p>
+            <p className="text-2xl font-bold text-red-600">
+              £{expenseProjection.toFixed(2)}
+            </p>
             <p className="text-sm text-slate-500 mt-2">
               Predict monthly costs and cash flow risks.
             </p>
           </ResponsiveCard>
+
           <ResponsiveCard title="Net Profit Forecast">
-            <p className={`text-2xl font-bold ${netProfit >= 0 ? "text-green-600" : "text-red-600"}`}>
+            <p
+              className={`text-2xl font-bold ${
+                netProfit >= 0 ? "text-green-600" : "text-red-600"
+              }`}
+            >
               £{netProfit.toFixed(2)}
             </p>
-            <p className="text-sm text-slate-500 mt-2">Projected margin after expenses.</p>
+            <p className="text-sm text-slate-500 mt-2">
+              Projected margin after expenses.
+            </p>
           </ResponsiveCard>
         </div>
 
@@ -125,9 +171,30 @@ export default function Forecasts() {
             data={{
               labels: series.months,
               datasets: [
-                { label: "Revenue", data: series.revenue, borderColor: "#22C55E", backgroundColor: "#22C55E33", fill: true, tension: 0.4 },
-                { label: "Expenses", data: series.expenses, borderColor: "#EF4444", backgroundColor: "#EF444433", fill: true, tension: 0.4 },
-                { label: "Net Profit", data: series.net, borderColor: "#6366F1", backgroundColor: "#6366F133", fill: true, tension: 0.4 },
+                {
+                  label: "Revenue",
+                  data: series.revenue,
+                  borderColor: "#22C55E",
+                  backgroundColor: "#22C55E33",
+                  fill: true,
+                  tension: 0.4,
+                },
+                {
+                  label: "Expenses",
+                  data: series.expenses,
+                  borderColor: "#EF4444",
+                  backgroundColor: "#EF444433",
+                  fill: true,
+                  tension: 0.4,
+                },
+                {
+                  label: "Net Profit",
+                  data: series.net,
+                  borderColor: "#6366F1",
+                  backgroundColor: "#6366F133",
+                  fill: true,
+                  tension: 0.4,
+                },
               ],
             }}
             options={{ responsive: true }}
@@ -140,9 +207,21 @@ export default function Forecasts() {
             <Line
               data={{
                 labels: ["Q1", "Q2", "Q3", "Q4"],
-                datasets: [{ label: "Revenue Projection", data: revenueTrend, borderColor: "#22C55E", backgroundColor: "#22C55E33", fill: true, tension: 0.4 }],
+                datasets: [
+                  {
+                    label: "Revenue Projection",
+                    data: revenueTrend,
+                    borderColor: "#22C55E",
+                    backgroundColor: "#22C55E33",
+                    fill: true,
+                    tension: 0.4,
+                  },
+                ],
               }}
-              options={{ responsive: true, plugins: { legend: { display: false } } }}
+              options={{
+                responsive: true,
+                plugins: { legend: { display: false } },
+              }}
             />
           </ResponsiveCard>
 
@@ -150,9 +229,19 @@ export default function Forecasts() {
             <Bar
               data={{
                 labels: ["Ops", "Payroll", "Marketing", "Tools"],
-                datasets: [{ label: "Expenses Breakdown", data: expenseBreakdown, backgroundColor: "#EF4444CC", borderRadius: 6 }],
+                datasets: [
+                  {
+                    label: "Expenses Breakdown",
+                    data: expenseBreakdown,
+                    backgroundColor: "#EF4444CC",
+                    borderRadius: 6,
+                  },
+                ],
               }}
-              options={{ responsive: true, plugins: { legend: { display: false } } }}
+              options={{
+                responsive: true,
+                plugins: { legend: { display: false } },
+              }}
             />
           </ResponsiveCard>
         </div>
@@ -162,9 +251,21 @@ export default function Forecasts() {
           <Line
             data={{
               labels: ["Q1", "Q2", "Q3", "Q4"],
-              datasets: [{ label: "Projected Net Profit", data: netTrend, borderColor: "#6366F1", backgroundColor: "#6366F133", fill: true, tension: 0.4 }],
+              datasets: [
+                {
+                  label: "Projected Net Profit",
+                  data: netTrend,
+                  borderColor: "#6366F1",
+                  backgroundColor: "#6366F133",
+                  fill: true,
+                  tension: 0.4,
+                },
+              ],
             }}
-            options={{ responsive: true, plugins: { legend: { display: false } } }}
+            options={{
+              responsive: true,
+              plugins: { legend: { display: false } },
+            }}
           />
         </ResponsiveCard>
 

@@ -10,6 +10,8 @@ import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
+import { CT_MAP } from "../lib/constants/ctMap";
+
 // ✅ HighchartsReact (client-only)
 const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
   ssr: false,
@@ -108,14 +110,11 @@ export default function Reports() {
     fetchTx();
   }, [selectedClient, status]);
 
-  // ✅ Exclusion set
-  const excludedCategories = new Set([
-    "Asset Disposal",
-    "Insurance Payout",
-    "Internal Transfer",
-    "Returned Direct Debit",
-    "Transfer Between Accounts",
-  ]);
+  // ✅ Use the same ignore set as backend (CT_MAP.ignore)
+  const ignoredCategories = useMemo(
+    () => new Set(CT_MAP.ignore),
+    []
+  );
 
   // ✅ Available categories
   const availableCategories = useMemo(() => {
@@ -140,10 +139,18 @@ export default function Reports() {
     if (!filteredReports.length) return null;
     const labels = filteredReports.map((r) => r.label);
     const income = filteredReports.map((r) =>
-      (r.categories || []).reduce((sum, c) => sum + (c.amount > 0 ? c.amount : 0), 0)
+      (r.categories || []).reduce(
+        (sum, c) => sum + (Number(c.amount || 0) > 0 ? Number(c.amount) : 0),
+        0
+      )
     );
     const expenses = filteredReports.map((r) =>
-      (r.categories || []).reduce((sum, c) => sum + (c.amount < 0 ? Math.abs(c.amount) : 0), 0)
+      (r.categories || []).reduce(
+        (sum, c) =>
+          sum +
+          (Number(c.amount || 0) < 0 ? Math.abs(Number(c.amount || 0)) : 0),
+        0
+      )
     );
     const net = income.map((inc, i) => inc - expenses[i]);
     return {
@@ -167,14 +174,14 @@ export default function Reports() {
     const categorySet = new Set();
     filteredReports.forEach((r) =>
       (r.categories || [])
-        .filter((c) => !excludedCategories.has(c.name))
+        .filter((c) => !ignoredCategories.has(c.name))
         .forEach((c) => categorySet.add(c.name))
     );
     const catList = Array.from(categorySet);
     const series = catList.map((cat) => {
       const data = filteredReports.map((r) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
-        return entry && !excludedCategories.has(entry.name)
+        return entry && !ignoredCategories.has(entry.name)
           ? Number(entry.amount || 0)
           : 0;
       });
@@ -189,7 +196,7 @@ export default function Reports() {
       series,
       credits: { enabled: false },
     };
-  }, [filteredReports]);
+  }, [filteredReports, ignoredCategories]);
 
   const waterfallOptions = useMemo(() => {
     if (!filteredReports.length) return null;
@@ -197,13 +204,16 @@ export default function Reports() {
     if (!latest) return null;
     const income = Number(latest.revenue || 0);
     const expenseItems = (latest.categories || [])
-      .filter((c) => !excludedCategories.has(c.name))
+      .filter((c) => !ignoredCategories.has(c.name))
       .map((c) => ({
         name: c.name,
         y: -Number(c.amount || 0),
         color: "#ef4444",
       }));
-    const totalExpenses = -expenseItems.reduce((sum, c) => sum + Math.abs(c.y), 0);
+    const totalExpenses = -expenseItems.reduce(
+      (sum, c) => sum + Math.abs(c.y),
+      0
+    );
     const data = [
       { name: "Income", y: income, color: "#16a34a" },
       ...expenseItems,
@@ -216,12 +226,12 @@ export default function Reports() {
       series: [{ data }],
       credits: { enabled: false },
     };
-  }, [filteredReports]);
+  }, [filteredReports, ignoredCategories]);
 
   const sankeyOptions = useMemo(() => {
     if (!transactions.length) return null;
     const links = transactions
-      .filter((tx) => !excludedCategories.has(tx.category))
+      .filter((tx) => !ignoredCategories.has(tx.category))
       .map((tx) => ({
         from: "Income",
         to: tx.category,
@@ -233,14 +243,14 @@ export default function Reports() {
       series: [{ type: "sankey", keys: ["from", "to", "weight"], data: links }],
       credits: { enabled: false },
     };
-  }, [transactions]);
+  }, [transactions, ignoredCategories]);
 
   const sunburstOptions = useMemo(() => {
     if (!transactions.length) return null;
     const data = [];
     const catTotals = {};
     transactions
-      .filter((tx) => !excludedCategories.has(tx.category))
+      .filter((tx) => !ignoredCategories.has(tx.category))
       .forEach((tx) => {
         const cat = tx.category;
         const amt = Math.abs(Number(tx.amount || 0));
@@ -261,7 +271,7 @@ export default function Reports() {
       ],
       credits: { enabled: false },
     };
-  }, [transactions]);
+  }, [transactions, ignoredCategories]);
 
   const heatmapOptions = useMemo(() => {
     if (!filteredReports.length) return null;
@@ -269,7 +279,7 @@ export default function Reports() {
     const catSet = new Set();
     filteredReports.forEach((r) =>
       (r.categories || [])
-        .filter((c) => !excludedCategories.has(c.name))
+        .filter((c) => !ignoredCategories.has(c.name))
         .forEach((c) => catSet.add(c.name))
     );
     const catList = Array.from(catSet);
@@ -280,7 +290,7 @@ export default function Reports() {
         data.push([
           i,
           j,
-          entry && !excludedCategories.has(entry.name)
+          entry && !ignoredCategories.has(entry.name)
             ? Number(entry.amount || 0)
             : 0,
         ]);
@@ -295,7 +305,7 @@ export default function Reports() {
       series: [{ data }],
       credits: { enabled: false },
     };
-  }, [filteredReports]);
+  }, [filteredReports, ignoredCategories]);
 
   return (
     <ResponsiveLayout>
@@ -339,6 +349,7 @@ export default function Reports() {
           Download PDF
         </button>
       </div>
+
       {/* Charts */}
       <ResponsiveCard title="Income, expenses, and net profit">
         {!hc || loading ? (
@@ -355,7 +366,10 @@ export default function Reports() {
           {!hc || !stackedCategoryOptions ? (
             <p className="text-slate-500">No data for category breakdown.</p>
           ) : (
-            <ResponsiveHighchart highcharts={hc} options={stackedCategoryOptions} />
+            <ResponsiveHighchart
+              highcharts={hc}
+              options={stackedCategoryOptions}
+            />
           )}
         </ResponsiveCard>
 
@@ -406,7 +420,9 @@ export default function Reports() {
             {showTransactions ? "Hide" : "Show"}
           </button>
           {showTransactions && (
-            <ResponsiveTable headers={["Date", "Description", "Category", "Amount"]}>
+            <ResponsiveTable
+              headers={["Date", "Description", "Category", "Amount"]}
+            >
               {transactions.map((tx) => (
                 <tr key={tx.id}>
                   <td>{tx.date}</td>
@@ -453,7 +469,9 @@ export default function Reports() {
                 <h4 className="font-semibold text-slate-700 mb-2">
                   Transactions
                 </h4>
-                <ResponsiveTable headers={["Date", "Description", "Category", "Amount"]}>
+                <ResponsiveTable
+                  headers={["Date", "Description", "Category", "Amount"]}
+                >
                   {report.transactions.map((tx, k) => (
                     <tr key={`${tx.id}-${k}`}>
                       <td>{tx.date}</td>
