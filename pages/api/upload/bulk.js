@@ -57,7 +57,7 @@ function parseFileBuffer(filename, buffer) {
   throw new Error(`Unsupported file type: ${ext}`);
 }
 
-// 🔎 Descriptive category inference (for reports/forecasts)
+// ✅ Descriptive category inference
 function inferCategory(type = "", description = "") {
   const normalized = type?.trim().toUpperCase() || "";
   const desc = description?.trim() || "";
@@ -84,9 +84,7 @@ function inferCategory(type = "", description = "") {
   ];
 
   for (const rule of rules) {
-    if (rule.regex.test(desc)) {
-      return rule.category;
-    }
+    if (rule.regex.test(desc)) return rule.category;
   }
 
   switch (normalized) {
@@ -103,18 +101,8 @@ function inferCategory(type = "", description = "") {
     case "PAY": return "Charges";
     case "FEE": return "Bank Account Fee";
     case "CPT": return "Cash Withdrawal";
-    default: return "Uncategorized";
+    default: return "other";
   }
-}
-
-// ✅ Canonical MTD category mapping
-function mapToMtdCategory(rawCategory, description = "") {
-  const desc = (description || "").toUpperCase();
-  if (/VAT|HMRC/.test(desc) || rawCategory === "Tax Payment") return "vat";
-  if (/CONSTRUC|CIS/.test(desc) || rawCategory === "Subcontractor Payment") return "cis";
-  if (/SERVICE CHARGE|INTEREST|BANK FEE/.test(desc) || rawCategory === "Bank Fees") return "corp";
-  if (/PAYMENT|INVOICE|CLIENT|SALES|REVENUE/.test(desc) || rawCategory === "Payment") return "income";
-  return "other";
 }
 
 function getValue(row, keys = []) {
@@ -155,6 +143,7 @@ function detectReversalPairs(rows) {
   return pairs;
 }
 
+// ✅ FIXED normalizeRow — aligned with new schema
 function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const debit = toNumber(getValue(row, ["Debit Amount", "Debit", "Dr"]));
   const credit = toNumber(getValue(row, ["Credit Amount", "Credit", "Cr"]));
@@ -178,7 +167,6 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const sort_code = String(getValue(row, ["Sort Code", "SortCode"]) || "").trim();
 
   const descriptiveCategory = inferCategory(type, description);
-  const canonicalCategory = mapToMtdCategory(descriptiveCategory, description);
 
   const reversal_group_id = reversalPairs?.get(i) || null;
   const is_reversal = !!reversal_group_id;
@@ -190,13 +178,17 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     debit_amount: debit ?? null,
     credit_amount: credit ?? null,
     balance: balance ?? null,
-    category: canonicalCategory,          // ✅ canonical for MTD dashboard
-    hmrc_category_id: descriptiveCategory, // ✅ keep descriptive for reports
+
+    // ✅ NEW: single category field
+    business_category: descriptiveCategory,
+
     type: type || null,
     account_number: account_number || null,
     sort_code: sort_code || null,
+
     reversal_group_id,
     is_reversal,
+
     source: "upload",
     client_id: clientId,
     user_id: userId,
@@ -204,10 +196,11 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   };
 }
 
+// ✅ FIXED category breakdown
 function groupByCategory(rows) {
   const map = {};
   for (const r of rows) {
-    const cat = r.hmrc_category_id || "Uncategorized";
+    const cat = r.business_category || "other";
     const amt = r.amount ?? 0;
     map[cat] = (map[cat] || 0) + amt;
   }
@@ -289,6 +282,7 @@ export default async function handler(req, res) {
           const accountNumber = normalized[0].account_number;
           const sortCode = normalized[0].sort_code;
 
+          // ✅ Insert statement (TEXT id + UUID id_uuid)
           const { data: statement, error: stmtErr } = await supabaseAdmin
             .from("statements")
             .insert({
@@ -305,9 +299,10 @@ export default async function handler(req, res) {
 
           if (stmtErr) throw new Error(`Statement insert failed: ${stmtErr.message}`);
 
+          // ✅ FIXED: use statement_id_uuid
           const txPayload = normalized.map((r) => ({
             ...r,
-            statement_id: statement.id,
+            statement_id_uuid: statement.id_uuid,
           }));
 
           const { error: txErr } = await supabaseAdmin.from("transactions").insert(txPayload);
@@ -349,6 +344,7 @@ export default async function handler(req, res) {
 
           const nextQuarter = quarterFromDateStr(periodEnd || toISODate(new Date()));
 
+          // ✅ Optional: migrate to UUID version later
           await supabaseAdmin.from("forecasts").insert({
             client_id: clientId,
             user_id: userId,
@@ -357,7 +353,7 @@ export default async function handler(req, res) {
             expenses: expenses * 1.05,
             net_profit: netProfit * 1.1,
             method: "heuristic",
-            source_statement_id: statement.id,
+            source_statement_id: statement.id, // still allowed
             created_at: nowIso,
           });
 
@@ -384,7 +380,7 @@ export default async function handler(req, res) {
             details: `File: ${originalName}, Transactions: ${txPayload.length}, Revenue: ${revenue}, Expenses: ${expenses}, Net: ${netProfit}`,
           }]);
 
-                    results.push({
+          results.push({
             file: originalName,
             storage_path: storagePath,
             statement_id: statement.id,
