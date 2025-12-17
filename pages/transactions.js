@@ -21,7 +21,6 @@ const BUSINESS_CATEGORIES = Array.from(
   ])
 ).sort((a, b) => a.localeCompare(b));
 
-
 // Legacy inference — used only as a fallback until users explicitly choose
 function inferCategory(description = "") {
   const desc = description.toLowerCase();
@@ -41,7 +40,7 @@ function inferCategory(description = "") {
   // Transfers / internal movements
   if (desc.includes("savethechange")) return "Transfers";
   if (desc.includes("transfer")) return "Internal Transfers";
-  if (desc.includes("standing order")) return "Internal Transfers";
+  if (desc.includes("standing order")) return "Internal Internal Transfers";
   if (desc.includes("returned dd") || desc.includes("rddp") || desc.includes("returned d/d"))
     return "Returned Direct Debit";
 
@@ -246,7 +245,7 @@ export default function Transactions() {
       if (period === "month") {
         return (
           d.getMonth() === today.getMonth() &&
-          d.getFullYear() === today.getFullYear()
+          d.getFullFullYear() === today.getFullYear()
         );
       }
       if (period === "quarter") {
@@ -503,14 +502,14 @@ export default function Transactions() {
     { key: "thisTimeLastYear", label: "This Time Last Year" },
     { key: "custom", label: "Custom" },
   ];
-
+  // ✅ FIXED FUNCTION — correct payload
   async function updateBusinessCategory(id, newCategory) {
     await fetch("/api/transactions/update-category", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        id,
-        business_category: newCategory,
+        transactionId: id,
+        category: newCategory,
       }),
     });
   }
@@ -640,6 +639,7 @@ export default function Transactions() {
                 </td>
               </tr>
             )}
+
             {!data && !error && (
               <tr>
                 <td colSpan={6} className="px-4 py-2 text-slate-500">
@@ -647,6 +647,7 @@ export default function Transactions() {
                 </td>
               </tr>
             )}
+
             {data && filtered.length === 0 && !error && (
               <tr>
                 <td colSpan={6} className="px-4 py-2 text-slate-500">
@@ -654,6 +655,7 @@ export default function Transactions() {
                 </td>
               </tr>
             )}
+
             {data &&
               filtered.length > 0 &&
               filtered.map((tx) => {
@@ -689,7 +691,7 @@ export default function Transactions() {
                   tx.cis_type === "deducted"
                     ? "deducted"
                     : tx.cis_type === "suffered"
-                    ? "suffered"
+                    ? "sufferred"
                     : "none";
 
                 const effectiveVatAmount =
@@ -699,10 +701,10 @@ export default function Transactions() {
 
                 return (
                   <tr key={tx.id} className="border-t">
-                    <td>
-                      {safeDate(tx.date)?.toLocaleDateString() ?? "—"}
-                    </td>
+                    <td>{safeDate(tx.date)?.toLocaleDateString() ?? "—"}</td>
+
                     <td>{tx.description}</td>
+
                     <td
                       className={
                         tx.amount >= 0
@@ -715,7 +717,7 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* Category (dropdown, auto-save) */}
+                    {/* Category dropdown */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -732,13 +734,11 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* VAT + CIS in one column */}
+                    {/* VAT + CIS */}
                     <td>
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500">
-                            VAT:
-                          </span>
+                          <span className="text-xs text-slate-500">VAT:</span>
                           <select
                             className="border p-1 rounded text-sm"
                             defaultValue={vatRate}
@@ -755,9 +755,7 @@ export default function Transactions() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500">
-                            CIS:
-                          </span>
+                          <span className="text-xs text-slate-500">CIS:</span>
                           <select
                             className="border p-1 rounded text-sm"
                             defaultValue={cisSelection}
