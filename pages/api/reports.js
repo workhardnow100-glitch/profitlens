@@ -81,12 +81,12 @@ export default async function handler(req, res) {
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-const isFounder = session.user.role === "admin";
-const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+    const isFounder = session.user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
 
-if (!(isFounder || isSubscribedOrTrial)) {
-  return res.status(403).json({ error: "Upgrade required" });
-}
+    if (!(isFounder || isSubscribedOrTrial)) {
+      return res.status(403).json({ error: "Upgrade required" });
+    }
 
     const clientId = session.user.clientId;
     if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
@@ -98,9 +98,10 @@ if (!(isFounder || isSubscribedOrTrial)) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
+    // ✅ FIX: use business_category instead of deleted category column
     let txQuery = supabaseAdmin
       .from("transactions")
-      .select("id, date, description, amount, category, type, is_reversal")
+      .select("id, date, description, amount, business_category, type, is_reversal")
       .eq("client_id", clientId);
 
     if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
@@ -126,7 +127,12 @@ if (!(isFounder || isSubscribedOrTrial)) {
       const year = String(date.getFullYear());
 
       const clientLabel = extractClientLabel(tx.description);
-      const category = (tx.category && String(tx.category).trim()) || inferCategory(tx.type, tx.description);
+
+      // ✅ FIX: use business_category or infer
+      const category =
+        (tx.business_category && String(tx.business_category).trim()) ||
+        inferCategory(tx.type, tx.description);
+
       const amount = parseFloat(tx.amount || 0);
 
       if (clientFilter && clientLabel !== clientFilter) continue;
@@ -141,20 +147,17 @@ if (!(isFounder || isSubscribedOrTrial)) {
             revenue: 0,
             expenses: 0,
             net: 0,
-            categories: {}, // now store BOTH positive and negative amounts
+            categories: {},
             transactions: [],
           };
         }
 
         const bucket = map[key];
-        if (amount >= 0) {
-          bucket.revenue += amount;
-        } else {
-          bucket.expenses += -amount;
-        }
+        if (amount >= 0) bucket.revenue += amount;
+        else bucket.expenses += -amount;
+
         bucket.net = bucket.revenue - bucket.expenses;
 
-        // Update categories for both Income and Expenses
         bucket.categories[category] = (bucket.categories[category] || 0) + amount;
 
         bucket.transactions.push({
@@ -205,13 +208,24 @@ if (!(isFounder || isSubscribedOrTrial)) {
       date: tx.date,
       description: tx.description,
       amount: formatCurrency(tx.amount),
-      category: tx.category,
+      category:
+        tx.business_category ||
+        inferCategory(tx.type, tx.description),
       type: tx.type,
     }));
 
     return res.status(200).json({
-      pagination: { total: allMonthly.length, page: pageNum, limit: limitNum, hasMore: end < allMonthly.length },
-      reports: { monthly: paginated, quarterly: allQuarterly, yearly: allYearly },
+      pagination: {
+        total: allMonthly.length,
+        page: pageNum,
+        limit: limitNum,
+        hasMore: end < allMonthly.length,
+      },
+      reports: {
+        monthly: paginated,
+        quarterly: allQuarterly,
+        yearly: allYearly,
+      },
       transactions: returnedTxs,
       clients: Array.from(clientSet).sort(),
       categories: Array.from(categorySet).sort(),

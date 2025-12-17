@@ -59,7 +59,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing clientId" });
 
   try {
-    // 1. Load HMRC categories
+    // ✅ 1. Load HMRC categories (still used for mapping)
     const { data: categories, error: catError } = await supabaseAdmin
       .from("hmrc_categories")
       .select("id, canonical_name");
@@ -71,21 +71,21 @@ export default async function handler(req, res) {
       categoryMap[c.id] = (c.canonical_name || "").toLowerCase();
     });
 
-    // ✅ 2. Fetch all transactions (now includes CIS fields)
+    // ✅ 2. Fetch all transactions (updated to new schema)
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, hmrc_category_id, tax_locked, client_id, category, vat_amount, amount, cis_amount, cis_type"
+        "id, date, business_category, tax_locked, client_id, vat_amount, amount, cis_amount, cis_type"
       )
       .eq("client_id", clientId);
 
     if (txError) throw txError;
 
-    // ✅ 3. Group by canonical tax type
+    // ✅ 3. Group by canonical tax type (using business_category)
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
 
     transactions.forEach((tx) => {
-      const canonical = categoryMap[tx.hmrc_category_id] || "";
+      const canonical = (tx.business_category || "").toLowerCase();
 
       if (canonical === "vat") grouped.vat.push(tx);
       else if (canonical === "cis") grouped.cis.push(tx);
@@ -325,12 +325,14 @@ export default async function handler(req, res) {
       vat: vatPeriods,
       cis: cisPeriods,
       corp: corpPeriods,
+
       sa: grouped.sa.map((tx) => ({
         periodLabel: tx.date,
         periodStart: tx.date,
         periodEnd: tx.date,
         locked: tx.tax_locked,
-        hmrcAuthorized: !!tx.hmrc_category_id,
+        hmrcAuthorized:
+          (tx.business_category || "").toLowerCase() === "self assessment",
       })),
 
       vatStagger: stagger,

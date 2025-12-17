@@ -11,16 +11,16 @@ export default async function handler(req, res) {
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
   try {
-    // ✅ Handle category update
+    // ✅ Handle category update (now updates business_category)
     if (req.method === "POST") {
-      const { transactionId, newCategoryId } = req.body;
-      if (!transactionId || !newCategoryId) {
-        return res.status(400).json({ error: "Missing transactionId or newCategoryId" });
+      const { transactionId, newCategory } = req.body;
+      if (!transactionId || !newCategory) {
+        return res.status(400).json({ error: "Missing transactionId or newCategory" });
       }
 
       const { error } = await supabaseAdmin
         .from("transactions")
-        .update({ hmrc_category_id: newCategoryId })
+        .update({ business_category: newCategory })
         .eq("id", transactionId)
         .eq("client_id", clientId);
 
@@ -30,16 +30,16 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "GET") {
-      // ✅ Fetch transactions
+      // ✅ Fetch transactions (updated schema)
       const { data: transactions, error: txError } = await supabaseAdmin
         .from("transactions")
-        .select("id, date, description, amount, hmrc_category_id, account_number, sort_code")
+        .select("id, date, description, amount, business_category, account_number, sort_code")
         .eq("client_id", clientId)
         .order("date", { ascending: false });
 
       if (txError) throw txError;
 
-      // ✅ Fetch global HMRC categories
+      // ✅ Fetch HMRC categories (still used for tax logic)
       const { data: hmrcCategories, error: hmrcError } = await supabaseAdmin
         .from("hmrc_categories")
         .select("id, category_name, business_type, description, is_global, is_excluded")
@@ -56,13 +56,13 @@ export default async function handler(req, res) {
 
       if (accError && accError.code !== "PGRST116") throw accError;
 
-      // ✅ Initialize totals safely
+      // ✅ Initialize totals
       const totalsByType = {
         sole_trader: {},
         limited_company: {}
       };
 
-      // ✅ Pre-fill known HMRC categories
+      // ✅ Pre-fill HMRC categories
       hmrcCategories.forEach(cat => {
         if (!totalsByType[cat.business_type]) {
           totalsByType[cat.business_type] = {};
@@ -73,19 +73,19 @@ export default async function handler(req, res) {
       let totalIncome = 0;
       let totalExpenses = 0;
 
-      // ✅ Compute totals safely
+      // ✅ Compute totals using business_category
       transactions.forEach(tx => {
-        const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-        const catName = cat?.category_name || tx.hmrc_category_id || "Uncategorised";
-        const businessType = cat?.business_type || "sole_trader";
+        const categoryName = tx.business_category || "Uncategorised";
 
-        // ✅ Ensure object exists
+        // Default business type
+        const businessType = "sole_trader";
+
         if (!totalsByType[businessType]) totalsByType[businessType] = {};
-        if (!totalsByType[businessType][catName]) totalsByType[businessType][catName] = 0;
+        if (!totalsByType[businessType][categoryName]) {
+          totalsByType[businessType][categoryName] = 0;
+        }
 
-        totalsByType[businessType][catName] += Number(tx.amount || 0);
-
-        if (cat?.is_excluded) return;
+        totalsByType[businessType][categoryName] += Number(tx.amount || 0);
 
         if (tx.amount > 0) {
           totalIncome += tx.amount;
@@ -103,18 +103,12 @@ export default async function handler(req, res) {
       const soleTraderOwed = netProfit > 0 ? netProfit * soleTraderTaxRate : 0;
       const limitedCompanyOwed = netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
 
-      // ✅ Group by month safely
+      // ✅ Group by month
       const byMonth = {};
 
       transactions.forEach(tx => {
         const month = new Date(tx.date).toISOString().slice(0, 7);
         if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0 };
-
-        const cat = hmrcCategories.find(c => c.id === tx.hmrc_category_id);
-        const catName = cat?.category_name || tx.hmrc_category_id || "";
-        const businessType = cat?.business_type || "sole_trader";
-
-        if (cat?.is_excluded) return;
 
         if (tx.amount > 0) {
           byMonth[month].income += tx.amount;

@@ -57,6 +57,7 @@ export default async function handler(req, res) {
   const clientId = session.user.clientId;
   if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
 
+  // ✅ PATCH — update business_category
   if (req.method === "PATCH") {
     try {
       const { id, category } = req.body || {};
@@ -64,7 +65,7 @@ export default async function handler(req, res) {
 
       const { error: updateErr } = await supabaseAdmin
         .from("transactions")
-        .update({ category })
+        .update({ business_category: category })
         .eq("id", id)
         .eq("client_id", clientId);
 
@@ -85,6 +86,7 @@ export default async function handler(req, res) {
     }
   }
 
+  // ✅ DELETE — delete all transactions
   if (req.method === "DELETE") {
     try {
       const { count, error } = await supabaseAdmin
@@ -108,12 +110,16 @@ export default async function handler(req, res) {
     }
   }
 
+  // ✅ GET — dashboard data
   try {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
-      .select("id, date, amount, description, category, account_number, sort_code, storage_path, type, is_reversal")
+      .select(
+        "id, date, amount, description, business_category, account_number, sort_code, storage_path, type, is_reversal"
+      )
       .eq("client_id", clientId)
       .order("date", { ascending: false });
+
     if (error) throw error;
 
     const monthly = {};
@@ -146,7 +152,11 @@ export default async function handler(req, res) {
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-      const category = tx.category?.trim() || inferCategory(tx.type, tx.description);
+
+      // ✅ Use business_category if present, otherwise infer
+      const category =
+        tx.business_category?.trim() ||
+        inferCategory(tx.type, tx.description);
 
       recent.push({
         id: tx.id,
