@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import { CT_MAP } from "../../../lib/constants/ctMap";
 
+// ✅ Confirm route execution
+console.log("🔥🔥🔥 CT SUMMARY ROUTE EXECUTED — LIVE BUILD 🔥🔥🔥");
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
