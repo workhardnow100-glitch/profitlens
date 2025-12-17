@@ -102,6 +102,9 @@ export default async function handler(req, res) {
       });
     }
 
+    // ✅ DEBUG: Log raw categories coming from Supabase
+    console.log("CT RAW CATEGORIES SAMPLE:", txs.slice(0, 10).map(t => t.business_category));
+
     // ✅ 2. Prepare totals
     let income = 0;
     let allowable = 0;
@@ -145,6 +148,18 @@ export default async function handler(req, res) {
       if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
       if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
     });
+
+    // ✅ DEBUG: Log classification counts
+    console.log("CT CLASSIFICATION COUNTS:", {
+      income: breakdown.filter(r => r.ctType === "income").length,
+      allowable: breakdown.filter(r => r.ctType === "allowable").length,
+      disallowable: breakdown.filter(r => r.ctType === "disallowable").length,
+      ignore: breakdown.filter(r => r.ctType === "ignore").length,
+      review: breakdown.filter(r => r.ctType === "review").length,
+    });
+
+    // ✅ DEBUG: Log first 10 breakdown rows
+    console.log("CT BREAKDOWN SAMPLE:", breakdown.slice(0, 10));
 
     // ✅ 5. Compute profit + adjusted profit
     const profit = income - allowable;
