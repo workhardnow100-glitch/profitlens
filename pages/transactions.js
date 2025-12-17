@@ -9,48 +9,17 @@ import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
-// Canonical ProfitLens business categories (HMRC-aligned shape)
+import { CATEGORIES } from "../lib/constants/categories";
+import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
+
 const BUSINESS_CATEGORIES = [
-  // Income
-  "Sales",
-  "Other Income",
-  "Refunds Received",
-
-  // Allowable expenses
-  "Materials",
-  "Subcontractors",
-  "Tools & Equipment",
-  "Fuel",
-  "Motor Expenses",
-  "Travel & Subsistence",
-  "Rent",
-  "Utilities",
-  "Phone & Internet",
-  "Bank Charges",
-  "Insurance",
-  "Advertising & Marketing",
-  "Repairs & Maintenance",
-  "Professional Fees",
-  "Software & Subscriptions",
-  "Office Supplies",
-
-  // Disallowable / personal
-  "Clothing",
-  "Groceries",
-  "Entertainment",
-  "Personal Spending",
-  "Cash Withdrawals",
-  "Gifts",
-  "Fines & Penalties",
-  "Loan Repayments",
-  "Credit Card Payments",
-
-  // Other / system
-  "Transfers",
-  "Internal Transfers",
-  "Returned Direct Debit",
-  "Uncategorised",
-];
+  ...CATEGORIES.income,
+  ...CATEGORIES.allowable,
+  ...CATEGORIES.disallowable,
+  ...CATEGORIES.dla,
+  ...CATEGORIES.tax,
+  ...SYSTEM_CATEGORIES,
+].sort((a, b) => a.localeCompare(b));
 
 // Legacy inference — used only as a fallback until users explicitly choose
 function inferCategory(description = "") {
