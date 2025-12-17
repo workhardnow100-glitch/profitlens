@@ -1,6 +1,9 @@
+// pages/api/reports.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { CT_MAP } from "../../lib/constants/ctMap";
+import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
@@ -17,7 +20,6 @@ function formatCurrency(n) {
   return Number(n || 0).toFixed(2);
 }
 
-// Client label extraction
 function extractClientLabel(description = "") {
   const cleaned = String(description).trim();
   if (!cleaned) return "UNLABELED";
@@ -28,43 +30,6 @@ function extractClientLabel(description = "") {
   return parts[0].toUpperCase();
 }
 
-// Category inference
-function inferCategory(type = "", description = "") {
-  const normalized = (type || "").trim().toUpperCase();
-  const banking = {
-    FPO: "Payment", TFR: "Transfer", CHG: "Bank Charges", DEB: "Debit",
-    DD: "Direct Debit", SO: "Standing Order", INT: "Interest", FPI: "Transfer In",
-    BP: "Savings", DEP: "Bank Charge Waived", PAY: "Charges", FEE: "Bank Account Fee",
-    CPT: "Cash Withdrawal",
-  };
-  if (banking[normalized]) return banking[normalized];
-
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Utilities" },
-    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS|BRITISH\s*GAS\b/i, category: "Utilities" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i, category: "Advertising" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
-    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Health" },
-    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance" },
-    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
-    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
-  ];
-
-  for (const rule of rules) {
-    if (rule.regex.test(description)) return rule.category;
-  }
-
-  return "Other";
-}
-
-// Helper to parse label for sorting
 function parseLabelToDate(label) {
   if (!label) return new Date(0);
   const qMatch = label.match(/^(\d{4})-Q([1-4])$/);
@@ -76,29 +41,47 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
+// ✅ Unified allowed categories
+const ALLOWED_CATEGORIES = new Set([
+  ...CT_MAP.income,
+  ...CT_MAP.allowable,
+  ...CT_MAP.disallowable,
+  ...CT_MAP.ignore,
+  ...SYSTEM_CATEGORIES,
+  "Uncategorised",
+]);
+
+// ✅ Lowercase sets for classification
+const MAP = {
+  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
+};
+
 export default async function handler(req, res) {
   try {
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
     const isFounder = session.user.role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
 
     if (!(isFounder || isSubscribedOrTrial)) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
     const clientId = session.user.clientId;
-    if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
+    if (!clientId || clientId === "unknown-client")
+      return res.status(400).json({ error: "Invalid client ID" });
 
-    const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } = req.query;
+    const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } =
+      req.query;
 
     const filters = {
       ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ✅ FIX: use business_category instead of deleted category column
     let txQuery = supabaseAdmin
       .from("transactions")
       .select("id, date, description, amount, business_category, type, is_reversal")
@@ -128,10 +111,14 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      // ✅ FIX: use business_category or infer
-      const category =
-        (tx.business_category && String(tx.business_category).trim()) ||
-        inferCategory(tx.type, tx.description);
+      // ✅ Use validated business_category only
+      let category = tx.business_category?.trim() || "Uncategorised";
+      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
+
+      const lower = category.toLowerCase();
+
+      // ✅ Exclude system categories from P&L
+      if (MAP.ignore.has(lower)) continue;
 
       const amount = parseFloat(tx.amount || 0);
 
@@ -153,6 +140,7 @@ export default async function handler(req, res) {
         }
 
         const bucket = map[key];
+
         if (amount >= 0) bucket.revenue += amount;
         else bucket.expenses += -amount;
 
@@ -201,18 +189,23 @@ export default async function handler(req, res) {
     const paginated = allMonthly.slice(start, end);
 
     const returnedTxs = (clientFilter
-      ? transactions.filter(tx => extractClientLabel(tx.description) === clientFilter && !tx.is_reversal)
-      : transactions.filter(tx => !tx.is_reversal)
-    ).map(tx => ({
-      id: tx.id,
-      date: tx.date,
-      description: tx.description,
-      amount: formatCurrency(tx.amount),
-      category:
-        tx.business_category ||
-        inferCategory(tx.type, tx.description),
-      type: tx.type,
-    }));
+      ? transactions.filter(
+          (tx) => extractClientLabel(tx.description) === clientFilter && !tx.is_reversal
+        )
+      : transactions.filter((tx) => !tx.is_reversal)
+    ).map((tx) => {
+      let category = tx.business_category?.trim() || "Uncategorised";
+      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
+
+      return {
+        id: tx.id,
+        date: tx.date,
+        description: tx.description,
+        amount: formatCurrency(tx.amount),
+        category,
+        type: tx.type,
+      };
+    });
 
     return res.status(200).json({
       pagination: {
@@ -230,7 +223,6 @@ export default async function handler(req, res) {
       clients: Array.from(clientSet).sort(),
       categories: Array.from(categorySet).sort(),
     });
-
   } catch (err) {
     console.error("❌ Reports API error:", err);
     return res.status(500).json({ error: "Failed to generate report" });

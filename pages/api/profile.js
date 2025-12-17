@@ -2,6 +2,18 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { CT_MAP } from "../../lib/constants/ctMap";
+import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+
+// ✅ Unified allowed category list
+const ALLOWED_CATEGORIES = new Set([
+  ...CT_MAP.income,
+  ...CT_MAP.allowable,
+  ...CT_MAP.disallowable,
+  ...CT_MAP.ignore,
+  ...SYSTEM_CATEGORIES,
+  "Uncategorised",
+]);
 
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
@@ -11,16 +23,28 @@ export default async function handler(req, res) {
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
   try {
-    // ✅ Handle category update (now updates business_category)
+    // ✅ POST — Update category (validated)
     if (req.method === "POST") {
       const { transactionId, newCategory } = req.body;
+
       if (!transactionId || !newCategory) {
-        return res.status(400).json({ error: "Missing transactionId or newCategory" });
+        return res
+          .status(400)
+          .json({ error: "Missing transactionId or newCategory" });
+      }
+
+      const category = String(newCategory).trim();
+
+      // ✅ Validate category
+      if (!ALLOWED_CATEGORIES.has(category)) {
+        return res.status(400).json({
+          error: `Invalid category: "${category}". Must be a defined HMRC category.`,
+        });
       }
 
       const { error } = await supabaseAdmin
         .from("transactions")
-        .update({ business_category: newCategory })
+        .update({ business_category: category })
         .eq("id", transactionId)
         .eq("client_id", clientId);
 
@@ -29,20 +53,25 @@ export default async function handler(req, res) {
       req.method = "GET"; // fall through to GET
     }
 
+    // ✅ GET — Profile data
     if (req.method === "GET") {
-      // ✅ Fetch transactions (updated schema)
+      // ✅ Fetch transactions
       const { data: transactions, error: txError } = await supabaseAdmin
         .from("transactions")
-        .select("id, date, description, amount, business_category, account_number, sort_code")
+        .select(
+          "id, date, description, amount, business_category, account_number, sort_code"
+        )
         .eq("client_id", clientId)
         .order("date", { ascending: false });
 
       if (txError) throw txError;
 
-      // ✅ Fetch HMRC categories (still used for tax logic)
+      // ✅ Fetch HMRC categories (optional, used for UI)
       const { data: hmrcCategories, error: hmrcError } = await supabaseAdmin
         .from("hmrc_categories")
-        .select("id, category_name, business_type, description, is_global, is_excluded")
+        .select(
+          "id, category_name, business_type, description, is_global, is_excluded"
+        )
         .eq("is_global", true);
 
       if (hmrcError) throw hmrcError;
@@ -56,14 +85,14 @@ export default async function handler(req, res) {
 
       if (accError && accError.code !== "PGRST116") throw accError;
 
-      // ✅ Initialize totals
+      // ✅ Totals by business type
       const totalsByType = {
         sole_trader: {},
-        limited_company: {}
+        limited_company: {},
       };
 
-      // ✅ Pre-fill HMRC categories
-      hmrcCategories.forEach(cat => {
+      // ✅ Pre-fill HMRC categories (UI only)
+      hmrcCategories.forEach((cat) => {
         if (!totalsByType[cat.business_type]) {
           totalsByType[cat.business_type] = {};
         }
@@ -73,12 +102,15 @@ export default async function handler(req, res) {
       let totalIncome = 0;
       let totalExpenses = 0;
 
-      // ✅ Compute totals using business_category
-      transactions.forEach(tx => {
-        const categoryName = tx.business_category || "Uncategorised";
+      // ✅ Compute totals using validated business_category
+      transactions.forEach((tx) => {
+        let categoryName = tx.business_category || "Uncategorised";
 
-        // Default business type
-        const businessType = "sole_trader";
+        if (!ALLOWED_CATEGORIES.has(categoryName)) {
+          categoryName = "Uncategorised";
+        }
+
+        const businessType = "sole_trader"; // default
 
         if (!totalsByType[businessType]) totalsByType[businessType] = {};
         if (!totalsByType[businessType][categoryName]) {
@@ -97,16 +129,18 @@ export default async function handler(req, res) {
       const netProfit = totalIncome - totalExpenses;
 
       // ✅ Tax calculations
-      const soleTraderTaxRate = 0.20;
+      const soleTraderTaxRate = 0.2;
       const limitedCompanyTaxRate = 0.19;
 
-      const soleTraderOwed = netProfit > 0 ? netProfit * soleTraderTaxRate : 0;
-      const limitedCompanyOwed = netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
+      const soleTraderOwed =
+        netProfit > 0 ? netProfit * soleTraderTaxRate : 0;
+      const limitedCompanyOwed =
+        netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
 
       // ✅ Group by month
       const byMonth = {};
 
-      transactions.forEach(tx => {
+      transactions.forEach((tx) => {
         const month = new Date(tx.date).toISOString().slice(0, 7);
         if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0 };
 
@@ -136,7 +170,6 @@ export default async function handler(req, res) {
     }
 
     return res.status(405).json({ error: "Method not allowed" });
-
   } catch (err) {
     console.error("Profile API error:", err.message || err);
     return res.status(500).json({ error: "Failed to load profile data" });

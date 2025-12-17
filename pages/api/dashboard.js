@@ -2,66 +2,54 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { CT_MAP } from "../../lib/constants/ctMap";
+import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 
-// --- inferCategory logic ---
-function inferCategory(type = "", description = "") {
-  const normalized = type?.trim().toUpperCase() || "";
+// ✅ Build unified allowed category list
+const ALLOWED_CATEGORIES = new Set([
+  ...CT_MAP.income,
+  ...CT_MAP.allowable,
+  ...CT_MAP.disallowable,
+  ...CT_MAP.ignore,
+  ...SYSTEM_CATEGORIES,
+  "Uncategorised",
+]);
 
-  if (normalized === "FPO") return "Payment";
-  if (normalized === "TFR") return "Transfer";
-  if (normalized === "CHG") return "Bank Charges";
-  if (normalized === "DEB") return "Debit";
-  if (normalized === "DD") return "Direct Debit";
-  if (normalized === "SO") return "Standing Order";
-  if (normalized === "INT") return "Interest";
-  if (normalized === "FPI") return "Transfer In";
-  if (normalized === "BP") return "Savings";
-  if (normalized === "DEP") return "Bank Charge Waived";
-  if (normalized === "PAY") return "Charges";
-  if (normalized === "FEE") return "Bank Account Fee";
-  if (normalized === "CPT") return "Cash Withdrawal";
-
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO/i, category: "Food & Drink" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Utilities" },
-    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i, category: "Utilities" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i, category: "Advertising" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Business & Tax" },
-    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Health" },
-    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance" },
-    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
-    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
-  ];
-
-  for (const rule of rules) {
-    if (rule.regex.test(description)) return rule.category;
-  }
-  return "Other";
-}
-// --- End inferCategory ---
+// ✅ Build lowercase sets for classification
+const MAP = {
+  income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
+  allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
+  disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
+  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
+};
 
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
   const isFounder = session.user.role === "admin";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-  if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+  if (!(isFounder || isSubscribedOrTrial))
+    return res.status(403).json({ error: "Upgrade required" });
 
   const clientId = session.user.clientId;
-  if (!clientId || clientId === "unknown-client") return res.status(400).json({ error: "Invalid client ID" });
+  if (!clientId || clientId === "unknown-client")
+    return res.status(400).json({ error: "Invalid client ID" });
 
-  // ✅ PATCH — update business_category
+  // ✅ PATCH — update category (validated)
   if (req.method === "PATCH") {
     try {
       const { id, category } = req.body || {};
-      if (!id || !category) return res.status(400).json({ error: "Missing id or category" });
+      if (!id || !category)
+        return res.status(400).json({ error: "Missing id or category" });
+
+      if (!ALLOWED_CATEGORIES.has(category)) {
+        return res.status(400).json({
+          error: `Invalid category: "${category}". Must be a defined HMRC category.`,
+        });
+      }
 
       const { error: updateErr } = await supabaseAdmin
         .from("transactions")
@@ -71,13 +59,15 @@ export default async function handler(req, res) {
 
       if (updateErr) throw updateErr;
 
-      await supabaseAdmin.from("audit").insert([{
-        client_id: clientId,
-        user: session.user.email,
-        action: "UPDATE_CATEGORY",
-        details: `Updated transaction ${id} category to ${category}`,
-        timestamp: new Date().toISOString(),
-      }]);
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          user: session.user.email,
+          action: "UPDATE_CATEGORY",
+          details: `Updated transaction ${id} category to ${category}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
       return res.status(200).json({ success: true });
     } catch (err) {
@@ -95,13 +85,15 @@ export default async function handler(req, res) {
         .eq("client_id", clientId);
       if (error) throw error;
 
-      await supabaseAdmin.from("audit").insert([{
-        client_id: clientId,
-        user: session.user.email,
-        action: "DELETE_TRANSACTIONS",
-        details: `Deleted ${count} transactions`,
-        timestamp: new Date().toISOString(),
-      }]);
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          user: session.user.email,
+          action: "DELETE_TRANSACTIONS",
+          details: `Deleted ${count} transactions`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
       return res.status(200).json({ success: true, deleted: count });
     } catch (err) {
@@ -110,7 +102,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // ✅ GET — dashboard data
+  // ✅ GET — dashboard data (clean, aligned)
   try {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
@@ -124,23 +116,12 @@ export default async function handler(req, res) {
 
     const monthly = {};
     const recent = [];
+    const categoryBreakdown = {};
 
-    const categoryBreakdown = {
-      Payment: 0, Transfer: 0, "Bank Charges": 0, Debit: 0, "Direct Debit": 0,
-      "Standing Order": 0, Interest: 0, Groceries: 0, "Food & Drink": 0, Shopping: 0,
-      Transport: 0, Travel: 0, Fuel: 0, Utilities: 0, Subscriptions: 0, Advertising: 0,
-      "Business & Tax": 0, Health: 0, Insurance: 0, Entertainment: 0, Fitness: 0,
-      Other: 0, "Asset Disposal": 0, "Insurance Payout": 0, "Internal Transfer": 0,
-      "Returned Direct Debit": 0, "Transfer Between Accounts": 0,
-    };
-
-    const excludedCategories = new Set([
-      "Asset Disposal",
-      "Insurance Payout",
-      "Internal Transfer",
-      "Returned Direct Debit",
-      "Transfer Between Accounts",
-    ]);
+    // ✅ Initialise breakdown with CT_MAP categories
+    for (const cat of ALLOWED_CATEGORIES) {
+      categoryBreakdown[cat] = 0;
+    }
 
     for (const tx of transactions ?? []) {
       if (tx.is_reversal) continue;
@@ -148,15 +129,16 @@ export default async function handler(req, res) {
       const date = new Date(tx.date);
       if (isNaN(date.getTime())) continue;
 
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      const monthKey = `${date.getFullYear()}-${String(
+        date.getMonth() + 1
+      ).padStart(2, "0")}`;
       if (!monthly[monthKey]) monthly[monthKey] = { revenue: 0, expenses: 0 };
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
 
-      // ✅ Use business_category if present, otherwise infer
-      const category =
-        tx.business_category?.trim() ||
-        inferCategory(tx.type, tx.description);
+      // ✅ Use validated business_category only
+      let category = tx.business_category?.trim() || "Uncategorised";
+      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       recent.push({
         id: tx.id,
@@ -169,15 +151,16 @@ export default async function handler(req, res) {
         storagePath: tx.storage_path || null,
       });
 
+      const key = category.toLowerCase();
+
+      // ✅ Exclude system categories from P&L
+      if (MAP.ignore.has(key)) continue;
+
       if (amount > 0) {
-        if (!excludedCategories.has(category)) {
-          monthly[monthKey].revenue += amount;
-        }
+        monthly[monthKey].revenue += amount;
       } else if (amount < 0) {
-        if (!excludedCategories.has(category)) {
-          monthly[monthKey].expenses += -amount;
-          categoryBreakdown[category] = (categoryBreakdown[category] || 0) + -amount;
-        }
+        monthly[monthKey].expenses += -amount;
+        categoryBreakdown[category] += -amount;
       }
     }
 
@@ -188,13 +171,15 @@ export default async function handler(req, res) {
     const totalExpenses = expenses.reduce((a, b) => a + b, 0);
     const netProfit = totalRevenue - totalExpenses;
 
-    await supabaseAdmin.from("audit").insert([{
-      client_id: clientId,
-      user: session.user.email,
-      action: "FETCH_DASHBOARD",
-      details: `Returned ${transactions?.length ?? 0} transactions`,
-      timestamp: new Date().toISOString(),
-    }]);
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        user: session.user.email,
+        action: "FETCH_DASHBOARD",
+        details: `Returned ${transactions?.length ?? 0} transactions`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
     return res.status(200).json({
       stats: [
@@ -206,7 +191,6 @@ export default async function handler(req, res) {
       recent,
       breakdown: categoryBreakdown,
       categories: Object.keys(categoryBreakdown),
-      excludedIncomeCategories: Array.from(excludedCategories),
     });
   } catch (err) {
     console.error("Dashboard API error:", err?.message || err);
