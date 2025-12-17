@@ -2,7 +2,7 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { SYSTEM_CATEGORIES } from "@/lib/constants/systemCategories";
+import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 
 // --- New inferSystemCategory (MTD-safe, system-only) ---
 function inferSystemCategory(type = "", description = "") {

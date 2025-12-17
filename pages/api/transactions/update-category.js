@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { CATEGORIES } from "@/lib/constants/categories";
-import { SYSTEM_CATEGORIES } from "@/lib/constants/systemCategories";
+import { CATEGORIES } from "../../lib/constants/categories";
+import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { createClient } from "@/utils/supabase/server";
 
 export async function POST(req) {
