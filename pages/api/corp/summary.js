@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import { CT_MAP } from "../../lib/constants/ctMap";
+import { CT_MAP } from "../../../lib/constants/ctMap";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
