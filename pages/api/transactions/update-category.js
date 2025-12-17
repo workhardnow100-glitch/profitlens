@@ -30,11 +30,14 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
-  const { transactionId, category } = req.body || {};
+  let { transactionId, category } = req.body || {};
 
   if (!transactionId || !category) {
     return res.status(400).json({ error: "Missing transactionId or category" });
   }
+
+  // ✅ Normalise category
+  category = String(category).trim();
 
   // ✅ Validate category against constants
   if (!ALL_CATEGORIES.has(category)) {
