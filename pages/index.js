@@ -476,7 +476,7 @@ export default function Home() {
                     </button>
                   </form>
 
-                  {/* ✅ Signup Disclaimer (added here) */}
+                  {/* ✅ Signup Disclaimer */}
                   <p
                     style={{
                       fontSize: "0.75rem",
@@ -545,6 +545,85 @@ export default function Home() {
               </video>
             </div>
           </section>
+
+          {/* Homepage Disclaimer */}
+          <p
+            style={{
+              marginTop: "1.5rem",
+              fontSize: "0.8rem",
+              color: "#cbd5e1",
+              maxWidth: "800px",
+              marginLeft: "auto",
+              marginRight: "auto",
+            }}
+          >
+            ProfitLens does not provide tax, accounting, or legal advice. All
+            outputs are for informational purposes only and should not be used
+            as a substitute for professional advice or for making filing
+            decisions without independent verification.
+          </p>
+
+          {/* Homepage Footer */}
+          <footer
+            style={{
+              marginTop: "3rem",
+              paddingTop: "1.5rem",
+              paddingBottom: "1.5rem",
+              borderTop: "1px solid rgba(148, 163, 184, 0.4)",
+              fontSize: "0.8rem",
+              color: "#cbd5e1",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "960px",
+                margin: "0 auto",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "0.75rem",
+                justifyContent: "center",
+              }}
+            >
+              <a href="/legal/terms" style={{ textDecoration: "underline" }}>
+                Terms &amp; Conditions
+              </a>
+              <span>•</span>
+              <a href="/legal/privacy" style={{ textDecoration: "underline" }}>
+                Privacy Policy
+              </a>
+              <span>•</span>
+              <a href="/legal/cookies" style={{ textDecoration: "underline" }}>
+                Cookie Policy
+              </a>
+              <span>•</span>
+              <a href="/legal/dpa" style={{ textDecoration: "underline" }}>
+                Data Processing Agreement
+              </a>
+              <span>•</span>
+              <a href="/legal/aup" style={{ textDecoration: "underline" }}>
+                Acceptable Use Policy
+              </a>
+              <span>•</span>
+              <a href="/legal/sla" style={{ textDecoration: "underline" }}>
+                Service Level Agreement
+              </a>
+              <span>•</span>
+              <a href="/legal/security" style={{ textDecoration: "underline" }}>
+                Security Statement
+              </a>
+              <span>•</span>
+              <a
+                href="/legal/disclaimer"
+                style={{ textDecoration: "underline" }}
+              >
+                Website Disclaimer
+              </a>
+            </div>
+            <p style={{ marginTop: "0.75rem", opacity: 0.8 }}>
+              &copy; {new Date().getFullYear()} ProfitLens Technologies Ltd. All
+              rights reserved.
+            </p>
+          </footer>
         </div>
       </main>
     </>
