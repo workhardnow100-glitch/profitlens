@@ -1,3 +1,4 @@
+// pages/api/forecasts.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -41,15 +42,19 @@ export default async function handler(req, res) {
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const isFounder = session.user.role === "admin";
+    const role = session.user.role || "";
+    const subscriptionStatus = session.user.subscriptionStatus || "incomplete";
+    const clientId = session.user.clientId;
+
+    const isFounder = role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
+      subscriptionStatus
     );
+
     if (!(isFounder || isSubscribedOrTrial)) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    const clientId = session.user.clientId;
     if (!clientId || clientId === "unknown-client") {
       console.error("❌ Invalid or missing clientId in session:", session?.user);
       return res.status(400).json({ error: "Invalid client ID" });
@@ -65,7 +70,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
-    if (!transactions.length) {
+    if (!transactions || !transactions.length) {
       return res.status(200).json({
         forecast: [
           { label: "Projected Revenue", value: "£0.00" },

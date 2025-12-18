@@ -53,9 +53,12 @@ export default function Forecasts() {
       return;
     }
 
-    const isAdmin = session.user.role === "admin";
+    const role = session.user.role || "";
+    const subscriptionStatus = session.user.subscriptionStatus || "incomplete";
+
+    const isAdmin = role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
+      subscriptionStatus
     );
 
     if (!(isAdmin || isSubscribedOrTrial)) {
@@ -65,31 +68,44 @@ export default function Forecasts() {
 
   // ✅ Fetch forecast data
   useEffect(() => {
+    if (status !== "authenticated") return;
     if (!session?.user) return;
 
     const fetchForecastData = async () => {
       try {
+        setError(null);
+
         const res = await fetch("/api/forecasts", {
           credentials: "include",
         });
 
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
 
         if (!res.ok || json.error) {
           throw new Error(json.error || "Failed to fetch forecast");
         }
 
-        setForecast(json.forecast || []);
+        setForecast(Array.isArray(json.forecast) ? json.forecast : []);
         setSeries(
-          json.series || { months: [], revenue: [], expenses: [], net: [] }
+          json.series && Array.isArray(json.series.months)
+            ? {
+                months: json.series.months || [],
+                revenue: json.series.revenue || [],
+                expenses: json.series.expenses || [],
+                net: json.series.net || [],
+              }
+            : { months: [], revenue: [], expenses: [], net: [] }
         );
       } catch (err) {
+        console.error("Forecast fetch error:", err);
         setError(err.message || "Failed to load forecast");
+        setForecast([]);
+        setSeries({ months: [], revenue: [], expenses: [], net: [] });
       }
     };
 
     fetchForecastData();
-  }, [session]);
+  }, [session, status]);
 
   // ✅ Parse projections safely
   const revenueProjection = forecast[0]?.value
@@ -122,6 +138,9 @@ export default function Forecasts() {
     );
   }, [revenueTrend, expenseProjection]);
 
+  const hasHistoricalSeries =
+    Array.isArray(series.months) && series.months.length > 0;
+
   return (
     <ResponsiveLayout currentPageName="Forecasts">
       <div className="p-8 space-y-8">
@@ -130,6 +149,19 @@ export default function Forecasts() {
           Predict future performance based on historical transaction data.
           Visualize revenue, expenses, and profitability trends.
         </p>
+
+        {/* Auth/loading guard */}
+        {status === "loading" && (
+          <p className="text-slate-500">Loading your session…</p>
+        )}
+
+        {/* Error state */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            <p className="font-semibold">Unable to load forecast data.</p>
+            <p className="text-sm mt-1">{error}</p>
+          </div>
+        )}
 
         {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -167,38 +199,44 @@ export default function Forecasts() {
 
         {/* Historical data */}
         <ResponsiveCard title="Historical Trends">
-          <Line
-            data={{
-              labels: series.months,
-              datasets: [
-                {
-                  label: "Revenue",
-                  data: series.revenue,
-                  borderColor: "#22C55E",
-                  backgroundColor: "#22C55E33",
-                  fill: true,
-                  tension: 0.4,
-                },
-                {
-                  label: "Expenses",
-                  data: series.expenses,
-                  borderColor: "#EF4444",
-                  backgroundColor: "#EF444433",
-                  fill: true,
-                  tension: 0.4,
-                },
-                {
-                  label: "Net Profit",
-                  data: series.net,
-                  borderColor: "#6366F1",
-                  backgroundColor: "#6366F133",
-                  fill: true,
-                  tension: 0.4,
-                },
-              ],
-            }}
-            options={{ responsive: true }}
-          />
+          {hasHistoricalSeries ? (
+            <Line
+              data={{
+                labels: series.months,
+                datasets: [
+                  {
+                    label: "Revenue",
+                    data: series.revenue,
+                    borderColor: "#22C55E",
+                    backgroundColor: "#22C55E33",
+                    fill: true,
+                    tension: 0.4,
+                  },
+                  {
+                    label: "Expenses",
+                    data: series.expenses,
+                    borderColor: "#EF4444",
+                    backgroundColor: "#EF444433",
+                    fill: true,
+                    tension: 0.4,
+                  },
+                  {
+                    label: "Net Profit",
+                    data: series.net,
+                    borderColor: "#6366F1",
+                    backgroundColor: "#6366F133",
+                    fill: true,
+                    tension: 0.4,
+                  },
+                ],
+              }}
+              options={{ responsive: true }}
+            />
+          ) : (
+            <p className="text-sm text-slate-500">
+              Not enough transaction history yet to render trends.
+            </p>
+          )}
         </ResponsiveCard>
 
         {/* Simulated forecasts */}
@@ -269,17 +307,14 @@ export default function Forecasts() {
           />
         </ResponsiveCard>
 
-          <ForecastSimulator />
-
-        {error && <p className="text-red-500 mt-4">{error}</p>}
+        <ForecastSimulator />
 
         {/* ✅ In‑App Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-          ProfitLens provides estimates only. Always verify figures before filing
-          with HMRC. Nothing displayed here constitutes tax, accounting, or legal
-          advice.
+          ProfitLens provides estimates only. Always verify figures before
+          filing with HMRC. Nothing displayed here constitutes tax, accounting,
+          or legal advice.
         </p>
-
       </div>
     </ResponsiveLayout>
   );
