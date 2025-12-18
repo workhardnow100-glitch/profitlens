@@ -396,10 +396,18 @@ export default function SAPage() {
                 ]}
                 data={result.transactions}
               />
-            </ResponsiveCard>
+              </ResponsiveCard>
           </>
         )}
       </div>
+
+      {/* ✅ Filing Disclaimer (Strong Version for SA) */}
+      <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+        ProfitLens does not provide tax advice. All calculations are estimates
+        only. Users are solely responsible for verifying all figures and
+        ensuring accuracy before submitting any tax filings to HMRC.
+      </p>
+
     </ResponsiveLayout>
   );
 }

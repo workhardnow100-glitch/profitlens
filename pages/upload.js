@@ -119,7 +119,7 @@ export default function Upload() {
             {uploading ? "Uploading..." : "Upload Statements"}
           </button>
 
-          {uploadSummary && (
+           {uploadSummary && (
             <ResponsiveCard title="Upload Summary">
               <p className="text-sm text-slate-700 mb-2">
                 {uploadSummary.totalStatements} statements parsed across {uploadSummary.files.length} file(s).
@@ -132,6 +132,14 @@ export default function Upload() {
             </ResponsiveCard>
           )}
         </ResponsiveCard>
+
+        {/* ✅ In‑App Disclaimer */}
+        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+          ProfitLens provides estimates only. Always verify figures before filing
+          with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+          advice.
+        </p>
+
       </div>
     </ResponsiveLayout>
   );

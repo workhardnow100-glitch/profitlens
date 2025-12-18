@@ -186,7 +186,7 @@ export default function EmailSetup() {
               </div>
             </ResponsiveCard>
 
-            {/* Security & Audit */}
+              {/* Security & Audit */}
             <ResponsiveCard title="Security & Audit (Pro)">
               <p className="text-sm text-slate-500">
                 Last Gmail connection: 2025-09-12 • IP: 82.17.44.201
@@ -198,6 +198,14 @@ export default function EmailSetup() {
           </>
         )}
       </div>
+
+      {/* ✅ In‑App Disclaimer */}
+      <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+        ProfitLens provides estimates only. Always verify figures before filing
+        with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+        advice.
+      </p>
+
     </ResponsiveLayout>
   );
 }

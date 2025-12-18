@@ -191,6 +191,14 @@ export default function BulkProcessing() {
           className="h-200"
         />
       </div>
+
+      {/* ✅ In‑App Disclaimer */}
+      <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+        ProfitLens provides estimates only. Always verify figures before filing
+        with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+        advice.
+      </p>
+
     </div>
   );
 }
