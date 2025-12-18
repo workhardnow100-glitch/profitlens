@@ -1,4 +1,3 @@
-// pages/api/forecasts.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -39,27 +38,29 @@ const MAP = {
 
 export default async function handler(req, res) {
   try {
+    // ✅ MATCH DASHBOARD — session guard
     const session = await getServerSession(req, res, authOptions);
-    if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
+    if (!session?.user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-    const role = session.user.role || "";
-    const subscriptionStatus = session.user.subscriptionStatus || "incomplete";
-    const clientId = session.user.clientId;
-
-    const isFounder = role === "admin";
+    // ✅ MATCH DASHBOARD — role + subscription guard
+    const isFounder = session.user.role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      subscriptionStatus
+      session.user.subscriptionStatus
     );
 
     if (!(isFounder || isSubscribedOrTrial)) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
+    // ✅ MATCH DASHBOARD — clientId guard
+    const clientId = session.user.clientId;
     if (!clientId || clientId === "unknown-client") {
-      console.error("❌ Invalid or missing clientId in session:", session?.user);
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
+    // ✅ Fetch transactions
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select("date, amount, business_category, is_reversal")
@@ -70,7 +71,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
-    if (!transactions || !transactions.length) {
+    if (!transactions.length) {
       return res.status(200).json({
         forecast: [
           { label: "Projected Revenue", value: "£0.00" },
@@ -85,7 +86,7 @@ export default async function handler(req, res) {
     const monthly = {};
     const categoriesTotals = {};
 
-    // ✅ Initialise category totals for all allowed categories
+    // ✅ Initialise category totals
     for (const cat of ALLOWED_CATEGORIES) {
       categoriesTotals[cat] = { revenue: 0, expenses: 0 };
     }
@@ -98,13 +99,10 @@ export default async function handler(req, res) {
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
 
-      // ✅ Use validated business_category only
       let category = tx.business_category?.trim() || "Uncategorised";
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
-
-      // ✅ Exclude system categories from P&L
       if (MAP.ignore.has(lower)) continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
