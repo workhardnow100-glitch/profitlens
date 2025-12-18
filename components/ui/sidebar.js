@@ -45,7 +45,7 @@ export function SidebarMenu() {
     { title: "Forecasts", url: "/forecasts", icon: BarChart },
     { title: "Email Setup", url: "/emailsetup", icon: Users },
     { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
-    { title: "Accountants", url: "/accountants", icon: Users },
+
   ];
 
   const taxItems = [
