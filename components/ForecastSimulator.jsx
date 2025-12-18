@@ -8,13 +8,13 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
-import { useUser } from "../hooks/useUser";
+import { useSession } from "next-auth/react";
 
 export default function ForecastSimulator() {
-  const { user } = useUser();
+  const { data: session, status } = useSession();
 
-  // ✅ Prevent hook-order crash: wait for user to load
-  if (!user) {
+  // ✅ Match Dashboard: wait for session hydration
+  if (status === "loading") {
     return (
       <div className="mt-10 bg-white/70 p-6 rounded-lg border text-center">
         <p className="text-slate-600">Loading forecast tools…</p>
@@ -22,10 +22,23 @@ export default function ForecastSimulator() {
     );
   }
 
-  const subscriptionStatus = user.subscriptionStatus || "none";
-  const isUnlocked = ["basic", "pro"].includes(subscriptionStatus);
+  // ✅ If no user, do not render
+  if (!session?.user) {
+    return null;
+  }
 
-  // ✅ Safe locked state AFTER hooks run
+  // ✅ EXACT SAME LOGIC AS DASHBOARD API
+  const role = session.user.role || "";
+  const subscriptionStatus = session.user.subscriptionStatus || "incomplete";
+
+  const isFounder = role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    subscriptionStatus
+  );
+
+  const isUnlocked = isFounder || isSubscribedOrTrial;
+
+  // ✅ Locked state AFTER hydration
   if (!isUnlocked) {
     return (
       <div className="mt-10 bg-white/70 p-6 rounded-lg border text-center">
@@ -42,7 +55,7 @@ export default function ForecastSimulator() {
   // ✅ Hooks ALWAYS run — safe
   const [baseRevenue, setBaseRevenue] = useState(5000);
   const [baseExpenses, setBaseExpenses] = useState(3000);
-  const [growthRate, setGrowthRate] = useState(0.05); // 5%
+  const [growthRate, setGrowthRate] = useState(0.05);
 
   const forecastMonths = 12;
 
@@ -64,12 +77,8 @@ export default function ForecastSimulator() {
     return data;
   }, [baseRevenue, baseExpenses, growthRate]);
 
-  const yearProfit = forecastData
-    .reduce((acc, d) => acc + d.net, 0)
-    .toFixed(2);
-
-  const breakEvenMonth =
-    forecastData.find((d) => d.net >= 0)?.month || "None";
+  const yearProfit = forecastData.reduce((acc, d) => acc + d.net, 0).toFixed(2);
+  const breakEvenMonth = forecastData.find((d) => d.net >= 0)?.month || "None";
 
   return (
     <div className="mt-10 bg-white/70 p-6 rounded-lg border">
@@ -125,39 +134,20 @@ export default function ForecastSimulator() {
           <YAxis />
           <Tooltip />
           <Legend />
-          <Line
-            type="monotone"
-            dataKey="revenue"
-            stroke="#4ade80"
-            name="Revenue"
-          />
-          <Line
-            type="monotone"
-            dataKey="expenses"
-            stroke="#f87171"
-            name="Expenses"
-          />
-          <Line
-            type="monotone"
-            dataKey="net"
-            stroke="#3b82f6"
-            name="Net Profit"
-          />
+          <Line type="monotone" dataKey="revenue" stroke="#4ade80" />
+          <Line type="monotone" dataKey="expenses" stroke="#f87171" />
+          <Line type="monotone" dataKey="net" stroke="#3b82f6" />
         </LineChart>
       </ResponsiveContainer>
 
       <div className="mt-6 text-sm text-slate-700 space-y-1">
         <p>
           <strong>Year-End Profit:</strong>{" "}
-          <span className="text-emerald-600 font-semibold">
-            £{yearProfit}
-          </span>
+          <span className="text-emerald-600 font-semibold">£{yearProfit}</span>
         </p>
         <p>
           <strong>Break-Even Month:</strong>{" "}
-          <span className="text-blue-600 font-medium">
-            {breakEvenMonth}
-          </span>
+          <span className="text-blue-600 font-medium">{breakEvenMonth}</span>
         </p>
       </div>
     </div>
