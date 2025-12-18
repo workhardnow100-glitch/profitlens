@@ -16,6 +16,7 @@ import {
   Activity,
   Users,
 } from "lucide-react";
+
 import {
   Sidebar,
   SidebarContent,
@@ -29,8 +30,10 @@ import {
   SidebarFooter,
   SidebarProvider,
   SidebarTrigger,
-  useSidebar, // ✅ import hook to read state
+  useSidebar,
 } from "./ui/sidebar";
+
+import Footer from "./Footer"; // ✅ ADD THIS
 
 const navigationItems = [
   { title: "Dashboard", url: createPageUrl("Dashboard"), icon: BarChart3 },
@@ -56,7 +59,6 @@ export default function Layout({ children }) {
   );
 }
 
-// ✅ Inner component so we can useSidebar hook
 function LayoutInner({ router, user, children }) {
   const { open } = useSidebar();
 
@@ -143,7 +145,12 @@ function LayoutInner({ router, user, children }) {
             <h1 className="text-xl font-bold text-slate-900">ProfitLens</h1>
           </div>
         </header>
+
+        {/* Scrollable content */}
         <div className="flex-1 overflow-auto">{children}</div>
+
+        {/* ✅ Footer added here */}
+        <Footer />
       </main>
     </div>
   );
