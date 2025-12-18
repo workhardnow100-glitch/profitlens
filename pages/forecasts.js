@@ -85,8 +85,7 @@ export default function Forecasts() {
           throw new Error(json.error || "Failed to fetch forecast");
         }
 
-        setForecast(Array.isArray(json.forecast) ? json.forecast : []);
-        setSeries(
+        const safeSeries =
           json.series && Array.isArray(json.series.months)
             ? {
                 months: json.series.months || [],
@@ -94,8 +93,10 @@ export default function Forecasts() {
                 expenses: json.series.expenses || [],
                 net: json.series.net || [],
               }
-            : { months: [], revenue: [], expenses: [], net: [] }
-        );
+            : { months: [], revenue: [], expenses: [], net: [] };
+
+        setForecast(Array.isArray(json.forecast) ? json.forecast : []);
+        setSeries(safeSeries);
       } catch (err) {
         console.error("Forecast fetch error:", err);
         setError(err.message || "Failed to load forecast");
@@ -138,8 +139,18 @@ export default function Forecasts() {
     );
   }, [revenueTrend, expenseProjection]);
 
+  // ✅ Robust guards for historical series (for Chart.js)
   const hasHistoricalSeries =
     Array.isArray(series.months) && series.months.length > 0;
+
+  const canRenderHistoricalChart =
+    hasHistoricalSeries &&
+    Array.isArray(series.revenue) &&
+    Array.isArray(series.expenses) &&
+    Array.isArray(series.net) &&
+    series.revenue.length === series.expenses.length &&
+    series.expenses.length === series.net.length &&
+    series.months.length === series.revenue.length;
 
   return (
     <ResponsiveLayout currentPageName="Forecasts">
@@ -199,7 +210,7 @@ export default function Forecasts() {
 
         {/* Historical data */}
         <ResponsiveCard title="Historical Trends">
-          {hasHistoricalSeries ? (
+          {canRenderHistoricalChart ? (
             <Line
               data={{
                 labels: series.months,
