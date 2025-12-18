@@ -13,12 +13,25 @@ import { useUser } from "../hooks/useUser";
 export default function ForecastSimulator() {
   const { user } = useUser();
 
-  const isUnlocked = ["basic", "pro"].includes(user.subscriptionStatus);
+  // ✅ Prevent hook-order crash: wait for user to load
+  if (!user) {
+    return (
+      <div className="mt-10 bg-white/70 p-6 rounded-lg border text-center">
+        <p className="text-slate-600">Loading forecast tools…</p>
+      </div>
+    );
+  }
 
+  const subscriptionStatus = user.subscriptionStatus || "none";
+  const isUnlocked = ["basic", "pro"].includes(subscriptionStatus);
+
+  // ✅ Safe locked state AFTER hooks run
   if (!isUnlocked) {
     return (
       <div className="mt-10 bg-white/70 p-6 rounded-lg border text-center">
-        <h3 className="text-xl font-semibold text-slate-800 mb-2">🔒 Forecast Locked</h3>
+        <h3 className="text-xl font-semibold text-slate-800 mb-2">
+          🔒 Forecast Locked
+        </h3>
         <p className="text-slate-600">
           Upgrade to Pro to unlock forecasting and scenario planning tools.
         </p>
@@ -26,6 +39,7 @@ export default function ForecastSimulator() {
     );
   }
 
+  // ✅ Hooks ALWAYS run — safe
   const [baseRevenue, setBaseRevenue] = useState(5000);
   const [baseExpenses, setBaseExpenses] = useState(3000);
   const [growthRate, setGrowthRate] = useState(0.05); // 5%
@@ -39,6 +53,7 @@ export default function ForecastSimulator() {
       const revenue = baseRevenue * Math.pow(1 + growthRate, i);
       const expenses = baseExpenses;
       const net = revenue - expenses;
+
       data.push({
         month,
         revenue: parseFloat(revenue.toFixed(2)),
@@ -49,14 +64,21 @@ export default function ForecastSimulator() {
     return data;
   }, [baseRevenue, baseExpenses, growthRate]);
 
-  const yearProfit = forecastData.reduce((acc, d) => acc + d.net, 0).toFixed(2);
-  const breakEvenMonth = forecastData.find((d) => d.net >= 0)?.month || "None";
+  const yearProfit = forecastData
+    .reduce((acc, d) => acc + d.net, 0)
+    .toFixed(2);
+
+  const breakEvenMonth =
+    forecastData.find((d) => d.net >= 0)?.month || "None";
 
   return (
     <div className="mt-10 bg-white/70 p-6 rounded-lg border">
-      <h3 className="text-xl font-semibold text-slate-800 mb-4">Forecast Mode</h3>
+      <h3 className="text-xl font-semibold text-slate-800 mb-4">
+        Forecast Mode
+      </h3>
       <p className="text-slate-600 mb-6">
-        Simulate future performance by adjusting revenue, expenses, and growth rate.
+        Simulate future performance by adjusting revenue, expenses, and growth
+        rate.
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -71,6 +93,7 @@ export default function ForecastSimulator() {
             className="w-full border rounded px-3 py-2"
           />
         </div>
+
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
             Monthly Expenses (£)
@@ -82,6 +105,7 @@ export default function ForecastSimulator() {
             className="w-full border rounded px-3 py-2"
           />
         </div>
+
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-1">
             Growth Rate (%)
@@ -101,20 +125,39 @@ export default function ForecastSimulator() {
           <YAxis />
           <Tooltip />
           <Legend />
-          <Line type="monotone" dataKey="revenue" stroke="#4ade80" name="Revenue" />
-          <Line type="monotone" dataKey="expenses" stroke="#f87171" name="Expenses" />
-          <Line type="monotone" dataKey="net" stroke="#3b82f6" name="Net Profit" />
+          <Line
+            type="monotone"
+            dataKey="revenue"
+            stroke="#4ade80"
+            name="Revenue"
+          />
+          <Line
+            type="monotone"
+            dataKey="expenses"
+            stroke="#f87171"
+            name="Expenses"
+          />
+          <Line
+            type="monotone"
+            dataKey="net"
+            stroke="#3b82f6"
+            name="Net Profit"
+          />
         </LineChart>
       </ResponsiveContainer>
 
       <div className="mt-6 text-sm text-slate-700 space-y-1">
         <p>
           <strong>Year-End Profit:</strong>{" "}
-          <span className="text-emerald-600 font-semibold">£{yearProfit}</span>
+          <span className="text-emerald-600 font-semibold">
+            £{yearProfit}
+          </span>
         </p>
         <p>
           <strong>Break-Even Month:</strong>{" "}
-          <span className="text-blue-600 font-medium">{breakEvenMonth}</span>
+          <span className="text-blue-600 font-medium">
+            {breakEvenMonth}
+          </span>
         </p>
       </div>
     </div>
