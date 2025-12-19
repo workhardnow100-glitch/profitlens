@@ -9,6 +9,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+// 🔐 Internal server-to-server bypass: set in Vercel env
+// INTERNAL_SECRET=some-long-random-string
+
 // ✅ Global, bank-agnostic code hints
 const EXPENSE_TYPE_HINTS = [
   "DEB", "DR", "DB", "D",
@@ -46,23 +49,30 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  // ✅ Validate session
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user)
-    return res.status(401).json({ error: "Unauthorized" });
+  // 🔑 Detect internal server-to-server call
+  const internalBypass =
+    req.headers["x-internal-secret"] &&
+    process.env.INTERNAL_SECRET &&
+    req.headers["x-internal-secret"] === process.env.INTERNAL_SECRET;
 
-  const isFounder = session.user.role === "admin";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
-  );
+  // ✅ Validate session for external calls only
+  let session = null;
+  if (!internalBypass) {
+    session = await getServerSession(req, res, authOptions);
+    if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  if (!(isFounder || isSubscribedOrTrial)) {
-    return res.status(403).json({ error: "Upgrade required" });
+    const isFounder = session.user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
+    if (!(isFounder || isSubscribedOrTrial)) {
+      return res.status(403).json({ error: "Upgrade required" });
+    }
   }
 
-  // ✅ Accountant-aware client ID
+  // ✅ Accountant-aware client ID (only relevant for external requests)
   const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
+    session?.user?.actingAsClientId || session?.user?.clientId;
 
   const { clientId, periodStart, periodEnd } = req.body;
 
@@ -70,16 +80,16 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing parameters" });
   }
 
-  // ✅ Prevent accountants from spoofing clientId
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
+  // ✅ Prevent accountants from spoofing clientId (external only)
+  if (!internalBypass && session.user.role === "accountant" && clientId !== actingClientId) {
     return res.status(403).json({
       error: "Accountants cannot view VAT summaries for unauthorized clients",
     });
   }
 
   try {
-    // ✅ AUDIT LOG — Accountant viewing VAT summary
-    if (session.user.role === "accountant") {
+    // ✅ AUDIT LOG — Accountant viewing VAT summary (external only)
+    if (!internalBypass && session.user.role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
@@ -91,13 +101,15 @@ export default async function handler(req, res) {
     }
 
     // ✅ 1. VAT period record (lock + submitted status)
-    const { data: vatPeriod } = await supabase
+    const { data: vatPeriod, error: vatPeriodErr } = await supabase
       .from("vat_periods")
       .select("*")
       .eq("client_id", clientId)
       .eq("period_start", periodStart)
       .eq("period_end", periodEnd)
       .maybeSingle();
+
+    if (vatPeriodErr) throw vatPeriodErr;
 
     const vatPeriodId = vatPeriod?.id ?? null;
     const locked = !!vatPeriod?.locked;

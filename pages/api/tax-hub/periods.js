@@ -1,3 +1,4 @@
+// pages/api/tax-hub/periods.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]"; // ⬅️ adjust relative path if needed
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -243,14 +244,7 @@ export default async function handler(req, res) {
     }
 
     const corpPeriods = buildCorpPeriods(grouped.corp);
-
-    // ✅ VAT logic unchanged
-    const { data: vatPayments } = await supabaseAdmin
-      .from("vat_payments")
-      .select("*")
-      .eq("client_id", clientId)
-      .order("payment_date", { ascending: false });
-
+    // ✅ VAT logic continued
     const { data: vatSetting } = await supabaseAdmin
       .from("vat_settings")
       .select("stagger")
@@ -258,29 +252,27 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     let stagger = vatSetting?.stagger || 1;
-
     const rawVatPeriods = generateVatPeriods(stagger);
 
     let totalVatOwed = 0;
     let totalVatOutput = 0;
     let totalVatInput = 0;
     const vatPeriods = [];
-
     const now = new Date();
 
     for (const p of rawVatPeriods) {
-      const summaryRes = await fetch(
-        `${req.headers.origin}/api/vat/summary`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            clientId,
-            periodStart: p.periodStart,
-            periodEnd: p.periodEnd,
-          }),
-        }
-      );
+      const summaryRes = await fetch(`${req.headers.origin}/api/vat/summary`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-internal-secret": process.env.INTERNAL_SECRET, // 🔑 bypass header
+        },
+        body: JSON.stringify({
+          clientId,
+          periodStart: p.periodStart,
+          periodEnd: p.periodEnd,
+        }),
+      });
 
       let box1 = 0;
       let box4 = 0;
@@ -308,7 +300,6 @@ export default async function handler(req, res) {
         Math.abs(box5) !== 0;
 
       let status = "Draft";
-
       if (submitted) status = "Submitted";
       else if (endDate < now && hasActivity) status = "Overdue";
       else if (hasActivity) status = "Ready to Submit";
@@ -332,11 +323,9 @@ export default async function handler(req, res) {
     }
 
     const totalVatPaid = (vatPayments || []).reduce(
-      (sum, p) =>
-        sum + (p.direction === "payment" ? p.amount : -p.amount),
+      (sum, p) => sum + (p.direction === "payment" ? p.amount : -p.amount),
       0
     );
-
     const vatBalance = totalVatOwed - totalVatPaid;
 
     const { data: ctPayments } = await supabaseAdmin
@@ -349,22 +338,17 @@ export default async function handler(req, res) {
       (sum, p) => sum + (p.corpTaxDue || 0),
       0
     );
-
     const totalCtPaid = (ctPayments || []).reduce(
-      (sum, p) =>
-        sum + (p.direction === "payment" ? p.amount : -p.amount),
+      (sum, p) => sum + (p.direction === "payment" ? p.amount : -p.amount),
       0
     );
-
     const ctBalance = totalCorpTaxDue - totalCtPaid;
-
     const overdueVatCount = vatPeriods.filter((p) => p.overdue).length;
 
     return res.status(200).json({
       vat: vatPeriods,
       cis: cisPeriods,
       corp: corpPeriods,
-
       sa: grouped.sa.map((tx) => ({
         periodLabel: tx.date,
         periodStart: tx.date,
@@ -373,9 +357,7 @@ export default async function handler(req, res) {
         hmrcAuthorized:
           (tx.business_category || "").toLowerCase() === "self assessment",
       })),
-
       vatStagger: stagger,
-
       vatPayments,
       totalVatOwed,
       totalVatPaid,
@@ -383,7 +365,6 @@ export default async function handler(req, res) {
       totalVatOutput,
       totalVatInput,
       overdueVatCount,
-
       ctPayments,
       totalCorpTaxDue,
       totalCtPaid,
