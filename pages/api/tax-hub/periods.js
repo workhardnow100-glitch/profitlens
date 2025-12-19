@@ -147,7 +147,7 @@ function buildCorpPeriods(corpTxs) {
         locked: false,
         hmrcAuthorized: true,
         transactions: [],
-        corpTaxDue: 0, // placeholder; your CT logic can populate this if needed
+        corpTaxDue: 0,
       };
     }
     periods[key].transactions.push(tx);
@@ -155,11 +155,9 @@ function buildCorpPeriods(corpTxs) {
   });
   return Object.values(periods);
 }
-
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  // Session + role/subscription checks (kept, but non-blocking to data if valid)
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
@@ -167,28 +165,27 @@ export default async function handler(req, res) {
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
   if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
 
-  // Accountant-aware client ID
   const actingClientId = session.user.actingAsClientId || session.user.clientId;
-
   const { clientId } = req.body;
   if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
-  // Prevent accountants from spoofing clientId
   if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot request tax periods for unauthorized clients",
-    });
+    return res.status(403).json({ error: "Accountants cannot request tax periods for unauthorized clients" });
   }
 
   try {
-    // AUDIT LOG — Accountant viewing Tax Hub periods
+    // ✅ Fixed audit insert to match table schema
     if (session.user.role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
+          id: crypto.randomUUID(),
           client_id: clientId,
           actor_email: session.user.email,
           action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
           details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
+          timestamp: new Date().toISOString(),
+          user: null,
+          user_id: null,
         },
       ]);
     }
@@ -342,13 +339,15 @@ export default async function handler(req, res) {
 
     const overdueVatCount = vatPeriods.filter((p) => p.overdue).length;
 
-    // SA bucket: as per old version, reflect transactions marked SA/SA Payment
+    // SA bucket
     const saPeriods = grouped.sa.map((tx) => ({
       periodLabel: tx.date,
       periodStart: tx.date,
       periodEnd: tx.date,
       locked: tx.tax_locked,
-      hmrcAuthorized: (tx.business_category || "").toLowerCase().includes("self assessment") || (tx.business_category || "").toLowerCase().includes("sa payment"),
+      hmrcAuthorized:
+        (tx.business_category || "").toLowerCase().includes("self assessment") ||
+        (tx.business_category || "").toLowerCase().includes("sa payment"),
     }));
 
     return res.status(200).json({
