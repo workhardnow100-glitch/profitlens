@@ -11,7 +11,7 @@ export default function ClientSwitcher({ clients, currentClient }) {
     const newClientId = e.target.value;
     setSelected(newClientId);
 
-    await fetch("/api/accountants/switch-client", {
+    await fetch("/api/accountant/switch-client", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId: newClientId }),

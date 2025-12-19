@@ -35,7 +35,7 @@ function ClientSwitcher() {
 
   useEffect(() => {
     async function load() {
-      const res = await fetch("/api/accountants/get-accessible-clients");
+      const res = await fetch("/api/accountant/get-accessible-clients");
       const data = await res.json();
 
       if (data.success) {
@@ -52,7 +52,7 @@ function ClientSwitcher() {
     const newClientId = e.target.value;
     setCurrent(newClientId);
 
-    await fetch("/api/accountants/switch-client", {
+    await fetch("/api/accountant/switch-client", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId: newClientId }),
