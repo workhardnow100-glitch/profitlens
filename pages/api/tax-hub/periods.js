@@ -89,13 +89,13 @@ export default async function handler(req, res) {
   try {
     // ✅ AUDIT LOG — Accountant viewing Tax Hub periods
     if (session.user.role === "accountant") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
-          details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
-        },
+      await supabaseAdmin.from("audit").insert([ 
+        { 
+          client_id: clientId, 
+          actor_email: session.user.email, 
+          action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS", 
+          details: "Viewed VAT/CIS/CT/SA periods in Tax Hub" 
+        } 
       ]);
     }
 
@@ -321,6 +321,15 @@ export default async function handler(req, res) {
         overdue,
       });
     }
+
+    // ✅ Fetch vatPayments from database
+    const { data: vatPayments, error: vatPaymentsError } = await supabaseAdmin
+      .from("vat_payments")
+      .select("*")
+      .eq("client_id", clientId)
+      .order("payment_date", { ascending: false });
+
+    if (vatPaymentsError) throw vatPaymentsError;
 
     const totalVatPaid = (vatPayments || []).reduce(
       (sum, p) => sum + (p.direction === "payment" ? p.amount : -p.amount),
