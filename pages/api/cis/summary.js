@@ -1,6 +1,6 @@
 // pages/api/cis/summary.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]"; 
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -50,19 +50,19 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ✅ Load transactions
+    // ✅ Load CIS-relevant transactions
     const { data: tx, error } = await supabaseAdmin
       .from("transactions")
-      .select("id, date, category, cis_amount, tax_locked, hmrc_category_id")
+      .select("id, date, cis_type, cis_amount, tax_locked, amount, description")
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
     if (error) throw error;
 
-    // ✅ Filter CIS‑mapped transactions
+    // ✅ Filter only transactions where CIS fields are present
     const cisTx = tx.filter(
-      (t) => t.hmrc_category_id && t.category === "cis"
+      (t) => t.cis_type && t.cis_amount !== null
     );
 
     // ✅ Totals
@@ -71,8 +71,9 @@ export default async function handler(req, res) {
 
     cisTx.forEach((t) => {
       const amt = Number(t.cis_amount || 0);
-      if (amt > 0) cisDeducted += amt;
-      else cisSuffered += Math.abs(amt);
+
+      if (t.cis_type === "deducted") cisDeducted += Math.abs(amt);
+      if (t.cis_type === "suffered") cisSuffered += Math.abs(amt);
     });
 
     const netCis = cisDeducted - cisSuffered;
