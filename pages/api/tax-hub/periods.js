@@ -4,7 +4,39 @@ import { authOptions } from "../auth/[...nextauth]"; // adjust if needed
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { SYSTEM_CATEGORIES } from "../../../lib/constants/systemCategories";
 import { CT_MAP } from "../../../lib/constants/ctMap";
-import vatSummaryHandler from "../vat/summary"; // ✅ added import
+import vatSummaryHandler from "../vat/summary"; // ✅ VAT summary import
+
+// ✅ Marginal relief calculator (mirrors /api/ct/summary)
+function calculateCorporationTax(profit) {
+  if (profit <= 0) return { tax: 0, rate: 0 };
+
+  const smallProfitsRate = 0.19;
+  const mainRate = 0.25;
+
+  if (profit <= 50000) {
+    return { tax: profit * smallProfitsRate, rate: 19 };
+  }
+
+  if (profit >= 250000) {
+    return { tax: profit * mainRate, rate: 25 };
+  }
+
+  const marginalRelief = ((250000 - profit) / 200000) * (0.25 - 0.19);
+  const effectiveRate = 0.25 - marginalRelief;
+
+  return {
+    tax: profit * effectiveRate,
+    rate: effectiveRate * 100,
+  };
+}
+
+// ✅ Build lowercase sets for exact CT classification (mirrors /api/ct/summary)
+const CT_MAP_LOWER = {
+  income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
+  allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
+  disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
+  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
+};
 
 // Build allowed categories like the transactions API
 const ALLOWED_BUSINESS_CATEGORIES = new Set([
@@ -130,7 +162,7 @@ function buildCISPeriods(cisTxs) {
   return Object.values(periods);
 }
 
-// Corporation Tax periods (calendar year buckets)
+// Corporation Tax periods (calendar year buckets) – structure helper, not used for calc now
 function buildCorpPeriods(corpTxs) {
   const periods = {};
   corpTxs.forEach((tx) => {
@@ -189,7 +221,7 @@ export default async function handler(req, res) {
       }]);
     }
 
-        const { data: transactions, error: txError } = await supabaseAdmin
+    const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select(
         "id, date, business_category, tax_locked, client_id, vat_amount, amount, cis_amount, cis_type, type, description"
@@ -219,7 +251,7 @@ export default async function handler(req, res) {
       return { ...tx, business_category: category };
     });
 
-    // Bucket into VAT, CIS, CT, SA based on enriched categories
+    // Bucket into VAT, CIS, CT, SA based on enriched categories (CT now computed separately)
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
     enriched.forEach((tx) => {
       const c = (tx.business_category || "").toLowerCase();
@@ -232,8 +264,71 @@ export default async function handler(req, res) {
     // CIS
     const cisPeriods = buildCISPeriods(grouped.cis);
 
-    // Corporation Tax
-    const corpPeriods = buildCorpPeriods(grouped.corp);
+    // ✅ Corporation Tax (calendar-year periods, last 5 years, using CT engine logic)
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const yearsBack = 5;
+    const corpPeriods = [];
+
+    for (let year = currentYear; year > currentYear - yearsBack; year--) {
+      const periodStartDate = new Date(year, 0, 1);
+      const periodEndDate = new Date(year, 11, 31);
+      const periodStart = fmt(periodStartDate);
+      const periodEnd = fmt(periodEndDate);
+
+      // Filter enriched transactions for this year
+      const yearTxs = enriched.filter((tx) => {
+        if (!tx.date) return false;
+        const d = new Date(tx.date);
+        const y = d.getFullYear();
+        return y === year;
+      });
+
+      if (yearTxs.length === 0) continue;
+
+      let income = 0;
+      let allowable = 0;
+      let disallowable = 0;
+      let locked = false;
+
+      yearTxs.forEach((tx) => {
+        const cat = (tx.business_category || "Uncategorised").trim();
+        const key = cat.toLowerCase();
+        const amount = Number(tx.amount || 0);
+
+        if (tx.tax_locked) locked = true;
+
+        // Exact CT classification
+        if (CT_MAP_LOWER.income.has(key) && amount > 0) {
+          income += amount;
+        } else if (CT_MAP_LOWER.allowable.has(key) && amount < 0) {
+          allowable += Math.abs(amount);
+        } else if (CT_MAP_LOWER.disallowable.has(key) && amount < 0) {
+          disallowable += Math.abs(amount);
+        }
+        // ignore + uncategorised are skipped for totals
+      });
+
+      const profit = income - allowable;
+      const adjustedProfit = profit + disallowable;
+      const { tax: corpTaxDue, rate: effectiveRate } = calculateCorporationTax(adjustedProfit);
+
+      corpPeriods.push({
+        periodLabel: `${periodStart} → ${periodEnd}`,
+        periodStart,
+        periodEnd,
+        locked,
+        hmrcAuthorized: true,
+        transactions: yearTxs,
+        corpTaxDue,
+        income,
+        allowable,
+        disallowable,
+        profit,
+        adjustedProfit,
+        effectiveRate,
+      });
+    }
 
     // VAT settings and periods
     const { data: vatSetting } = await supabaseAdmin
@@ -248,7 +343,6 @@ export default async function handler(req, res) {
     // VAT summary aggregation via direct import of summary handler
     let totalVatOwed = 0, totalVatOutput = 0, totalVatInput = 0;
     const vatPeriods = [];
-    const now = new Date();
 
     for (const p of rawVatPeriods) {
       const mockReq = {
