@@ -52,23 +52,29 @@ PatchedAdapter.createVerificationToken = async (token) => {
     .single();
 
   if (!user) {
-    await supabaseAdmin.from("audit").insert([{
-      client_id: "unknown-client",
-      actor_email: token.identifier,
-      action: "MAGIC_LINK_BLOCKED",
-      details: "User not found",
-    }]);
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: "unknown-client",
+        actor_email: token.identifier,
+        action: "MAGIC_LINK_BLOCKED",
+        details: "User not found",
+      },
+    ]);
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  const isActive = ["basic", "pro", "trialing"].includes(user.subscription_status);
+  const isActive = ["basic", "pro", "trialing"].includes(
+    user.subscription_status
+  );
   if (!user.client_id || !isActive) {
-    await supabaseAdmin.from("audit").insert([{
-      client_id: user.client_id ?? "unknown-client",
-      actor_email: token.identifier,
-      action: "MAGIC_LINK_BLOCKED",
-      details: "Missing subscription or client ID",
-    }]);
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: user.client_id ?? "unknown-client",
+        actor_email: token.identifier,
+        action: "MAGIC_LINK_BLOCKED",
+        details: "Missing subscription or client ID",
+      },
+    ]);
     throw new Error(
       `🚫 Magic link blocked: ${token.identifier} lacks subscription or client ID`
     );
@@ -76,13 +82,16 @@ PatchedAdapter.createVerificationToken = async (token) => {
 
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
-    .insert([{
-      identifier: token.identifier,
-      token: token.token,
-      expires: typeof token.expires === "string"
-        ? token.expires
-        : token.expires.toISOString(),
-    }])
+    .insert([
+      {
+        identifier: token.identifier,
+        token: token.token,
+        expires:
+          typeof token.expires === "string"
+            ? token.expires
+            : token.expires.toISOString(),
+      },
+    ])
     .select()
     .single();
 
@@ -108,10 +117,12 @@ PatchedAdapter.useVerificationToken = async (token) => {
     return null;
   }
 
-  // Mark user as verified
   const { error: verifyErr } = await supabaseAdmin
     .from("app_users")
-    .update({ email_verified: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .update({
+      email_verified: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
     .eq("email", consumed.identifier);
 
   if (verifyErr) {
@@ -197,12 +208,14 @@ export const authOptions: NextAuthOptions = {
 
         if (error || !user) return null;
 
-        await supabaseAdmin.from("audit").insert([{
-          client_id: user.client_id ?? "unknown-client",
-          actor_email: user.email,
-          action: "LOGIN",
-          details: "Credentials login successful",
-        }]);
+        await supabaseAdmin.from("audit").insert([
+          {
+            client_id: user.client_id ?? "unknown-client",
+            actor_email: user.email,
+            action: "LOGIN",
+            details: "Credentials login successful",
+          },
+        ]);
 
         return {
           id: String(user.id),
@@ -232,7 +245,9 @@ export const authOptions: NextAuthOptions = {
       if (token.email) {
         const { data: dbUser } = await supabaseAdmin
           .from("app_users")
-          .select("id, role, client_id, subscription_status, acting_client_id")
+          .select(
+            "id, role, client_id, subscription_status, acting_client_id"
+          )
           .eq("email", token.email.toLowerCase().trim())
           .single();
 
@@ -240,9 +255,8 @@ export const authOptions: NextAuthOptions = {
           token.sub = dbUser.id;
           token.role = dbUser.role ?? "USER";
           token.clientId = dbUser.client_id ?? "unknown-client";
-          token.subscriptionStatus = dbUser.subscription_status ?? "incomplete";
-
-          // ✅ Persist accountant's chosen client
+          token.subscriptionStatus =
+            dbUser.subscription_status ?? "incomplete";
           token.actingAsClientId = dbUser.acting_client_id ?? null;
         }
       }
@@ -262,13 +276,14 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
-      if (session.user.role === "accountant") {
+      // ✅ FIXED: uppercase role check
+      if (session.user.role === "ACCOUNTANT") {
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_access")
           .select("client_id")
           .eq("accountant_email", session.user.email);
 
-        const accessibleClients = accessRows?.map(r => r.client_id) || [];
+        const accessibleClients = accessRows?.map((r) => r.client_id) || [];
 
         session.user.accessibleClients = accessibleClients;
 
