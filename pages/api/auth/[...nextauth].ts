@@ -276,10 +276,10 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
-      // ✅ FIXED: uppercase role check
+      // ✅ Accountant role is uppercase in your union/DB
       if (session.user.role === "ACCOUNTANT") {
         const { data: accessRows } = await supabaseAdmin
-          .from("accountant_access")
+          .from("accountant_clients")
           .select("client_id")
           .eq("accountant_email", session.user.email);
 
@@ -288,9 +288,9 @@ export const authOptions: NextAuthOptions = {
         session.user.accessibleClients = accessibleClients;
 
         const persisted = token.actingAsClientId;
-        const valid = accessibleClients.includes(persisted);
+        const valid = accessibleClients.includes(persisted as string);
 
-        session.user.actingAsClientId = valid ? persisted : null;
+        session.user.actingAsClientId = valid ? (persisted as string) : null;
       } else {
         session.user.accessibleClients = [session.user.clientId];
         session.user.actingAsClientId = session.user.clientId;
