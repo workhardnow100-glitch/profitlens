@@ -1,4 +1,7 @@
 // pages/api/tax.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "./auth/[...nextauth]";
+import { supabaseAdmin } from "../../lib/supabase-admin";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -7,17 +10,48 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  // ✅ Enforce POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // ✅ Validate session
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   const { clientId, taxType, from, to } = req.body;
 
+  // ✅ Validate required parameters
   if (!clientId || !taxType || !from || !to) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
-  // 1️⃣ Fetch transactions for client + date range
+  // ✅ Prevent accountants from spoofing clientId
+  if (session.user.role === "accountant" && clientId !== actingClientId) {
+    return res.status(403).json({
+      error: "Accountants cannot request tax data for unauthorized clients",
+    });
+  }
+
+  // ✅ AUDIT LOG — Accountant calculating tax
+  if (session.user.role === "accountant") {
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: "ACCOUNTANT_CALCULATE_TAX",
+        details: `Calculated ${taxType.toUpperCase()} for period ${from} → ${to}`,
+      },
+    ]);
+  }
+
+  // ✅ Fetch transactions for client + date range
   const { data: transactions, error } = await supabase
     .from("transactions")
     .select("*")
@@ -29,7 +63,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
-  // 2️⃣ Route to correct tax calculation
+  // ✅ Route to correct tax calculation
   let calculations = {};
 
   switch (taxType) {
@@ -46,7 +80,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Unsupported tax type" });
   }
 
-  // 3️⃣ Return calculated results + source transactions
+  // ✅ Return calculated results + source transactions
   return res.status(200).json({
     taxType,
     period: { from, to },
@@ -59,16 +93,16 @@ export default async function handler(req, res) {
    VAT CALCULATION (HMRC)
    ========================= */
 function calculateVAT(transactions) {
-  const vatTx = transactions.filter(t => t.vat_rate !== null);
+  const vatTx = transactions.filter((t) => t.vat_rate !== null);
 
   const box1 = vatTx.reduce((sum, t) => sum + (t.vat_amount || 0), 0);
 
   const box6 = vatTx
-    .filter(t => t.amount > 0)
+    .filter((t) => t.amount > 0)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
   const box7 = vatTx
-    .filter(t => t.amount < 0)
+    .filter((t) => t.amount < 0)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
   return {
@@ -88,7 +122,7 @@ function calculateVAT(transactions) {
    CIS CALCULATION
    ========================= */
 function calculateCIS(transactions) {
-  const cisTx = transactions.filter(t => t.category === "cis");
+  const cisTx = transactions.filter((t) => t.category === "cis");
 
   const grossIncome = cisTx.reduce((sum, t) => sum + Math.abs(t.amount), 0);
   const deducted = cisTx.reduce((sum, t) => sum + (t.vat_amount || 0), 0);
@@ -104,11 +138,11 @@ function calculateCIS(transactions) {
    ========================= */
 function calculateCorporationTax(transactions) {
   const income = transactions
-    .filter(t => t.amount > 0)
+    .filter((t) => t.amount > 0)
     .reduce((sum, t) => sum + t.amount, 0);
 
   const expenses = transactions
-    .filter(t => t.amount < 0)
+    .filter((t) => t.amount < 0)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0);
 
   const profit = income - expenses;

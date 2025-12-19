@@ -192,7 +192,10 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  const clientId = session.user.clientId;
+  // ✅ Accountant-aware client ID
+  const clientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -200,6 +203,18 @@ export default async function handler(req, res) {
   const { period = "month", from: fromParam, to: toParam } = req.query;
 
   try {
+    // ✅ ✅ ✅ AUDIT LOG — Accountant viewing transactions
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_TRANSACTIONS",
+          details: `Viewed transactions (period=${period})`,
+        },
+      ]);
+    }
+
     const { data, error } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -215,12 +230,10 @@ export default async function handler(req, res) {
     const enriched = (data || []).map((tx) => {
       let category = tx.business_category?.trim() || null;
 
-      // ✅ If user set a category, enforce it must be allowed
       if (category && !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
         category = "Uncategorised";
       }
 
-      // ✅ If no category, infer system category only
       if (!category) {
         const sys = inferSystemCategory(tx.type, tx.description);
         if (sys && SYSTEM_CATEGORIES.includes(sys)) {
@@ -242,6 +255,18 @@ export default async function handler(req, res) {
 
     const filtered = filterByDateWindow(enriched, from, to);
     const summary = computeSummary(filtered);
+
+    // ✅ ✅ ✅ AUDIT LOG — Accountant filtered view
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_FILTER_TRANSACTIONS",
+          details: `Filtered transactions (period=${period}, from=${fromParam}, to=${toParam})`,
+        },
+      ]);
+    }
 
     return res.status(200).json({
       transactions: enriched,

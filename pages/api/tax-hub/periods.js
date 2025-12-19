@@ -1,3 +1,5 @@
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]"; // ⬅️ adjust relative path if needed
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 // Helper: format date → YYYY-MM-DD
@@ -54,11 +56,48 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
+  // ✅ Session + role/subscription checks
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   const { clientId } = req.body;
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
+  // ✅ Prevent accountants from spoofing clientId
+  if (session.user.role === "accountant" && clientId !== actingClientId) {
+    return res.status(403).json({
+      error: "Accountants cannot request tax periods for unauthorized clients",
+    });
+  }
+
   try {
+    // ✅ AUDIT LOG — Accountant viewing Tax Hub periods
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
+          details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
+        },
+      ]);
+    }
+
     // ✅ 1. Load HMRC categories (still used for mapping)
     const { data: categories, error: catError } = await supabaseAdmin
       .from("hmrc_categories")

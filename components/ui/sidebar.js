@@ -1,5 +1,4 @@
-// components/ui/sidebar.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import {
@@ -28,11 +27,63 @@ export const SidebarTrigger = ({ children, className, ...props }) => (
 export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
 export const SidebarMenuButton = ({ children, className }) => <div className={className}>{children}</div>;
 
+// ✅ Client Switcher Component (Accountants Only)
+function ClientSwitcher() {
+  const router = useRouter();
+  const [clients, setClients] = useState([]);
+  const [current, setCurrent] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      const res = await fetch("/api/accountants/get-accessible-clients");
+      const data = await res.json();
+
+      if (data.success) {
+        setClients(data.clients);
+        setCurrent(data.currentClient);
+      }
+    }
+    load();
+  }, []);
+
+  if (!clients || clients.length <= 1) return null;
+
+  const handleChange = async (e) => {
+    const newClientId = e.target.value;
+    setCurrent(newClientId);
+
+    await fetch("/api/accountants/switch-client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: newClientId }),
+    });
+
+    router.reload();
+  };
+
+  return (
+    <div className="p-3 border-b bg-white">
+      <label className="block text-xs font-semibold text-slate-500 mb-1">
+        Acting as:
+      </label>
+      <select
+        value={current || ""}
+        onChange={handleChange}
+        className="w-full border p-2 rounded text-sm"
+      >
+        {clients.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ✅ SidebarMenu with collapsible tax group
 export function SidebarMenu() {
   const router = useRouter();
-
-  // ✅ Collapsible state
   const [taxOpen, setTaxOpen] = useState(true);
 
   const navigationItems = [
@@ -45,27 +96,25 @@ export function SidebarMenu() {
     { title: "Forecasts", url: "/forecasts", icon: BarChart },
     { title: "Email Setup", url: "/emailsetup", icon: Users },
     { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
-
   ];
 
   const taxItems = [
     { title: "Tax Hub", url: "/tax-hub", icon: DollarSign },
-
     { title: "VAT", url: "/vat", icon: FileText },
     { title: "VAT History", url: "/vat/history", icon: History },
-
     { title: "CIS", url: "/cis", icon: FileText },
     { title: "CIS History", url: "/cis/history", icon: History },
-
     { title: "Corporation Tax", url: "/corp", icon: FileText },
     { title: "CT History", url: "/corp/history", icon: History },
-
     { title: "Self Assessment", url: "/sa", icon: FileText },
     { title: "SA History", url: "/sa/history", icon: History },
   ];
 
   return (
     <ul className="space-y-1">
+      {/* ✅ Accountant Client Switcher */}
+      <ClientSwitcher />
+
       {/* Default navigation */}
       {navigationItems.map(({ title, url, icon: Icon }) => (
         <SidebarMenuItem key={title}>
@@ -96,7 +145,6 @@ export function SidebarMenu() {
           />
         </button>
 
-        {/* ✅ Smooth collapse */}
         <div
           className={`overflow-hidden transition-all duration-300 ${
             taxOpen ? "max-h-[1000px]" : "max-h-0"

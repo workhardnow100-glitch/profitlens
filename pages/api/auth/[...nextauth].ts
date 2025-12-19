@@ -116,7 +116,6 @@ PatchedAdapter.useVerificationToken = async (token) => {
 
   if (verifyErr) {
     console.error("Failed to set email_verified on app_users:", verifyErr);
-    // Still return consumed so NextAuth proceeds, but session may not persist
   }
 
   return consumed;
@@ -220,19 +219,20 @@ export const authOptions: NextAuthOptions = {
   session: { strategy: "jwt" },
 
   callbacks: {
+    /* -------------------------------------------------------
+       ✅ JWT CALLBACK — loads acting_client_id from DB
+    ------------------------------------------------------- */
     async jwt({ token, user }) {
-      // Enrich on first login
       if (user) {
         token.sub = String(user.id);
         token.email = user.email;
         token.role = (user as any).role ?? "USER";
       }
 
-      // Refresh from DB to keep clientId and subscriptionStatus current
       if (token.email) {
         const { data: dbUser } = await supabaseAdmin
           .from("app_users")
-          .select("id, role, client_id, subscription_status")
+          .select("id, role, client_id, subscription_status, acting_client_id")
           .eq("email", token.email.toLowerCase().trim())
           .single();
 
@@ -241,12 +241,18 @@ export const authOptions: NextAuthOptions = {
           token.role = dbUser.role ?? "USER";
           token.clientId = dbUser.client_id ?? "unknown-client";
           token.subscriptionStatus = dbUser.subscription_status ?? "incomplete";
+
+          // ✅ Persist accountant's chosen client
+          token.actingAsClientId = dbUser.acting_client_id ?? null;
         }
       }
 
       return token;
     },
 
+    /* -------------------------------------------------------
+       ✅ SESSION CALLBACK — accountant-aware enrichment
+    ------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
         id: token.sub ?? "unknown",
@@ -255,7 +261,26 @@ export const authOptions: NextAuthOptions = {
         clientId: token.clientId ?? "unknown-client",
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
-      console.log("🔍 Session enrichment:", session.user);
+
+      if (session.user.role === "accountant") {
+        const { data: accessRows } = await supabaseAdmin
+          .from("accountant_access")
+          .select("client_id")
+          .eq("accountant_email", session.user.email);
+
+        const accessibleClients = accessRows?.map(r => r.client_id) || [];
+
+        session.user.accessibleClients = accessibleClients;
+
+        const persisted = token.actingAsClientId;
+        const valid = accessibleClients.includes(persisted);
+
+        session.user.actingAsClientId = valid ? persisted : null;
+      } else {
+        session.user.accessibleClients = [session.user.clientId];
+        session.user.actingAsClientId = session.user.clientId;
+      }
+
       return session;
     },
 

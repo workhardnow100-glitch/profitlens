@@ -24,6 +24,7 @@ const MAP = {
 };
 
 export default async function handler(req, res) {
+  // ✅ Session validation
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
@@ -31,14 +32,21 @@ export default async function handler(req, res) {
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
+
   if (!(isFounder || isSubscribedOrTrial))
     return res.status(403).json({ error: "Upgrade required" });
 
-  const clientId = session.user.clientId;
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
+
+  const clientId = actingClientId;
   if (!clientId || clientId === "unknown-client")
     return res.status(400).json({ error: "Invalid client ID" });
 
-  // ✅ PATCH — update category (validated)
+  /* -------------------------------------------------------
+     ✅ PATCH — update category (validated)
+  ------------------------------------------------------- */
   if (req.method === "PATCH") {
     try {
       const { id, category } = req.body || {};
@@ -59,10 +67,11 @@ export default async function handler(req, res) {
 
       if (updateErr) throw updateErr;
 
+      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          user: session.user.email,
+          actor_email: session.user.email,
           action: "UPDATE_CATEGORY",
           details: `Updated transaction ${id} category to ${category}`,
           timestamp: new Date().toISOString(),
@@ -76,19 +85,23 @@ export default async function handler(req, res) {
     }
   }
 
-  // ✅ DELETE — delete all transactions
+  /* -------------------------------------------------------
+     ✅ DELETE — delete all transactions
+  ------------------------------------------------------- */
   if (req.method === "DELETE") {
     try {
       const { count, error } = await supabaseAdmin
         .from("transactions")
         .delete({ count: "exact" })
         .eq("client_id", clientId);
+
       if (error) throw error;
 
+      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          user: session.user.email,
+          actor_email: session.user.email,
           action: "DELETE_TRANSACTIONS",
           details: `Deleted ${count} transactions`,
           timestamp: new Date().toISOString(),
@@ -102,7 +115,9 @@ export default async function handler(req, res) {
     }
   }
 
-  // ✅ GET — dashboard data (RAW, MATCHES PROFILE EXACTLY)
+  /* -------------------------------------------------------
+     ✅ GET — dashboard data (RAW, MATCHES PROFILE EXACTLY)
+  ------------------------------------------------------- */
   if (req.method === "GET") {
     try {
       const { data: transactions, error } = await supabaseAdmin
@@ -134,7 +149,6 @@ export default async function handler(req, res) {
         }
 
         const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-
         const category = tx.business_category?.trim() || "Uncategorised";
 
         if (!categoryBreakdown[category]) categoryBreakdown[category] = 0;
@@ -166,10 +180,11 @@ export default async function handler(req, res) {
       const totalExpenses = expenses.reduce((a, b) => a + b, 0);
       const netProfit = totalRevenue - totalExpenses;
 
+      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          user: session.user.email,
+          actor_email: session.user.email,
           action: "FETCH_DASHBOARD",
           details: `Returned ${transactions?.length ?? 0} transactions`,
           timestamp: new Date().toISOString(),

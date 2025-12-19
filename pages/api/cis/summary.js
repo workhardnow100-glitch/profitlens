@@ -1,16 +1,55 @@
 // pages/api/cis/summary.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
+  // ✅ Validate session
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user)
+    return res.status(401).json({ error: "Unauthorized" });
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   const { clientId, periodStart, periodEnd } = req.body;
 
   if (!clientId || !periodStart || !periodEnd)
     return res.status(400).json({ error: "Missing required fields" });
 
+  // ✅ Prevent accountants from spoofing clientId
+  if (session.user.role === "accountant" && clientId !== actingClientId) {
+    return res.status(403).json({
+      error: "Accountants cannot request CIS summaries for unauthorized clients",
+    });
+  }
+
   try {
+    // ✅ AUDIT LOG — Accountant viewing CIS summary
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_CIS_SUMMARY",
+          details: `Viewed CIS summary for ${periodStart} → ${periodEnd}`,
+        },
+      ]);
+    }
+
     // ✅ Load transactions
     const { data: tx, error } = await supabaseAdmin
       .from("transactions")

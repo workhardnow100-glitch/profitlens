@@ -1,4 +1,4 @@
-// pages/api/profile.js
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -19,10 +19,25 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  const clientId = session.user.clientId;
+  // ✅ Accountant-aware client ID
+  const clientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
   try {
+    // ✅ ✅ ✅ AUDIT LOG — Accountant viewing profile
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_PROFILE",
+          details: "Viewed client profile and transaction summary",
+        },
+      ]);
+    }
+
     // ✅ POST — Update category (validated)
     if (req.method === "POST") {
       const { transactionId, newCategory } = req.body;
@@ -49,6 +64,18 @@ export default async function handler(req, res) {
         .eq("client_id", clientId);
 
       if (error) throw error;
+
+      // ✅ Accountant audit log for category change
+      if (session.user.role === "accountant") {
+        await supabaseAdmin.from("audit").insert([
+          {
+            client_id: clientId,
+            actor_email: session.user.email,
+            action: "ACCOUNTANT_UPDATE_CATEGORY",
+            details: `Updated category for transaction ${transactionId} → ${category}`,
+          },
+        ]);
+      }
 
       req.method = "GET"; // fall through to GET
     }
@@ -85,7 +112,7 @@ export default async function handler(req, res) {
 
       if (accError && accError.code !== "PGRST116") throw accError;
 
-      // ✅ ✅ ✅ NEW — Fetch client details (ONLY ADDITION)
+      // ✅ Fetch client details
       const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
         .select("id, name, email, phone, address, postcode, business_type")
@@ -157,9 +184,9 @@ export default async function handler(req, res) {
         }
       });
 
-      // ✅ ✅ ✅ RETURN — Add client to response (ONLY ADDITION)
+      // ✅ ✅ ✅ RETURN — Add client to response
       return res.status(200).json({
-        client, // ✅ NEW
+        client,
         transactions,
         hmrcCategories,
         account: account || null,

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useUser } from "../hooks/useUser";
 import {
   SidebarProvider,
@@ -13,6 +13,38 @@ import {
   SidebarTrigger,
 } from "./ui/sidebar";
 import { TrendingUp } from "lucide-react";
+
+// ✅ Global Accountant Banner Component
+function ActingAsBanner() {
+  const [actingAs, setActingAs] = useState(null);
+  const [role, setRole] = useState(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch("/api/accountant/me");
+        if (!res.ok) return;
+
+        const data = await res.json();
+        setRole(data.user.role);
+        setActingAs(data.user.actingAsClientId);
+      } catch {
+        // ignore errors silently
+      }
+    };
+    load();
+  }, []);
+
+  // ✅ Only show for accountants who are acting as a client
+  if (role !== "accountant" || !actingAs) return null;
+
+  return (
+    <div className="bg-amber-50 border-b border-amber-200 py-2 px-6 text-sm text-amber-800">
+      <span className="font-semibold">Acting as client:</span>{" "}
+      <span className="font-mono">{actingAs}</span>
+    </div>
+  );
+}
 
 export default function ResponsiveLayout({ children }) {
   const { user } = useUser();
@@ -80,6 +112,9 @@ export default function ResponsiveLayout({ children }) {
               <h1 className="text-xl font-bold text-slate-900">ProfitLens</h1>
             </div>
           </header>
+
+          {/* ✅ Global Accountant Banner */}
+          <ActingAsBanner />
 
           {/* Page content */}
           <div className="flex-1 overflow-auto p-6">{children}</div>

@@ -1,5 +1,8 @@
 // pages/api/cis/submit.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
 import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -11,13 +14,50 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
+  // ✅ Validate session
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user)
+    return res.status(401).json({ error: "Unauthorized" });
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   const { clientId, periodStart, periodEnd } = req.body;
 
   if (!clientId || !periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
+  // ✅ Prevent accountants from spoofing clientId
+  if (session.user.role === "accountant" && clientId !== actingClientId) {
+    return res.status(403).json({
+      error: "Accountants cannot submit CIS for unauthorized clients",
+    });
+  }
+
   try {
+    // ✅ AUDIT LOG — Accountant submitting CIS
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_SUBMIT_CIS",
+          details: `Submitted CIS for ${periodStart} → ${periodEnd}`,
+        },
+      ]);
+    }
+
     // ✅ 1. Fetch CIS transactions for this period
     const { data: cisTxs, error: fetchError } = await supabase
       .from("transactions")

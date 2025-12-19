@@ -18,12 +18,21 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveChart from "../components/ResponsiveChart";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
+// ✅ NEW IMPORT
+import { AccountantAccessPanel } from "../components/AccountantAccessPanel";
+
+// ✅ ROUTE GUARD IMPORT
+import { useRouteGuard } from "../hooks/useRouteGuard";
+
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
   { ssr: false }
 );
 
 export default function Dashboard() {
+  // ✅ Apply route guard
+  useRouteGuard();
+
   const { data: session, status } = useSession();
   const router = useRouter();
 
@@ -43,7 +52,7 @@ export default function Dashboard() {
   const [Highcharts, setHighcharts] = useState(null);
   const [hcReady, setHcReady] = useState(false);
 
-  // 🔑 Access control
+  // 🔑 Access control (subscription)
   useEffect(() => {
     if (status === "loading") return;
     if (session?.user) {
@@ -101,11 +110,7 @@ export default function Dashboard() {
   }, [session]);
 
   async function nuke() {
-    if (
-      !confirm(
-        "Are you sure you want to delete all your statements?"
-      )
-    )
+    if (!confirm("Are you sure you want to delete all your statements?"))
       return;
     const res = await fetch("/api/dashboard", {
       method: "DELETE",
@@ -148,14 +153,8 @@ export default function Dashboard() {
   // ✅ Income vs Expenses 3D doughnut
   const incomeVsExpensesOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
-    const totalRevenue = (series.revenue || []).reduce(
-      (a, b) => a + b,
-      0
-    );
-    const totalExpenses = (series.expenses || []).reduce(
-      (a, b) => a + b,
-      0
-    );
+    const totalRevenue = (series.revenue || []).reduce((a, b) => a + b, 0);
+    const totalExpenses = (series.expenses || []).reduce((a, b) => a + b, 0);
 
     return {
       chart: {
@@ -178,11 +177,7 @@ export default function Dashboard() {
           name: "Total",
           data: [
             { name: "Income", y: totalRevenue, drilldown: "Income" },
-            {
-              name: "Expenses",
-              y: totalExpenses,
-              drilldown: "Expenses",
-            },
+            { name: "Expenses", y: totalExpenses, drilldown: "Expenses" },
           ],
         },
       ],
@@ -201,7 +196,7 @@ export default function Dashboard() {
     };
   }, [hcReady, Highcharts, series, breakdown]);
 
-  // ✅ New Highcharts drilldown: Expense Breakdown by Category
+  // ✅ Expense Breakdown Drilldown
   const expenseDrilldownOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     const entries = Object.entries(breakdown || {});
@@ -213,25 +208,14 @@ export default function Dashboard() {
     );
 
     return {
-      chart: {
-        type: "column",
-      },
-      title: {
-        text: "Expenses by Category (Drilldown)",
-      },
-      xAxis: {
-        type: "category",
-      },
-      legend: {
-        enabled: false,
-      },
+      chart: { type: "column" },
+      title: { text: "Expenses by Category (Drilldown)" },
+      xAxis: { type: "category" },
+      legend: { enabled: false },
       plotOptions: {
         series: {
           borderWidth: 0,
-          dataLabels: {
-            enabled: true,
-            format: "£{point.y:.2f}",
-          },
+          dataLabels: { enabled: true, format: "£{point.y:.2f}" },
         },
       },
       tooltip: {
@@ -277,16 +261,8 @@ export default function Dashboard() {
         is your cockpit.
       </p>
 
-      {error && (
-        <p className="text-red-600 mt-4">
-          {error}
-        </p>
-      )}
-      {loading && (
-        <p className="text-slate-500 mt-4">
-          Loading...
-        </p>
-      )}
+      {error && <p className="text-red-600 mt-4">{error}</p>}
+      {loading && <p className="text-slate-500 mt-4">Loading...</p>}
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
@@ -319,24 +295,14 @@ export default function Dashboard() {
               <YAxis />
               <Tooltip />
               <Legend />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                stroke="#4ade80"
-                name="Revenue"
-              />
-              <Line
-                type="monotone"
-                dataKey="expenses"
-                stroke="#f87171"
-                name="Expenses"
-              />
+              <Line type="monotone" dataKey="revenue" stroke="#4ade80" />
+              <Line type="monotone" dataKey="expenses" stroke="#f87171" />
             </LineChart>
           </ResponsiveChart>
         </ResponsiveCard>
       )}
 
-      {/* ✅ NEW: Expense Breakdown by Category (Highcharts drilldown) */}
+      {/* Expense Breakdown */}
       <ResponsiveCard title="Expense Breakdown by Category">
         {!hcReady || !Highcharts ? (
           <p className="text-slate-500">Preparing chart...</p>
@@ -361,9 +327,7 @@ export default function Dashboard() {
           {recent.map((r) => (
             <tr key={r.id}>
               <td className="p-2 border">{r.date}</td>
-              <td className="p-2 border">
-                {r.description || r.filename}
-              </td>
+              <td className="p-2 border">{r.description || r.filename}</td>
               <td className="p-2 border">£{r.amount}</td>
               <td className="p-2 border">
                 <select
@@ -383,9 +347,7 @@ export default function Dashboard() {
                         }),
                       });
                       if (!res.ok)
-                        throw new Error(
-                          "Failed to update category"
-                        );
+                        throw new Error("Failed to update category");
                       setRecent((prev) =>
                         prev.map((tx) =>
                           tx.id === r.id
@@ -394,9 +356,7 @@ export default function Dashboard() {
                         )
                       );
                     } catch (err) {
-                      alert(
-                        err.message || "Failed to update category"
-                      );
+                      alert(err.message || "Failed to update category");
                     }
                   }}
                   className="border rounded px-2 py-1"
@@ -432,13 +392,15 @@ export default function Dashboard() {
         </button>
       </ResponsiveCard>
 
+      {/* ✅ Accountant Access Panel */}
+      <AccountantAccessPanel />
+
       {/* ✅ In‑App Disclaimer */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
         ProfitLens provides estimates only. Always verify figures before filing
         with HMRC. Nothing displayed here constitutes tax, accounting, or legal
         advice.
       </p>
-
     </ResponsiveLayout>
   );
 }

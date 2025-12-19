@@ -1,4 +1,7 @@
 // pages/api/vat/summary.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -40,9 +43,26 @@ function classifyTransactionType(rawType, amount) {
 }
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
+
+  // ✅ Validate session
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user)
+    return res.status(401).json({ error: "Unauthorized" });
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
   }
+
+  // ✅ Accountant-aware client ID
+  const actingClientId =
+    session.user.actingAsClientId || session.user.clientId;
 
   const { clientId, periodStart, periodEnd } = req.body;
 
@@ -50,7 +70,26 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing parameters" });
   }
 
+  // ✅ Prevent accountants from spoofing clientId
+  if (session.user.role === "accountant" && clientId !== actingClientId) {
+    return res.status(403).json({
+      error: "Accountants cannot view VAT summaries for unauthorized clients",
+    });
+  }
+
   try {
+    // ✅ AUDIT LOG — Accountant viewing VAT summary
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_VAT_SUMMARY",
+          details: `Viewed VAT summary for ${periodStart} → ${periodEnd}`,
+        },
+      ]);
+    }
+
     // ✅ 1. VAT period record (lock + submitted status)
     const { data: vatPeriod } = await supabase
       .from("vat_periods")
@@ -64,7 +103,7 @@ export default async function handler(req, res) {
     const locked = !!vatPeriod?.locked;
     const submitted = !!vatPeriod?.submitted;
 
-    // ✅ 2. Fetch VAT-relevant transactions (updated schema)
+    // ✅ 2. Fetch VAT-relevant transactions
     const { data: transactions, error: txError } = await supabase
       .from("transactions")
       .select(

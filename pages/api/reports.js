@@ -70,12 +70,27 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    const clientId = session.user.clientId;
+    // ✅ Accountant-aware client ID
+    const clientId =
+      session.user.actingAsClientId || session.user.clientId;
+
     if (!clientId || clientId === "unknown-client")
       return res.status(400).json({ error: "Invalid client ID" });
 
     const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } =
       req.query;
+
+    // ✅ AUDIT LOG — Accountant viewing reports
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_REPORTS",
+          details: `Viewed reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        },
+      ]);
+    }
 
     const filters = {
       ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
@@ -206,6 +221,18 @@ export default async function handler(req, res) {
         type: tx.type,
       };
     });
+
+    // ✅ AUDIT LOG — Accountant filtered reports
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_FILTER_REPORTS",
+          details: `Filtered reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        },
+      ]);
+    }
 
     return res.status(200).json({
       pagination: {
