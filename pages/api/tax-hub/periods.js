@@ -154,7 +154,7 @@ function buildCISPeriods(cisTxs) {
     periods[key].transactions.push(tx);
     if (tx.tax_locked) periods[key].locked = true;
 
-    const amt = Number(tx.cis_amount || 0);
+    const amt = Math.abs(Number(tx.cis_amount || 0)); // ✅ align with CIS summary (always positive)
     if (tx.cis_type === "deducted") periods[key].cisDeducted += amt;
     else if (tx.cis_type === "suffered") periods[key].cisSuffered += amt;
     periods[key].netCis = periods[key].cisDeducted - periods[key].cisSuffered;
@@ -261,8 +261,18 @@ export default async function handler(req, res) {
       else if (c.includes("self assessment") || c.includes("sa payment")) grouped.sa.push(tx);
     });
 
-    // CIS
-    const cisPeriods = buildCISPeriods(grouped.cis);
+    // ✅ CIS: use real CIS fields, last 5 years, 6→5 monthly buckets
+    const fiveYearsAgo = new Date();
+    fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
+
+    const cisSource = (transactions || []).filter((tx) => {
+      if (!tx.cis_type || tx.cis_amount === null || tx.cis_amount === undefined) return false;
+      if (!tx.date) return false;
+      const d = new Date(tx.date);
+      return d >= fiveYearsAgo;
+    });
+
+    const cisPeriods = buildCISPeriods(cisSource);
 
     // ✅ Corporation Tax (calendar-year periods, last 5 years, using CT engine logic)
     const now = new Date();
