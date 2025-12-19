@@ -46,6 +46,7 @@ export default function ProfilePage() {
   const [transactions, setTransactions] = useState([]);
   const [hmrcCategories, setHmrcCategories] = useState([]);
   const [account, setAccount] = useState(null);
+  const [client, setClient] = useState(null); // ✅ NEW: client state
   const [totalsByType, setTotalsByType] = useState({
     sole_trader: {},
     limited_company: {},
@@ -102,6 +103,7 @@ export default function ProfilePage() {
         setTransactions(json.transactions || []);
         setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
+        setClient(json.client || null); // ✅ NEW: client from API
         setTotalsByType(
           json.totalsByType || { sole_trader: {}, limited_company: {} }
         );
@@ -595,6 +597,53 @@ export default function ProfilePage() {
           </div>
         </div>
 
+        {/* ✅ Business Profile */}
+        <ResponsiveCard title="Business Profile">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-slate-600">Business Name</p>
+              <p className="font-medium text-slate-900">
+                {client?.name || "—"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-600">Business Type</p>
+              <p className="font-medium text-slate-900">
+                {client?.business_type || "—"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-600">Address</p>
+              <p className="font-medium text-slate-900">
+                {client?.address || "—"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-600">Postcode</p>
+              <p className="font-medium text-slate-900">
+                {client?.postcode || "—"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-600">Phone Number</p>
+              <p className="font-medium text-slate-900">
+                {client?.phone || "—"}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-sm text-slate-600">Email</p>
+              <p className="font-medium text-slate-900">
+                {client?.email || "—"}
+              </p>
+            </div>
+          </div>
+        </ResponsiveCard>
+
         {/* Account info */}
         <ResponsiveCard title="Account details">
           <p>
@@ -655,7 +704,7 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* HMRC – Sole Trader + Limited Company breakdown (R1 scope in printable ref) */}
+        {/* HMRC – Sole Trader + Limited Company breakdown */}
         <div ref={taxReportRef}>
           <ResponsiveCard title="HMRC – Sole Trader breakdown">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
@@ -831,7 +880,7 @@ export default function ProfilePage() {
               );
             })}
           </ResponsiveTable>
-                </ResponsiveCard>
+        </ResponsiveCard>
 
         {/* Monthly breakdown (filtered by year) */}
         <ResponsiveCard title="By month (filtered by year)">
@@ -862,7 +911,6 @@ export default function ProfilePage() {
           with HMRC. Nothing displayed here constitutes tax, accounting, or legal
           advice.
         </p>
-
       </div>
     </ResponsiveLayout>
   );
