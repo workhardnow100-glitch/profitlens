@@ -4,6 +4,7 @@ import { authOptions } from "../auth/[...nextauth]"; // adjust if needed
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { SYSTEM_CATEGORIES } from "../../../lib/constants/systemCategories";
 import { CT_MAP } from "../../../lib/constants/ctMap";
+import vatSummaryHandler from "../vat/summary"; // ✅ added import
 
 // Build allowed categories like the transactions API
 const ALLOWED_BUSINESS_CATEGORIES = new Set([
@@ -155,6 +156,7 @@ function buildCorpPeriods(corpTxs) {
   });
   return Object.values(periods);
 }
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
@@ -174,24 +176,20 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ Fixed audit insert to match table schema
     if (session.user.role === "accountant") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          id: crypto.randomUUID(),
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
-          details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
-          timestamp: new Date().toISOString(),
-          user: null,
-          user_id: null,
-        },
-      ]);
+      await supabaseAdmin.from("audit").insert([{
+        id: crypto.randomUUID(),
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
+        details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
+        timestamp: new Date().toISOString(),
+        user: null,
+        user_id: null,
+      }]);
     }
 
-    // Fetch transactions with fields needed for enrichment
-    const { data: transactions, error: txError } = await supabaseAdmin
+        const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select(
         "id, date, business_category, tax_locked, client_id, vat_amount, amount, cis_amount, cis_type, type, description"
@@ -247,37 +245,29 @@ export default async function handler(req, res) {
     const stagger = vatSetting?.stagger || 1;
     const rawVatPeriods = generateVatPeriods(stagger);
 
-    // VAT summary aggregation via internal call (absolute URL + bypass header)
+    // VAT summary aggregation via direct import of summary handler
     let totalVatOwed = 0, totalVatOutput = 0, totalVatInput = 0;
     const vatPeriods = [];
     const now = new Date();
 
-    const baseUrl = `https://${process.env.VERCEL_URL || "profitlensuk.vercel.app"}`;
-
     for (const p of rawVatPeriods) {
-      const summaryRes = await fetch(`${baseUrl}/api/vat/summary`, {
+      const mockReq = {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-internal-secret": process.env.INTERNAL_SECRET,
-        },
-        body: JSON.stringify({
-          clientId,
-          periodStart: p.periodStart,
-          periodEnd: p.periodEnd,
-        }),
+        headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
+        body: { clientId, periodStart: p.periodStart, periodEnd: p.periodEnd }
+      };
+      let summary;
+      await vatSummaryHandler(mockReq, {
+        status: () => ({
+          json: (obj) => { summary = obj; return obj; }
+        })
       });
 
-      let box1 = 0, box4 = 0, box5 = 0, locked = false, submitted = false;
-
-      if (summaryRes.ok) {
-        const summary = await summaryRes.json();
-        box1 = summary.boxes?.box1 || 0;
-        box4 = summary.boxes?.box4 || 0;
-        box5 = summary.boxes?.box5 || 0;
-        locked = summary.locked || false;
-        submitted = summary.submitted || false;
-      }
+      let box1 = summary?.boxes?.box1 || 0;
+      let box4 = summary?.boxes?.box4 || 0;
+      let box5 = summary?.boxes?.box5 || 0;
+      let locked = summary?.locked || false;
+      let submitted = summary?.submitted || false;
 
       totalVatOwed += box5;
       totalVatOutput += box1;
