@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 
 type OverviewResponse = {
-  success: boolean;
-  overview: {
+  success?: boolean;
+  error?: string;
+  overview?: {
     businessName: string | null;
     totalRevenue: number;
     totalExpenses: number;
@@ -40,7 +41,7 @@ export function AccountantClientOverview() {
         if (!res.ok) {
           setError(data?.error || "Failed to load overview");
         } else {
-          setOverview(data.overview);
+          setOverview(data.overview || null);
         }
       } catch {
         setError("Network error");
