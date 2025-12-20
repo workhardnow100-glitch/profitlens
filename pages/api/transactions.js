@@ -244,9 +244,16 @@ export default async function handler(req, res) {
       }
 
       return {
-        ...tx,
-        business_category: category,
-      };
+  ...tx,
+  business_category: category,
+  assetdisposaltype: tx.assetdisposaltype, // ✅ ensure it survives enrichment
+  assetpurchaseprice: tx.assetpurchaseprice,
+  assetcapitalclaimed: tx.assetcapitalclaimed,
+  assettwdv: tx.assettwdv,
+  assetbalancingcharge: tx.assetbalancingcharge,
+  assetbalancingallowance: tx.assetbalancingallowance,
+};
+
     });
 
     const customFrom = fromParam ? new Date(fromParam) : null;
