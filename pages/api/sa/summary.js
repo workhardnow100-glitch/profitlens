@@ -1,7 +1,8 @@
 // pages/api/sa/summary.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { CT_MAP } from "../../../lib/constants/ctMap";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -50,11 +51,11 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ✅ Load SA transactions
+    // ✅ Load transactions using the REAL schema
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, description, amount, category, tax_locked, hmrc_category_id"
+        "id, date, description, amount, business_category, tax_locked"
       )
       .eq("client_id", clientId)
       .gte("date", periodStart)
@@ -62,24 +63,47 @@ export default async function handler(req, res) {
 
     if (txError) throw txError;
 
-    // ✅ Filter SA‑mapped transactions
-    const saTx = transactions.filter(
-      (t) => t.hmrc_category_id && t.category === "self_assessment"
-    );
+    // ✅ Build lowercase CT_MAP sets
+    const MAP = {
+      income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
+      allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
+      disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
+    };
 
-    // ✅ Compute totals
+    // ✅ Classify SA transactions using CT_MAP
     let totalIncome = 0;
     let totalExpenses = 0;
 
-    saTx.forEach((tx) => {
+    const saTx = [];
+
+    transactions.forEach((tx) => {
+      const cat = (tx.business_category || "").toLowerCase();
       const amt = Number(tx.amount || 0);
-      if (amt > 0) totalIncome += amt;
-      else totalExpenses += Math.abs(amt);
+
+      let isSA = false;
+
+      if (MAP.income.has(cat)) {
+        totalIncome += amt > 0 ? amt : 0;
+        isSA = true;
+      }
+
+      if (MAP.allowable.has(cat)) {
+        totalExpenses += amt < 0 ? Math.abs(amt) : 0;
+        isSA = true;
+      }
+
+      if (MAP.disallowable.has(cat)) {
+        // Disallowable expenses are added back later
+        totalExpenses += amt < 0 ? Math.abs(amt) : 0;
+        isSA = true;
+      }
+
+      if (isSA) saTx.push(tx);
     });
 
     const profit = totalIncome - totalExpenses;
 
-    // ✅ ✅ ✅ FULL UK TAX BAND CALCULATION
+    // ✅ Personal allowance
     let personalAllowance = 12570;
 
     // ✅ Personal allowance tapering above £100k
@@ -90,6 +114,7 @@ export default async function handler(req, res) {
 
     const taxableIncome = Math.max(0, profit - personalAllowance);
 
+    // ✅ UK tax bands
     let taxLiability = 0;
     let remaining = taxableIncome;
 
