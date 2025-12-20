@@ -373,15 +373,39 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
-  // ✅ Update functions
-  async function updateBusinessCategory(id, newCategory) {
-    await fetch("/api/transactions/update-category", {
+  // ✅ Generic transaction upsert helper — now used for CT, category, disposal, etc.
+  async function updateTransaction(id, payload) {
+    await fetch("/api/transactions/upsert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        transactionId: id,
-        category: newCategory,
-      }),
+      body: JSON.stringify({ id, ...payload }),
+    });
+  }
+
+  // ✅ Mode A Auto‑CT: category → suggested CT flag
+  //    Backend will apply this only if manualctoverride is NOT set.
+  async function updateBusinessCategory(id, newCategory) {
+    const key = (newCategory || "Uncategorised").toLowerCase();
+
+    // Build lowercase CT maps once per call
+    const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
+    const allowableSet = new Set(
+      CT_MAP.allowable.map((c) => c.toLowerCase())
+    );
+    const disallowableSet = new Set(
+      CT_MAP.disallowable.map((c) => c.toLowerCase())
+    );
+
+    let autoCT = false;
+    if (incomeSet.has(key)) autoCT = true;
+    else if (allowableSet.has(key)) autoCT = true;
+    else if (disallowableSet.has(key)) autoCT = true;
+    else autoCT = false; // ignore + uncategorised → false
+
+    // ✅ We send auto_ct hint; backend respects manualctoverride.
+    await updateTransaction(id, {
+      business_category: newCategory,
+      auto_ct: autoCT,
     });
   }
 
@@ -413,50 +437,28 @@ export default function Transactions() {
     });
   }
 
-  // ✅ NEW: Update transaction (generic)
-  async function updateTransaction(id, payload) {
-    await fetch("/api/transactions/upsert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...payload }),
-    });
-  }
-
-  // ✅ NEW: Update CT flag
-  async function updateTransactionCTFlag(id, included) {
-    await fetch("/api/transactions/upsert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id,
-        mtdMetadata: { includedInCT: included },
-      }),
-    });
-  }
-
-  // ✅ NEW: Asset Disposal handler
+  // ✅ Asset Disposal handler: open modal, clear fields when "No"
   function handleAssetDisposalChange(tx, value) {
-  // User selected "No"
-  if (value === "") {
-    updateTransaction(tx.id, {
-      assetdisposaltype: null,
-      assetpurchaseprice: null,
-      assetcapitalclaimed: null,
-      assettwdv: null,
-      assetbalancingcharge: null,
-      assetbalancingallowance: null,
+    // User selected "No"
+    if (value === "" || value === "NONE") {
+      updateTransaction(tx.id, {
+        assetdisposaltype: null,
+        assetpurchaseprice: null,
+        assetcapitalclaimed: null,
+        assettwdv: null,
+        assetbalancingcharge: null,
+        assetbalancingallowance: null,
+      });
+      return;
+    }
+
+    // User selected a pool → open modal with that pool type
+    setAssetModalTx({
+      ...tx,
+      assetdisposaltype: value,
     });
-    return;
+    setAssetModalOpen(true);
   }
-
-  // User selected a pool → open modal with that pool type
-  setAssetModalTx({
-    ...tx,
-    assetdisposaltype: value,
-  });
-  setAssetModalOpen(true);
-}
-
 
   return (
     <ResponsiveLayout>
@@ -634,7 +636,7 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* ✅ Category dropdown */}
+                    {/* ✅ Category dropdown + auto‑CT hint via updateBusinessCategory */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -692,7 +694,7 @@ export default function Transactions() {
                     {/* ✅ VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
 
-                    {/* ✅ NEW: Asset Disposal Column */}
+                    {/* ✅ Asset Disposal Column */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -709,13 +711,16 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* ✅ NEW: CT Flag */}
+                    {/* ✅ CT Flag: ON/OFF manual override toggle */}
                     <td className="text-center">
                       <input
                         type="checkbox"
-                        checked={tx.includedInCT || false}
+                        checked={tx.includedinct === true}
                         onChange={(e) =>
-                          updateTransactionCTFlag(tx.id, e.target.checked)
+                          updateTransaction(tx.id, {
+                            includedinct: e.target.checked,
+                            manualctoverride: true, // ✅ locks user override
+                          })
                         }
                       />
                     </td>
@@ -726,27 +731,31 @@ export default function Transactions() {
         </ResponsiveCard>
 
         {/* ✅ In‑App Disclaimer */}
-<p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-  ProfitLens provides estimates only. Always verify figures before filing
-  with HMRC. Nothing displayed here constitutes tax, accounting, or legal
-  advice.
-</p>
-</div>
+        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+          ProfitLens provides estimates only. Always verify figures before
+          filing with HMRC. Nothing displayed here constitutes tax, accounting,
+          or legal advice.
+        </p>
+      </div>
 
-{/* ✅ Asset Disposal Modal */}
-{assetModalOpen && assetModalTx && (
-  <AssetDisposalModal
-    transaction={assetModalTx}
-    onClose={() => setAssetModalOpen(false)}
-    onSave={(payload) => {
-      updateTransaction(assetModalTx.id, payload); // ✅ FIXED — send flat lowercase fields
-      updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
-      setAssetModalOpen(false);
-    }}
-  />
-)}
-</ResponsiveLayout>
-);
+      {/* ✅ Asset Disposal Modal */}
+      {assetModalOpen && assetModalTx && (
+        <AssetDisposalModal
+          transaction={assetModalTx}
+          onClose={() => setAssetModalOpen(false)}
+          onSave={(payload) => {
+            // ✅ Disposal always CT + locks override
+            updateTransaction(assetModalTx.id, {
+              ...payload,
+              includedinct: true,
+              manualctoverride: true,
+            });
+            setAssetModalOpen(false);
+          }}
+        />
+      )}
+    </ResponsiveLayout>
+  );
 }
 
 /* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */

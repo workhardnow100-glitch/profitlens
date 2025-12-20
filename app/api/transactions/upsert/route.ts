@@ -29,12 +29,18 @@ export async function POST(req: Request) {
       assetbalancingcharge,
       assetbalancingallowance,
 
+      // ✅ CT fields
+      includedinct,          // ✅ manual override or direct toggle
+      manualctoverride,      // ✅ locks CT state
+      auto_ct,               // ✅ auto‑CT hint from category change
+
       // ✅ MTD metadata
       mtdMetadata,
     } = body;
 
     const updateData: any = {};
 
+    // ✅ BASIC FIELDS
     if (clientId !== undefined) updateData.client_id = clientId;
     if (date !== undefined) updateData.date = date;
     if (description !== undefined) updateData.description = description;
@@ -46,25 +52,52 @@ export async function POST(req: Request) {
     if (cis_type !== undefined) updateData.cis_type = cis_type;
 
     // ✅ ASSET DISPOSAL FIELDS (flat, lowercase to match schema)
-   // ✅ FLAT asset fields
-if (assetdisposaltype !== undefined)
-  updateData.assetdisposaltype = assetdisposaltype;
+    if (assetdisposaltype !== undefined)
+      updateData.assetdisposaltype = assetdisposaltype;
 
-if (assetpurchaseprice !== undefined)
-  updateData.assetpurchaseprice = assetpurchaseprice;
+    if (assetpurchaseprice !== undefined)
+      updateData.assetpurchaseprice = assetpurchaseprice;
 
-if (assetcapitalclaimed !== undefined)
-  updateData.assetcapitalclaimed = assetcapitalclaimed;
+    if (assetcapitalclaimed !== undefined)
+      updateData.assetcapitalclaimed = assetcapitalclaimed;
 
-if (assettwdv !== undefined)
-  updateData.assettwdv = assettwdv;
+    if (assettwdv !== undefined)
+      updateData.assettwdv = assettwdv;
 
-if (assetbalancingcharge !== undefined)
-  updateData.assetbalancingcharge = assetbalancingcharge;
+    if (assetbalancingcharge !== undefined)
+      updateData.assetbalancingcharge = assetbalancingcharge;
 
-if (assetbalancingallowance !== undefined)
-  updateData.assetbalancingallowance = assetbalancingallowance;
+    if (assetbalancingallowance !== undefined)
+      updateData.assetbalancingallowance = assetbalancingallowance;
 
+    // ✅ FIRST: Fetch existing row so we can respect manual override
+    let existing = null;
+    if (id) {
+      const { data: existingRow } = await supabase
+        .from("transactions")
+        .select("manualctoverride, includedinct")
+        .eq("id", id)
+        .single();
+      existing = existingRow || {};
+    }
+
+    // ✅ MANUAL OVERRIDE (user clicked CT toggle)
+    if (includedinct !== undefined) {
+      updateData.includedinct = includedinct;
+    }
+
+    if (manualctoverride !== undefined) {
+      updateData.manualctoverride = manualctoverride;
+    }
+
+    // ✅ AUTO‑CT LOGIC (only applies if user has NOT overridden)
+    if (auto_ct !== undefined) {
+      const userHasOverridden = existing?.manualctoverride === true;
+
+      if (!userHasOverridden) {
+        updateData.includedinct = auto_ct;
+      }
+    }
 
     // ✅ MTD METADATA FIELDS (lowercase to match schema)
     if (mtdMetadata) {
@@ -90,6 +123,7 @@ if (assetbalancingallowance !== undefined)
         updateData.includedinsa = mtdMetadata.includedInSA;
     }
 
+    // ✅ UPSERT
     let result;
 
     if (id) {
