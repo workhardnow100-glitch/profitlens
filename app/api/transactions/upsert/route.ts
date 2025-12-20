@@ -21,12 +21,18 @@ export async function POST(req: Request) {
       vat_amount,
       cis_type,
 
-      // ✅ NEW FIELDS
-      assetDisposal,
+      // ✅ FLAT ASSET FIELDS (match DB)
+      assetdisposaltype,
+      assetpurchaseprice,
+      assetcapitalclaimed,
+      assettwdv,
+      assetbalancingcharge,
+      assetbalancingallowance,
+
+      // ✅ MTD metadata
       mtdMetadata,
     } = body;
 
-    // ✅ Build update object safely
     const updateData: any = {};
 
     if (clientId !== undefined) updateData.client_id = clientId;
@@ -39,17 +45,18 @@ export async function POST(req: Request) {
     if (vat_amount !== undefined) updateData.vat_amount = vat_amount;
     if (cis_type !== undefined) updateData.cis_type = cis_type;
 
-    // ✅ ASSET DISPOSAL FIELDS (lowercase to match schema)
-    if (assetDisposal) {
-      updateData.assetdisposaltype = assetDisposal.assetdisposaltype ?? "NONE";
-      updateData.assetpurchaseprice = assetDisposal.assetpurchaseprice ?? null;
-      updateData.assetcapitalclaimed = assetDisposal.assetcapitalclaimed ?? null;
-      updateData.assettwdv = assetDisposal.assettwdv ?? null;
-      updateData.assetbalancingcharge =
-        assetDisposal.assetbalancingcharge ?? null;
-      updateData.assetbalancingallowance =
-        assetDisposal.assetbalancingallowance ?? null;
-    }
+    // ✅ ASSET DISPOSAL FIELDS (flat, lowercase to match schema)
+    if (assetdisposaltype !== undefined)
+      updateData.assetdisposaltype = assetdisposaltype;
+    if (assetpurchaseprice !== undefined)
+      updateData.assetpurchaseprice = assetpurchaseprice;
+    if (assetcapitalclaimed !== undefined)
+      updateData.assetcapitalclaimed = assetcapitalclaimed;
+    if (assettwdv !== undefined) updateData.assettwdv = assettwdv;
+    if (assetbalancingcharge !== undefined)
+      updateData.assetbalancingcharge = assetbalancingcharge;
+    if (assetbalancingallowance !== undefined)
+      updateData.assetbalancingallowance = assetbalancingallowance;
 
     // ✅ MTD METADATA FIELDS (lowercase to match schema)
     if (mtdMetadata) {
@@ -75,7 +82,6 @@ export async function POST(req: Request) {
         updateData.includedinsa = mtdMetadata.includedInSA;
     }
 
-    // ✅ UPDATE OR INSERT
     let result;
 
     if (id) {
