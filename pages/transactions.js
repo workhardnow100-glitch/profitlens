@@ -437,16 +437,15 @@ export default function Transactions() {
   // ✅ NEW: Asset Disposal handler
   function handleAssetDisposalChange(tx, value) {
     if (value === "NONE") {
-      updateTransaction(tx.id, {
-  assetDisposal: {
-    assetdisposaltype: "NONE",
-    assetPurchasePrice: null,
-    assetCapitalClaimed: null,
-    assetTWDV: null,
-    assetBalancingCharge: null,
-    assetBalancingAllowance: null,
-  },
+   updateTransaction(tx.id, {
+  assetdisposaltype: "NONE",
+  assetpurchaseprice: null,
+  assetcapitalclaimed: null,
+  assettwdv: null,
+  assetbalancingcharge: null,
+  assetbalancingallowance: null,
 });
+
 
       return;
     }
