@@ -686,23 +686,23 @@ export default function Transactions() {
 
                     {/* ✅ VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
+{/* ✅ NEW: Asset Disposal Column */}
+<td>
+  <select
+    className="border p-1 rounded text-sm"
+    value={tx.assetdisposaltype || "NONE"}   // ✅ FIXED
+    onChange={(e) =>
+      handleAssetDisposalChange(tx, e.target.value)
+    }
+  >
+    <option value="NONE">No</option>
+    <option value="MAIN_POOL">Main Pool</option>
+    <option value="SPECIAL_RATE_POOL">Special Rate</option>
+    <option value="CARS">Cars</option>
+    <option value="SHORT_LIFE">Short‑Life</option>
+  </select>
+</td>
 
-                    {/* ✅ NEW: Asset Disposal Column */}
-                    <td>
-                      <select
-                        className="border p-1 rounded text-sm"
-                        value={tx.assetDisposalType || "NONE"}
-                        onChange={(e) =>
-                          handleAssetDisposalChange(tx, e.target.value)
-                        }
-                      >
-                        <option value="NONE">No</option>
-                        <option value="MAIN_POOL">Main Pool</option>
-                        <option value="SPECIAL_RATE_POOL">Special Rate</option>
-                        <option value="CARS">Cars</option>
-                        <option value="SHORT_LIFE">Short‑Life</option>
-                      </select>
-                    </td>
 
                     {/* ✅ NEW: CT Flag */}
                     <td className="text-center">
