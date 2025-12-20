@@ -703,74 +703,76 @@ export default function Transactions() {
   </select>
 </td>
 
+{/* ✅ NEW: CT Flag */}
+<td className="text-center">
+  <input
+    type="checkbox"
+    checked={tx.includedInCT || false}
+    onChange={(e) =>
+      updateTransactionCTFlag(tx.id, e.target.checked)
+    }
+  />
+</td>
+</tr>
+))}
+</ResponsiveTable>
+</ResponsiveCard>
 
-                    {/* ✅ NEW: CT Flag */}
-                    <td className="text-center">
-                      <input
-                        type="checkbox"
-                        checked={tx.includedInCT || false}
-                        onChange={(e) =>
-                          updateTransactionCTFlag(tx.id, e.target.checked)
-                        }
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-          </ResponsiveTable>
-        </ResponsiveCard>
-        {/* ✅ In‑App Disclaimer */}
-        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-          ProfitLens provides estimates only. Always verify figures before filing
-          with HMRC. Nothing displayed here constitutes tax, accounting, or legal
-          advice.
-        </p>
+{/* ✅ In‑App Disclaimer */}
+<p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+  ProfitLens provides estimates only. Always verify figures before filing
+  with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+  advice.
+</p>
 
-      </div>
+</div>
 
-      {/* ✅ Asset Disposal Modal */}
-      {assetModalOpen && assetModalTx && (
-        <AssetDisposalModal
-          transaction={assetModalTx}
-          onClose={() => setAssetModalOpen(false)}
-          onSave={(payload) => {
-            updateTransaction(assetModalTx.id, { assetDisposal: payload });
-            updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
-            setAssetModalOpen(false);
-          }}
-        />
-      )}
+{/* ✅ Asset Disposal Modal */}
+{assetModalOpen && assetModalTx && (
+  <AssetDisposalModal
+    transaction={assetModalTx}
+    onClose={() => setAssetModalOpen(false)}
+    onSave={(payload) => {
+      updateTransaction(assetModalTx.id, { assetDisposal: payload });
+      updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
+      setAssetModalOpen(false);
+    }}
+  />
+)}
 
-    </ResponsiveLayout>
-  );
+</ResponsiveLayout>
+);
 }
+
+/* ✅ IMPORT THE ENGINE */
+import { computeAssetDisposal } from "@/lib/assetDisposal";
 
 /* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */
 function AssetDisposalModal({ transaction, onClose, onSave }) {
   const [purchasePrice, setPurchasePrice] = useState("");
   const [capitalClaimed, setCapitalClaimed] = useState("");
 
+  // ✅ Disposal proceeds from the transaction amount
   const disposalValue = Math.abs(Number(transaction.amount));
 
-  const twdv =
+  // ✅ Use the calculation engine
+  const result =
     purchasePrice !== "" && capitalClaimed !== ""
-      ? Math.max(0, Number(purchasePrice) - Number(capitalClaimed))
+      ? computeAssetDisposal({
+          poolType: transaction.assetdisposaltype || "NONE",
+          purchasePrice: Number(purchasePrice),
+          capitalClaimed: Number(capitalClaimed),
+          disposalProceeds: disposalValue,
+        })
       : null;
 
-  let balancingCharge = null;
-  let balancingAllowance = null;
-
-  if (twdv !== null) {
-    if (disposalValue > twdv) {
-      balancingCharge = disposalValue - twdv;
-    } else if (twdv > disposalValue) {
-      balancingAllowance = twdv - disposalValue;
-    }
-  }
+  const twdv = result?.values?.assettwdv ?? null;
+  const balancingCharge = result?.values?.assetbalancingcharge ?? null;
+  const balancingAllowance = result?.values?.assetbalancingallowance ?? null;
 
   const handleSave = () => {
     onSave({
-      assetDisposalType: transaction.assetDisposalType,
+      assetDisposalType: transaction.assetdisposaltype, // ✅ unchanged
       assetPurchasePrice: purchasePrice === "" ? null : Number(purchasePrice),
       assetCapitalClaimed: capitalClaimed === "" ? null : Number(capitalClaimed),
       assetTWDV: twdv,
@@ -820,6 +822,7 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
             />
           </div>
 
+          {/* ✅ ENGINE OUTPUT PANEL */}
           <div className="bg-slate-50 p-3 rounded border text-sm">
             <p>
               <span className="font-semibold">TWDV:</span>{" "}
