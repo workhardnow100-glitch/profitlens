@@ -71,14 +71,15 @@ export async function POST(req: Request) {
       updateData.assetbalancingallowance = assetbalancingallowance;
 
     // ✅ FIRST: Fetch existing row so we can respect manual override
-    let existing = null;
+    let existing: any = {}; // ✅ FIXED — allow object, not null
     if (id) {
       const { data: existingRow } = await supabase
         .from("transactions")
         .select("manualctoverride, includedinct")
         .eq("id", id)
         .single();
-      existing = existingRow || {};
+
+      existing = existingRow ?? {}; // ✅ FIXED — safe fallback
     }
 
     // ✅ MANUAL OVERRIDE (user clicked CT toggle)
