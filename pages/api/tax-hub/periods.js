@@ -30,7 +30,7 @@ function calculateCorporationTax(profit) {
   };
 }
 
-// ✅ Build lowercase sets for exact CT classification (mirrors /api/ct/summary)
+// ✅ Build lowercase sets for exact CT/SA classification
 const CT_MAP_LOWER = {
   income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
   allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
@@ -251,7 +251,7 @@ export default async function handler(req, res) {
       return { ...tx, business_category: category };
     });
 
-    // Bucket into VAT, CIS, CT, SA based on enriched categories (CT now computed separately)
+    // Bucket into VAT, CIS, CT, SA based on enriched categories (CT/SA computed separately)
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
     enriched.forEach((tx) => {
       const c = (tx.business_category || "").toLowerCase();
@@ -337,6 +337,104 @@ export default async function handler(req, res) {
         profit,
         adjustedProfit,
         effectiveRate,
+      });
+    }
+
+    // ✅ Self Assessment (calendar-year periods, last 5 years, using CT_MAP + SA bands)
+    const saPeriods = [];
+    for (let year = currentYear; year > currentYear - yearsBack; year--) {
+      const periodStartDate = new Date(year, 0, 1);
+      const periodEndDate = new Date(year, 11, 31);
+      const periodStart = fmt(periodStartDate);
+      const periodEnd = fmt(periodEndDate);
+
+      const yearTxs = enriched.filter((tx) => {
+        if (!tx.date) return false;
+        const d = new Date(tx.date);
+        return d.getFullYear() === year;
+      });
+
+      if (yearTxs.length === 0) continue;
+
+      let totalIncome = 0;
+      let totalExpenses = 0;
+      let locked = false;
+
+      const saTxs = [];
+
+      yearTxs.forEach((tx) => {
+        const cat = (tx.business_category || "").toLowerCase();
+        const amt = Number(tx.amount || 0);
+
+        let isSA = false;
+
+        if (CT_MAP_LOWER.income.has(cat)) {
+          if (amt > 0) totalIncome += amt;
+          isSA = true;
+        }
+
+        if (CT_MAP_LOWER.allowable.has(cat) || CT_MAP_LOWER.disallowable.has(cat)) {
+          if (amt < 0) totalExpenses += Math.abs(amt);
+          isSA = true;
+        }
+
+        if (tx.tax_locked) locked = true;
+        if (isSA) saTxs.push(tx);
+      });
+
+      if (saTxs.length === 0) continue;
+
+      const profit = totalIncome - totalExpenses;
+
+      // Personal allowance
+      let personalAllowance = 12570;
+
+      // Personal allowance tapering above £100k
+      if (profit > 100000) {
+        const reduction = Math.floor((profit - 100000) / 2);
+        personalAllowance = Math.max(0, personalAllowance - reduction);
+      }
+
+      const taxableIncome = Math.max(0, profit - personalAllowance);
+
+      // UK tax bands
+      let taxLiability = 0;
+      let remaining = taxableIncome;
+
+      // 20% basic rate (up to £50,270)
+      const basicLimit = 50270 - personalAllowance;
+      if (remaining > 0) {
+        const basicTaxable = Math.min(remaining, basicLimit);
+        taxLiability += basicTaxable * 0.20;
+        remaining -= basicTaxable;
+      }
+
+      // 40% higher rate (up to £125,140)
+      const higherLimit = 125140 - 50270;
+      if (remaining > 0) {
+        const higherTaxable = Math.min(remaining, higherLimit);
+        taxLiability += higherTaxable * 0.40;
+        remaining -= higherTaxable;
+      }
+
+      // 45% additional rate (above £125,140)
+      if (remaining > 0) {
+        taxLiability += remaining * 0.45;
+      }
+
+      saPeriods.push({
+        periodLabel: `${periodStart} → ${periodEnd}`,
+        periodStart,
+        periodEnd,
+        locked,
+        hmrcAuthorized: true,
+        transactions: saTxs,
+        totalIncome,
+        totalExpenses,
+        profit,
+        personalAllowance,
+        taxableIncome,
+        taxLiability,
       });
     }
 
@@ -432,17 +530,6 @@ export default async function handler(req, res) {
     const ctBalance = totalCorpTaxDue - totalCtPaid;
 
     const overdueVatCount = vatPeriods.filter((p) => p.overdue).length;
-
-    // SA bucket
-    const saPeriods = grouped.sa.map((tx) => ({
-      periodLabel: tx.date,
-      periodStart: tx.date,
-      periodEnd: tx.date,
-      locked: tx.tax_locked,
-      hmrcAuthorized:
-        (tx.business_category || "").toLowerCase().includes("self assessment") ||
-        (tx.business_category || "").toLowerCase().includes("sa payment"),
-    }));
 
     return res.status(200).json({
       vat: vatPeriods,
