@@ -292,9 +292,11 @@ export const authOptions: NextAuthOptions = {
 
         session.user.actingAsClientId = valid ? (persisted as string) : null;
       } else {
-        session.user.accessibleClients = [session.user.clientId];
-        session.user.actingAsClientId = session.user.clientId;
-      }
+  const cid = session.user.clientId ?? "unknown-client";
+  session.user.accessibleClients = [cid];
+  session.user.actingAsClientId = cid;
+}
+
 
       return session;
     },
