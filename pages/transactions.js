@@ -11,7 +11,6 @@ import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
 import { CT_MAP } from "../lib/constants/ctMap";
 
-// ✅ Single unified category list from CT_MAP (HMRC aligned)
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
@@ -41,6 +40,10 @@ export default function Transactions() {
   const [customTo, setCustomTo] = useState("");
   const [Highcharts, setHighcharts] = useState(null);
   const [hcReady, setHcReady] = useState(false);
+
+  // ✅ Asset Disposal Modal State
+  const [assetModalOpen, setAssetModalOpen] = useState(false);
+  const [assetModalTx, setAssetModalTx] = useState(null);
 
   useEffect(() => {
     if (status === "loading") return;
@@ -171,8 +174,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // ✅ Auto-save default VAT on any transaction missing vat_rate,
-  // using the stored HMRC-aligned business_category only
+  // ✅ Auto VAT logic unchanged
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -219,7 +221,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // ✅ Aggregation logic — uses the same stored category, no inference
+  // ✅ Aggregation logic unchanged
   const {
     totalIncome,
     totalExpenses,
@@ -370,6 +372,7 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
+  // ✅ Update functions
   async function updateBusinessCategory(id, newCategory) {
     await fetch("/api/transactions/update-category", {
       method: "POST",
@@ -407,6 +410,47 @@ export default function Transactions() {
         amount: tx.amount,
       }),
     });
+  }
+
+  // ✅ NEW: Update transaction (generic)
+  async function updateTransaction(id, payload) {
+    await fetch("/api/transactions/upsert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...payload }),
+    });
+  }
+
+  // ✅ NEW: Update CT flag
+  async function updateTransactionCTFlag(id, included) {
+    await fetch("/api/transactions/upsert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id,
+        mtdMetadata: { includedInCT: included },
+      }),
+    });
+  }
+
+  // ✅ NEW: Asset Disposal handler
+  function handleAssetDisposalChange(tx, value) {
+    if (value === "NONE") {
+      updateTransaction(tx.id, {
+        assetDisposal: {
+          assetDisposalType: "NONE",
+          assetPurchasePrice: null,
+          assetCapitalClaimed: null,
+          assetTWDV: null,
+          assetBalancingCharge: null,
+          assetBalancingAllowance: null,
+        },
+      });
+      return;
+    }
+
+    setAssetModalTx({ ...tx, assetDisposalType: value });
+    setAssetModalOpen(true);
   }
 
   return (
@@ -497,11 +541,13 @@ export default function Transactions() {
               "Category",
               "VAT / CIS",
               "VAT Amount",
+              "Asset Disposal",
+              "CT",
             ]}
           >
             {error && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-red-500">
+                <td colSpan={8} className="px-4 py-2 text-red-500">
                   Failed to load transactions
                 </td>
               </tr>
@@ -509,7 +555,7 @@ export default function Transactions() {
 
             {!data && !error && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-slate-500">
+                <td colSpan={8} className="px-4 py-2 text-slate-500">
                   Loading transactions...
                 </td>
               </tr>
@@ -517,7 +563,7 @@ export default function Transactions() {
 
             {data && filtered.length === 0 && !error && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-slate-500">
+                <td colSpan={8} className="px-4 py-2 text-slate-500">
                   No transactions in this period.
                 </td>
               </tr>
@@ -557,7 +603,7 @@ export default function Transactions() {
                   tx.cis_type === "deducted"
                     ? "deducted"
                     : tx.cis_type === "suffered"
-                    ? "sufferred"
+                    ? "suffered"
                     : "none";
 
                 const effectiveVatAmount =
@@ -583,7 +629,7 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* ✅ Category dropdown — CT_MAP constants only */}
+                    {/* ✅ Category dropdown */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -601,7 +647,7 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* VAT + CIS */}
+                    {/* ✅ VAT + CIS */}
                     <td>
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-2">
@@ -638,14 +684,41 @@ export default function Transactions() {
                       </div>
                     </td>
 
-                    {/* VAT Amount */}
+                    {/* ✅ VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
+
+                    {/* ✅ NEW: Asset Disposal Column */}
+                    <td>
+                      <select
+                        className="border p-1 rounded text-sm"
+                        value={tx.assetDisposalType || "NONE"}
+                        onChange={(e) =>
+                          handleAssetDisposalChange(tx, e.target.value)
+                        }
+                      >
+                        <option value="NONE">No</option>
+                        <option value="MAIN_POOL">Main Pool</option>
+                        <option value="SPECIAL_RATE_POOL">Special Rate</option>
+                        <option value="CARS">Cars</option>
+                        <option value="SHORT_LIFE">Short‑Life</option>
+                      </select>
+                    </td>
+
+                    {/* ✅ NEW: CT Flag */}
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={tx.includedInCT || false}
+                        onChange={(e) =>
+                          updateTransactionCTFlag(tx.id, e.target.checked)
+                        }
+                      />
+                    </td>
                   </tr>
                 );
               })}
           </ResponsiveTable>
         </ResponsiveCard>
-
         {/* ✅ In‑App Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
           ProfitLens provides estimates only. Always verify figures before filing
@@ -654,6 +727,132 @@ export default function Transactions() {
         </p>
 
       </div>
+
+      {/* ✅ Asset Disposal Modal */}
+      {assetModalOpen && assetModalTx && (
+        <AssetDisposalModal
+          transaction={assetModalTx}
+          onClose={() => setAssetModalOpen(false)}
+          onSave={(payload) => {
+            updateTransaction(assetModalTx.id, { assetDisposal: payload });
+            updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
+            setAssetModalOpen(false);
+          }}
+        />
+      )}
+
     </ResponsiveLayout>
+  );
+}
+
+/* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */
+function AssetDisposalModal({ transaction, onClose, onSave }) {
+  const [purchasePrice, setPurchasePrice] = useState("");
+  const [capitalClaimed, setCapitalClaimed] = useState("");
+
+  const disposalValue = Math.abs(Number(transaction.amount));
+
+  const twdv =
+    purchasePrice !== "" && capitalClaimed !== ""
+      ? Math.max(0, Number(purchasePrice) - Number(capitalClaimed))
+      : null;
+
+  let balancingCharge = null;
+  let balancingAllowance = null;
+
+  if (twdv !== null) {
+    if (disposalValue > twdv) {
+      balancingCharge = disposalValue - twdv;
+    } else if (twdv > disposalValue) {
+      balancingAllowance = twdv - disposalValue;
+    }
+  }
+
+  const handleSave = () => {
+    onSave({
+      assetDisposalType: transaction.assetDisposalType,
+      assetPurchasePrice: purchasePrice === "" ? null : Number(purchasePrice),
+      assetCapitalClaimed: capitalClaimed === "" ? null : Number(capitalClaimed),
+      assetTWDV: twdv,
+      assetBalancingCharge: balancingCharge,
+      assetBalancingAllowance: balancingAllowance,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+        <h2 className="text-xl font-bold text-slate-800 mb-2">
+          Asset Disposal Details
+        </h2>
+
+        <p className="text-slate-600 mb-4">
+          {transaction.description} — Disposal value:{" "}
+          <span className="font-semibold">£{disposalValue.toFixed(2)}</span>
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">
+              Purchase Price
+            </label>
+            <input
+              type="number"
+              className="border rounded p-2 w-full"
+              value={purchasePrice}
+              onChange={(e) =>
+                setPurchasePrice(e.target.value === "" ? "" : Number(e.target.value))
+              }
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-slate-600 mb-1">
+              Capital Allowances Claimed So Far
+            </label>
+            <input
+              type="number"
+              className="border rounded p-2 w-full"
+              value={capitalClaimed}
+              onChange={(e) =>
+                setCapitalClaimed(e.target.value === "" ? "" : Number(e.target.value))
+              }
+            />
+          </div>
+
+          <div className="bg-slate-50 p-3 rounded border text-sm">
+            <p>
+              <span className="font-semibold">TWDV:</span>{" "}
+              {twdv !== null ? `£${twdv.toFixed(2)}` : "—"}
+            </p>
+            <p>
+              <span className="font-semibold">Balancing Charge:</span>{" "}
+              {balancingCharge !== null ? `£${balancingCharge.toFixed(2)}` : "£0.00"}
+            </p>
+            <p>
+              <span className="font-semibold">Balancing Allowance:</span>{" "}
+              {balancingAllowance !== null ? `£${balancingAllowance.toFixed(2)}` : "£0.00"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            className="px-4 py-2 bg-slate-200 rounded hover:bg-slate-300"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-blue-300"
+            disabled={twdv === null}
+            onClick={handleSave}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
