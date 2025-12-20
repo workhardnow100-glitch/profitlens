@@ -722,27 +722,27 @@ export default function Transactions() {
         </ResponsiveCard>
 
         {/* ✅ In‑App Disclaimer */}
-        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-          ProfitLens provides estimates only. Always verify figures before filing
-          with HMRC. Nothing displayed here constitutes tax, accounting, or legal
-          advice.
-        </p>
-      </div>
+<p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+  ProfitLens provides estimates only. Always verify figures before filing
+  with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+  advice.
+</p>
+</div>
 
-      {/* ✅ Asset Disposal Modal */}
-      {assetModalOpen && assetModalTx && (
-        <AssetDisposalModal
-          transaction={assetModalTx}
-          onClose={() => setAssetModalOpen(false)}
-          onSave={(payload) => {
-            updateTransaction(assetModalTx.id, { assetDisposal: payload });
-            updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
-            setAssetModalOpen(false);
-          }}
-        />
-      )}
-    </ResponsiveLayout>
-  );
+{/* ✅ Asset Disposal Modal */}
+{assetModalOpen && assetModalTx && (
+  <AssetDisposalModal
+    transaction={assetModalTx}
+    onClose={() => setAssetModalOpen(false)}
+    onSave={(payload) => {
+      updateTransaction(assetModalTx.id, payload); // ✅ FIXED — send flat lowercase fields
+      updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
+      setAssetModalOpen(false);
+    }}
+  />
+)}
+</ResponsiveLayout>
+);
 }
 
 /* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */
@@ -771,12 +771,12 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
   const handleSave = () => {
     onSave({
       assetdisposaltype: transaction.assetdisposaltype, // ✅ unchanged
-      assetPurchasePrice: purchasePrice === "" ? null : Number(purchasePrice),
-      assetCapitalClaimed:
-        capitalClaimed === "" ? null : Number(capitalClaimed),
-      assetTWDV: twdv,
-      assetBalancingCharge: balancingCharge,
-      assetBalancingAllowance: balancingAllowance,
+      assetpurchaseprice: purchasePrice === "" ? null : Number(purchasePrice), // ✅ FIXED
+      assetcapitalclaimed:
+        capitalClaimed === "" ? null : Number(capitalClaimed), // ✅ FIXED
+      assettwdv: twdv, // ✅ FIXED
+      assetbalancingcharge: balancingCharge, // ✅ FIXED
+      assetbalancingallowance: balancingAllowance, // ✅ FIXED
     });
   };
 

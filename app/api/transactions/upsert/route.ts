@@ -41,14 +41,14 @@ export async function POST(req: Request) {
 
     // ✅ ASSET DISPOSAL FIELDS (lowercase to match schema)
     if (assetDisposal) {
-      updateData.assetdisposaltype = assetDisposal.assetDisposalType ?? "NONE";
-      updateData.assetpurchaseprice = assetDisposal.assetPurchasePrice ?? null;
-      updateData.assetcapitalclaimed = assetDisposal.assetCapitalClaimed ?? null;
-      updateData.assettwdv = assetDisposal.assetTWDV ?? null;
+      updateData.assetdisposaltype = assetDisposal.assetdisposaltype ?? "NONE";
+      updateData.assetpurchaseprice = assetDisposal.assetpurchaseprice ?? null;
+      updateData.assetcapitalclaimed = assetDisposal.assetcapitalclaimed ?? null;
+      updateData.assettwdv = assetDisposal.assettwdv ?? null;
       updateData.assetbalancingcharge =
-        assetDisposal.assetBalancingCharge ?? null;
+        assetDisposal.assetbalancingcharge ?? null;
       updateData.assetbalancingallowance =
-        assetDisposal.assetBalancingAllowance ?? null;
+        assetDisposal.assetbalancingallowance ?? null;
     }
 
     // ✅ MTD METADATA FIELDS (lowercase to match schema)
