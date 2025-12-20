@@ -438,15 +438,16 @@ export default function Transactions() {
   function handleAssetDisposalChange(tx, value) {
     if (value === "NONE") {
       updateTransaction(tx.id, {
-        assetDisposal: {
-          assetdisposaltype: "NONE",
-          assetPurchasePrice: null,
-          assetCapitalClaimed: null,
-          assetTWDV: null,
-          assetBalancingCharge: null,
-          assetBalancingAllowance: null,
-        },
-      });
+  assetDisposal: {
+    assetdisposaltype: "NONE",
+    assetPurchasePrice: null,
+    assetCapitalClaimed: null,
+    assetTWDV: null,
+    assetBalancingCharge: null,
+    assetBalancingAllowance: null,
+  },
+});
+
       return;
     }
 
