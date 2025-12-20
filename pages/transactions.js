@@ -10,7 +10,7 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
 import { CT_MAP } from "../lib/constants/ctMap";
-import { computeAssetDisposal } from "@/lib/assetDisposal"; // ✅ moved to top where imports belong
+import { computeAssetDisposal } from "../lib/assetDisposal"; // ✅ moved to top where imports belong
 
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
