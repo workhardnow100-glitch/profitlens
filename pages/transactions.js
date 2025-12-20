@@ -10,6 +10,7 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
 import { CT_MAP } from "../lib/constants/ctMap";
+import { computeAssetDisposal } from "@/lib/assetDisposal"; // ✅ moved to top where imports belong
 
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
@@ -686,66 +687,63 @@ export default function Transactions() {
 
                     {/* ✅ VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
-{/* ✅ NEW: Asset Disposal Column */}
-<td>
-  <select
-    className="border p-1 rounded text-sm"
-    value={tx.assetdisposaltype || "NONE"}   // ✅ FIXED
-    onChange={(e) =>
-      handleAssetDisposalChange(tx, e.target.value)
-    }
-  >
-    <option value="NONE">No</option>
-    <option value="MAIN_POOL">Main Pool</option>
-    <option value="SPECIAL_RATE_POOL">Special Rate</option>
-    <option value="CARS">Cars</option>
-    <option value="SHORT_LIFE">Short‑Life</option>
-  </select>
-</td>
 
-{/* ✅ NEW: CT Flag */}
-<td className="text-center">
-  <input
-    type="checkbox"
-    checked={tx.includedInCT || false}
-    onChange={(e) =>
-      updateTransactionCTFlag(tx.id, e.target.checked)
-    }
-  />
-</td>
-</tr>
-))}
-</ResponsiveTable>
-</ResponsiveCard>
+                    {/* ✅ NEW: Asset Disposal Column */}
+                    <td>
+                      <select
+                        className="border p-1 rounded text-sm"
+                        value={tx.assetdisposaltype || "NONE"} // ✅ aligned with schema
+                        onChange={(e) =>
+                          handleAssetDisposalChange(tx, e.target.value)
+                        }
+                      >
+                        <option value="NONE">No</option>
+                        <option value="MAIN_POOL">Main Pool</option>
+                        <option value="SPECIAL_RATE_POOL">Special Rate</option>
+                        <option value="CARS">Cars</option>
+                        <option value="SHORT_LIFE">Short‑Life</option>
+                      </select>
+                    </td>
 
-{/* ✅ In‑App Disclaimer */}
-<p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-  ProfitLens provides estimates only. Always verify figures before filing
-  with HMRC. Nothing displayed here constitutes tax, accounting, or legal
-  advice.
-</p>
+                    {/* ✅ NEW: CT Flag */}
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={tx.includedInCT || false}
+                        onChange={(e) =>
+                          updateTransactionCTFlag(tx.id, e.target.checked)
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+          </ResponsiveTable>
+        </ResponsiveCard>
 
-</div>
+        {/* ✅ In‑App Disclaimer */}
+        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+          ProfitLens provides estimates only. Always verify figures before filing
+          with HMRC. Nothing displayed here constitutes tax, accounting, or legal
+          advice.
+        </p>
+      </div>
 
-{/* ✅ Asset Disposal Modal */}
-{assetModalOpen && assetModalTx && (
-  <AssetDisposalModal
-    transaction={assetModalTx}
-    onClose={() => setAssetModalOpen(false)}
-    onSave={(payload) => {
-      updateTransaction(assetModalTx.id, { assetDisposal: payload });
-      updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
-      setAssetModalOpen(false);
-    }}
-  />
-)}
-
-</ResponsiveLayout>
-);
+      {/* ✅ Asset Disposal Modal */}
+      {assetModalOpen && assetModalTx && (
+        <AssetDisposalModal
+          transaction={assetModalTx}
+          onClose={() => setAssetModalOpen(false)}
+          onSave={(payload) => {
+            updateTransaction(assetModalTx.id, { assetDisposal: payload });
+            updateTransactionCTFlag(assetModalTx.id, true); // auto‑include in CT
+            setAssetModalOpen(false);
+          }}
+        />
+      )}
+    </ResponsiveLayout>
+  );
 }
-
-/* ✅ IMPORT THE ENGINE */
-import { computeAssetDisposal } from "@/lib/assetDisposal";
 
 /* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */
 function AssetDisposalModal({ transaction, onClose, onSave }) {
@@ -774,7 +772,8 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
     onSave({
       assetDisposalType: transaction.assetdisposaltype, // ✅ unchanged
       assetPurchasePrice: purchasePrice === "" ? null : Number(purchasePrice),
-      assetCapitalClaimed: capitalClaimed === "" ? null : Number(capitalClaimed),
+      assetCapitalClaimed:
+        capitalClaimed === "" ? null : Number(capitalClaimed),
       assetTWDV: twdv,
       assetBalancingCharge: balancingCharge,
       assetBalancingAllowance: balancingAllowance,
@@ -803,7 +802,9 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
               className="border rounded p-2 w-full"
               value={purchasePrice}
               onChange={(e) =>
-                setPurchasePrice(e.target.value === "" ? "" : Number(e.target.value))
+                setPurchasePrice(
+                  e.target.value === "" ? "" : Number(e.target.value)
+                )
               }
             />
           </div>
@@ -817,7 +818,9 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
               className="border rounded p-2 w-full"
               value={capitalClaimed}
               onChange={(e) =>
-                setCapitalClaimed(e.target.value === "" ? "" : Number(e.target.value))
+                setCapitalClaimed(
+                  e.target.value === "" ? "" : Number(e.target.value)
+                )
               }
             />
           </div>
@@ -830,11 +833,15 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
             </p>
             <p>
               <span className="font-semibold">Balancing Charge:</span>{" "}
-              {balancingCharge !== null ? `£${balancingCharge.toFixed(2)}` : "£0.00"}
+              {balancingCharge !== null
+                ? `£${balancingCharge.toFixed(2)}`
+                : "£0.00"}
             </p>
             <p>
               <span className="font-semibold">Balancing Allowance:</span>{" "}
-              {balancingAllowance !== null ? `£${balancingAllowance.toFixed(2)}` : "£0.00"}
+              {balancingAllowance !== null
+                ? `£${balancingAllowance.toFixed(2)}`
+                : "£0.00"}
             </p>
           </div>
         </div>
