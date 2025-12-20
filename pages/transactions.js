@@ -439,7 +439,7 @@ export default function Transactions() {
     if (value === "NONE") {
       updateTransaction(tx.id, {
         assetDisposal: {
-          assetDisposalType: "NONE",
+          assetdisposaltype: "NONE",
           assetPurchasePrice: null,
           assetCapitalClaimed: null,
           assetTWDV: null,
@@ -770,7 +770,7 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
 
   const handleSave = () => {
     onSave({
-      assetDisposalType: transaction.assetdisposaltype, // ✅ unchanged
+      assetdisposaltype: transaction.assetdisposaltype, // ✅ unchanged
       assetPurchasePrice: purchasePrice === "" ? null : Number(purchasePrice),
       assetCapitalClaimed:
         capitalClaimed === "" ? null : Number(capitalClaimed),
