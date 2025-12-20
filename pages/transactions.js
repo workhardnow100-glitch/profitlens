@@ -436,24 +436,27 @@ export default function Transactions() {
 
   // ✅ NEW: Asset Disposal handler
   function handleAssetDisposalChange(tx, value) {
-    if (value === "NONE") {
-   updateTransaction(tx.id, {
-  assetdisposaltype: "NONE",
-  assetpurchaseprice: null,
-  assetcapitalclaimed: null,
-  assettwdv: null,
-  assetbalancingcharge: null,
-  assetbalancingallowance: null,
-});
-
-
-      return;
-    }
-
-  setAssetModalTx(tx);
-setAssetModalOpen(true);
-
+  // User selected "No"
+  if (value === "") {
+    updateTransaction(tx.id, {
+      assetdisposaltype: null,
+      assetpurchaseprice: null,
+      assetcapitalclaimed: null,
+      assettwdv: null,
+      assetbalancingcharge: null,
+      assetbalancingallowance: null,
+    });
+    return;
   }
+
+  // User selected a pool → open modal with that pool type
+  setAssetModalTx({
+    ...tx,
+    assetdisposaltype: value,
+  });
+  setAssetModalOpen(true);
+}
+
 
   return (
     <ResponsiveLayout>

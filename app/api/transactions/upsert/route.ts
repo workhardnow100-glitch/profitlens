@@ -46,17 +46,25 @@ export async function POST(req: Request) {
     if (cis_type !== undefined) updateData.cis_type = cis_type;
 
     // ✅ ASSET DISPOSAL FIELDS (flat, lowercase to match schema)
-    if (assetdisposaltype !== undefined)
-      updateData.assetdisposaltype = assetdisposaltype;
-    if (assetpurchaseprice !== undefined)
-      updateData.assetpurchaseprice = assetpurchaseprice;
-    if (assetcapitalclaimed !== undefined)
-      updateData.assetcapitalclaimed = assetcapitalclaimed;
-    if (assettwdv !== undefined) updateData.assettwdv = assettwdv;
-    if (assetbalancingcharge !== undefined)
-      updateData.assetbalancingcharge = assetbalancingcharge;
-    if (assetbalancingallowance !== undefined)
-      updateData.assetbalancingallowance = assetbalancingallowance;
+   // ✅ FLAT asset fields
+if (assetdisposaltype !== undefined)
+  updateData.assetdisposaltype = assetdisposaltype;
+
+if (assetpurchaseprice !== undefined)
+  updateData.assetpurchaseprice = assetpurchaseprice;
+
+if (assetcapitalclaimed !== undefined)
+  updateData.assetcapitalclaimed = assetcapitalclaimed;
+
+if (assettwdv !== undefined)
+  updateData.assettwdv = assettwdv;
+
+if (assetbalancingcharge !== undefined)
+  updateData.assetbalancingcharge = assetbalancingcharge;
+
+if (assetbalancingallowance !== undefined)
+  updateData.assetbalancingallowance = assetbalancingallowance;
+
 
     // ✅ MTD METADATA FIELDS (lowercase to match schema)
     if (mtdMetadata) {
