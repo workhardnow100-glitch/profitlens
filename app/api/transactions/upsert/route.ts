@@ -39,39 +39,40 @@ export async function POST(req: Request) {
     if (vat_amount !== undefined) updateData.vat_amount = vat_amount;
     if (cis_type !== undefined) updateData.cis_type = cis_type;
 
-    // ✅ ASSET DISPOSAL FIELDS
+    // ✅ ASSET DISPOSAL FIELDS (lowercase to match schema)
     if (assetDisposal) {
-      updateData.assetDisposalType = assetDisposal.assetDisposalType ?? "NONE";
-      updateData.assetPurchasePrice = assetDisposal.assetPurchasePrice ?? null;
-      updateData.assetCapitalClaimed = assetDisposal.assetCapitalClaimed ?? null;
-      updateData.assetTWDV = assetDisposal.assetTWDV ?? null;
-      updateData.assetBalancingCharge = assetDisposal.assetBalancingCharge ?? null;
-      updateData.assetBalancingAllowance =
+      updateData.assetdisposaltype = assetDisposal.assetDisposalType ?? "NONE";
+      updateData.assetpurchaseprice = assetDisposal.assetPurchasePrice ?? null;
+      updateData.assetcapitalclaimed = assetDisposal.assetCapitalClaimed ?? null;
+      updateData.assettwdv = assetDisposal.assetTWDV ?? null;
+      updateData.assetbalancingcharge =
+        assetDisposal.assetBalancingCharge ?? null;
+      updateData.assetbalancingallowance =
         assetDisposal.assetBalancingAllowance ?? null;
     }
 
-    // ✅ MTD METADATA FIELDS
+    // ✅ MTD METADATA FIELDS (lowercase to match schema)
     if (mtdMetadata) {
       if (mtdMetadata.source !== undefined)
         updateData.source = mtdMetadata.source;
 
       if (mtdMetadata.sourceId !== undefined)
-        updateData.sourceId = mtdMetadata.sourceId;
+        updateData.sourceid = mtdMetadata.sourceId;
 
       if (mtdMetadata.attachmentUrl !== undefined)
-        updateData.attachmentUrl = mtdMetadata.attachmentUrl;
+        updateData.attachmenturl = mtdMetadata.attachmentUrl;
 
       if (mtdMetadata.includedInVAT !== undefined)
-        updateData.includedInVAT = mtdMetadata.includedInVAT;
+        updateData.includedinvat = mtdMetadata.includedInVAT;
 
       if (mtdMetadata.includedInCIS !== undefined)
-        updateData.includedInCIS = mtdMetadata.includedInCIS;
+        updateData.includedincis = mtdMetadata.includedInCIS;
 
       if (mtdMetadata.includedInCT !== undefined)
-        updateData.includedInCT = mtdMetadata.includedInCT;
+        updateData.includedinct = mtdMetadata.includedInCT;
 
       if (mtdMetadata.includedInSA !== undefined)
-        updateData.includedInSA = mtdMetadata.includedInSA;
+        updateData.includedinsa = mtdMetadata.includedInSA;
     }
 
     // ✅ UPDATE OR INSERT
