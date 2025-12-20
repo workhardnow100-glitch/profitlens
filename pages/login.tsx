@@ -1,13 +1,13 @@
-// pages/login.js
+// pages/login.tsx
 import Head from "next/head";
 import { signIn } from "next-auth/react";
 import { useState } from "react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null); // ✅ FIXED
 
-  async function onSubmit(e) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
