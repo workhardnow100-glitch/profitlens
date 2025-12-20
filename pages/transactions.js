@@ -450,7 +450,7 @@ export default function Transactions() {
       return;
     }
 
-    setAssetModalTx({ ...tx, assetDisposalType: value });
+    setAssetModalTx({ ...tx, assetdisposaltype: value });
     setAssetModalOpen(true);
   }
 
