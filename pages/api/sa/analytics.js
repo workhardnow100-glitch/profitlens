@@ -1,5 +1,6 @@
 // pages/api/sa/analytics.js
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { CT_MAP } from "../../../lib/constants/ctMap";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -11,19 +12,32 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing required fields" });
 
   try {
+    // ✅ Load transactions using the REAL schema
     const { data: tx, error } = await supabaseAdmin
       .from("transactions")
-      .select("date, amount, category, hmrc_category_id")
+      .select("date, amount, business_category")
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
     if (error) throw error;
 
-    // ✅ Filter SA transactions
-    const saTx = tx.filter(
-      (t) => t.hmrc_category_id && t.category === "self_assessment"
-    );
+    // ✅ Build lowercase CT_MAP sets
+    const MAP = {
+      income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
+      allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
+      disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
+    };
+
+    // ✅ Filter SA‑relevant transactions using CT_MAP
+    const saTx = tx.filter((t) => {
+      const cat = (t.business_category || "").toLowerCase();
+      return (
+        MAP.income.has(cat) ||
+        MAP.allowable.has(cat) ||
+        MAP.disallowable.has(cat)
+      );
+    });
 
     // ✅ Build monthly buckets
     const buckets = {};
