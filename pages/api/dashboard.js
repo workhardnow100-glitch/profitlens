@@ -153,12 +153,13 @@ export default async function handler(req, res) {
 
         if (!categoryBreakdown[category]) categoryBreakdown[category] = 0;
 
+        // ✅ FIXED — return business_category, not category
         recent.push({
           id: tx.id,
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          category,
+          business_category: category,   // ✅ FIXED
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
