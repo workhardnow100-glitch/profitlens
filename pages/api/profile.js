@@ -1,4 +1,3 @@
-
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -121,6 +120,9 @@ export default async function handler(req, res) {
 
       if (clientError) throw clientError;
 
+      // ✅ Determine business type dynamically (recommended fix)
+      const businessType = client?.business_type || "sole_trader";
+
       // ✅ Totals by business type
       const totalsByType = {
         sole_trader: {},
@@ -145,14 +147,14 @@ export default async function handler(req, res) {
           categoryName = "Uncategorised";
         }
 
-        const businessType = "sole_trader"; // default
+        const bt = businessType; // ✅ use actual client type
 
-        if (!totalsByType[businessType]) totalsByType[businessType] = {};
-        if (!totalsByType[businessType][categoryName]) {
-          totalsByType[businessType][categoryName] = 0;
+        if (!totalsByType[bt]) totalsByType[bt] = {};
+        if (!totalsByType[bt][categoryName]) {
+          totalsByType[bt][categoryName] = 0;
         }
 
-        totalsByType[businessType][categoryName] += Number(tx.amount || 0);
+        totalsByType[bt][categoryName] += Number(tx.amount || 0);
 
         if (tx.amount > 0) {
           totalIncome += tx.amount;
