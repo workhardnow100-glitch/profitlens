@@ -51,7 +51,7 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
-// ✅ Lowercase sets for classification
+// ✅ Lowercase ignore set for system categories
 const MAP = {
   ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
 };
@@ -137,9 +137,13 @@ export default async function handler(req, res) {
 
       const amount = parseFloat(tx.amount || 0);
 
+      // ✅ FIXED: Only income transactions contribute to client dropdown
+      if (amount > 0) {
+        clientSet.add(clientLabel);
+      }
+
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      clientSet.add(clientLabel);
       categorySet.add(category);
 
       const addTo = (map, key) => {
@@ -247,7 +251,11 @@ export default async function handler(req, res) {
         yearly: allYearly,
       },
       transactions: returnedTxs,
+
+      // ✅ FIXED: Only income clients included
       clients: Array.from(clientSet).sort(),
+
+      // ✅ Unified categories
       categories: Array.from(categorySet).sort(),
     });
   } catch (err) {

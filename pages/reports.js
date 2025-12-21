@@ -72,9 +72,10 @@ export default function Reports() {
         const res = await fetch("/api/reports", { credentials: "include" });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to fetch reports");
+
         setReports(json.reports?.monthly || []);
         setCategories(json.categories || []);
-        setClients(json.clients || []);
+        setClients(json.clients || []); // ✅ income-only clients from API
         setError(null);
       } catch (err) {
         setError(err.message || "Failed to load reports");
@@ -111,12 +112,9 @@ export default function Reports() {
   }, [selectedClient, status]);
 
   // ✅ Use the same ignore set as backend (CT_MAP.ignore)
-  const ignoredCategories = useMemo(
-    () => new Set(CT_MAP.ignore),
-    []
-  );
+  const ignoredCategories = useMemo(() => new Set(CT_MAP.ignore), []);
 
-  // ✅ Available categories
+  // ✅ Available categories (validated + unified)
   const availableCategories = useMemo(() => {
     const set = new Set();
     (reports || []).forEach((r) =>
@@ -134,16 +132,19 @@ export default function Reports() {
     );
   }, [reports, selectedCategory]);
 
-  // ✅ Chart options
+  // ✅ Chart: Income vs Expenses vs Net
   const timeSeriesOptions = useMemo(() => {
     if (!filteredReports.length) return null;
+
     const labels = filteredReports.map((r) => r.label);
+
     const income = filteredReports.map((r) =>
       (r.categories || []).reduce(
         (sum, c) => sum + (Number(c.amount || 0) > 0 ? Number(c.amount) : 0),
         0
       )
     );
+
     const expenses = filteredReports.map((r) =>
       (r.categories || []).reduce(
         (sum, c) =>
@@ -152,7 +153,9 @@ export default function Reports() {
         0
       )
     );
+
     const net = income.map((inc, i) => inc - expenses[i]);
+
     return {
       chart: { type: "spline", height: 320 },
       title: { text: "Income vs Expenses vs Net Profit" },
@@ -168,16 +171,21 @@ export default function Reports() {
     };
   }, [filteredReports]);
 
+  // ✅ Chart: Stacked category breakdown
   const stackedCategoryOptions = useMemo(() => {
     if (!filteredReports.length) return null;
+
     const labels = filteredReports.map((r) => r.label);
     const categorySet = new Set();
+
     filteredReports.forEach((r) =>
       (r.categories || [])
         .filter((c) => !ignoredCategories.has(c.name))
         .forEach((c) => categorySet.add(c.name))
     );
+
     const catList = Array.from(categorySet);
+
     const series = catList.map((cat) => {
       const data = filteredReports.map((r) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
@@ -187,6 +195,7 @@ export default function Reports() {
       });
       return { name: cat, data };
     });
+
     return {
       chart: { type: "column", height: 320 },
       title: { text: "Expense categories over time" },
@@ -198,11 +207,15 @@ export default function Reports() {
     };
   }, [filteredReports, ignoredCategories]);
 
+  // ✅ Chart: Waterfall (profit composition)
   const waterfallOptions = useMemo(() => {
     if (!filteredReports.length) return null;
+
     const latest = filteredReports[0];
     if (!latest) return null;
+
     const income = Number(latest.revenue || 0);
+
     const expenseItems = (latest.categories || [])
       .filter((c) => !ignoredCategories.has(c.name))
       .map((c) => ({
@@ -210,16 +223,19 @@ export default function Reports() {
         y: -Number(c.amount || 0),
         color: "#ef4444",
       }));
+
     const totalExpenses = -expenseItems.reduce(
       (sum, c) => sum + Math.abs(c.y),
       0
     );
+
     const data = [
       { name: "Income", y: income, color: "#16a34a" },
       ...expenseItems,
       { name: "Total Expenses", y: totalExpenses, color: "#dc2626" },
       { name: "Net Profit", isSum: true, color: "#2563eb" },
     ];
+
     return {
       chart: { type: "waterfall", height: 320 },
       title: { text: "Profit Composition (Advanced)" },
@@ -228,8 +244,10 @@ export default function Reports() {
     };
   }, [filteredReports, ignoredCategories]);
 
+  // ✅ Chart: Sankey (money flow)
   const sankeyOptions = useMemo(() => {
     if (!transactions.length) return null;
+
     const links = transactions
       .filter((tx) => !ignoredCategories.has(tx.category))
       .map((tx) => ({
@@ -237,6 +255,7 @@ export default function Reports() {
         to: tx.category,
         weight: Math.abs(Number(tx.amount || 0)),
       }));
+
     return {
       chart: { height: 320 },
       title: { text: "Money Flow" },
@@ -245,10 +264,13 @@ export default function Reports() {
     };
   }, [transactions, ignoredCategories]);
 
+  // ✅ Chart: Sunburst (spending hierarchy)
   const sunburstOptions = useMemo(() => {
     if (!transactions.length) return null;
+
     const data = [];
     const catTotals = {};
+
     transactions
       .filter((tx) => !ignoredCategories.has(tx.category))
       .forEach((tx) => {
@@ -256,9 +278,11 @@ export default function Reports() {
         const amt = Math.abs(Number(tx.amount || 0));
         catTotals[cat] = (catTotals[cat] || 0) + amt;
       });
+
     Object.entries(catTotals).forEach(([cat, amt]) => {
       data.push({ id: cat, parent: "root", name: cat, value: amt });
     });
+
     return {
       chart: { height: 320 },
       title: { text: "Spending Hierarchy" },
@@ -272,18 +296,22 @@ export default function Reports() {
       credits: { enabled: false },
     };
   }, [transactions, ignoredCategories]);
-
+  // ✅ Chart: Heatmap (spending intensity)
   const heatmapOptions = useMemo(() => {
     if (!filteredReports.length) return null;
+
     const categories = filteredReports.map((r) => r.label);
     const catSet = new Set();
+
     filteredReports.forEach((r) =>
       (r.categories || [])
         .filter((c) => !ignoredCategories.has(c.name))
         .forEach((c) => catSet.add(c.name))
     );
+
     const catList = Array.from(catSet);
     const data = [];
+
     filteredReports.forEach((r, i) => {
       catList.forEach((cat, j) => {
         const entry = (r.categories || []).find((c) => c.name === cat);
@@ -296,6 +324,7 @@ export default function Reports() {
         ]);
       });
     });
+
     return {
       chart: { type: "heatmap", height: 320 },
       title: { text: "Spending Intensity" },
@@ -493,7 +522,6 @@ export default function Reports() {
         with HMRC. Nothing displayed here constitutes tax, accounting, or legal
         advice.
       </p>
-
     </ResponsiveLayout>
   );
 }
