@@ -361,7 +361,8 @@ export default function Dashboard() {
                       setRecent((prev) =>
                         prev.map((tx) =>
                           tx.id === r.id
-                            ? { ...tx, category: newCategory }
+                            ? { ...tx, business_category: newCategory }
+
                             : tx
                         )
                       );
