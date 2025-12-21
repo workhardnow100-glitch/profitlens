@@ -1,3 +1,4 @@
+// pages/transactions.js
 import React, { useEffect, useState, useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { useSession } from "next-auth/react";
@@ -10,16 +11,14 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
 import { CT_MAP } from "../lib/constants/ctMap";
-import { computeAssetDisposal } from "../lib/assetDisposal"; // ✅ moved to top where imports belong
+import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
+import { computeAssetDisposal } from "../lib/assetDisposal";
 
-const CT_CATEGORY_OPTIONS = Array.from(
-  new Set([
-    ...CT_MAP.income,
-    ...CT_MAP.allowable,
-    ...CT_MAP.disallowable,
-    ...CT_MAP.ignore,
-  ])
-).sort();
+const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
+  ssr: false,
+});
+
+const fetcher = (url) => fetch(url).then((res) => res.json());
 
 function safeDate(value) {
   if (!value) return null;
@@ -27,10 +26,17 @@ function safeDate(value) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-const HighchartsReact = dynamic(() => import("highcharts-react-official"), {
-  ssr: false,
-});
-const fetcher = (url) => fetch(url).then((res) => res.json());
+// ✅ Single unified category list for ALL dropdowns (matches Dashboard)
+const CT_CATEGORY_OPTIONS = Array.from(
+  new Set([
+    ...CT_MAP.income,
+    ...CT_MAP.allowable,
+    ...CT_MAP.disallowable,
+    ...CT_MAP.ignore,
+    ...SYSTEM_CATEGORIES,
+    "Uncategorised",
+  ])
+).sort();
 
 export default function Transactions() {
   const { data: session, status } = useSession();
@@ -46,6 +52,7 @@ export default function Transactions() {
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [assetModalTx, setAssetModalTx] = useState(null);
 
+  // 🔑 Access control (subscription)
   useEffect(() => {
     if (status === "loading") return;
     if (session?.user) {
@@ -61,6 +68,7 @@ export default function Transactions() {
     }
   }, [session, status, router]);
 
+  // 📈 Load Highcharts + modules
   useEffect(() => {
     let mounted = true;
     if (typeof window === "undefined") return;
@@ -91,6 +99,7 @@ export default function Transactions() {
 
   const { data, error } = useSWR("/api/transactions", fetcher);
 
+  // ✅ Local period filtering (API already has its own window; this is client view)
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
@@ -175,7 +184,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // ✅ Auto VAT logic unchanged
+  // ✅ Auto VAT logic (unchanged, but now reading business_category consistently)
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -222,7 +231,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // ✅ Aggregation logic unchanged
+  // ✅ Aggregation logic (income/expenses, category breakdown, top payers/merchants)
   const {
     totalIncome,
     totalExpenses,
@@ -239,6 +248,7 @@ export default function Transactions() {
       incomeByPayer = {},
       expenseByMerchant = {};
 
+    // ✅ Exclude system-only categories from CT/VAT world (matches API & Dashboard intent)
     const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
@@ -314,6 +324,7 @@ export default function Transactions() {
     };
   }, [filtered]);
 
+  // ✅ Highcharts pie + drilldown options
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     if (!filtered.length) return "NO_DATA";
@@ -373,7 +384,7 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
-  // ✅ Generic transaction upsert helper — now used for CT, category, disposal, etc.
+  // ✅ Generic transaction upsert helper — used for CT, category, disposal, etc.
   async function updateTransaction(id, payload) {
     await fetch("/api/transactions/upsert", {
       method: "POST",
@@ -387,7 +398,6 @@ export default function Transactions() {
   async function updateBusinessCategory(id, newCategory) {
     const key = (newCategory || "Uncategorised").toLowerCase();
 
-    // Build lowercase CT maps once per call
     const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
     const allowableSet = new Set(
       CT_MAP.allowable.map((c) => c.toLowerCase())
@@ -395,20 +405,20 @@ export default function Transactions() {
     const disallowableSet = new Set(
       CT_MAP.disallowable.map((c) => c.toLowerCase())
     );
+    const ignoreSet = new Set(CT_MAP.ignore.map((c) => c.toLowerCase()));
 
     let autoCT = false;
     if (incomeSet.has(key)) autoCT = true;
     else if (allowableSet.has(key)) autoCT = true;
     else if (disallowableSet.has(key)) autoCT = true;
-    else autoCT = false; // ignore + uncategorised → false
+    else if (ignoreSet.has(key)) autoCT = false;
+    else autoCT = false;
 
-    // ✅ We send auto_ct hint; backend respects manualctoverride.
     await updateTransaction(id, {
       business_category: newCategory,
       auto_ct: autoCT,
     });
 
-    // ✅ Refresh SWR cache so category + CT updates show without manual reload
     mutate("/api/transactions");
   }
 
@@ -427,7 +437,6 @@ export default function Transactions() {
       }),
     });
 
-    // ✅ Refresh SWR cache so VAT rate + VAT amount update instantly
     mutate("/api/transactions");
   }
 
@@ -442,13 +451,11 @@ export default function Transactions() {
       }),
     });
 
-    // ✅ Refresh SWR cache so CIS status updates instantly
     mutate("/api/transactions");
   }
 
   // ✅ Asset Disposal handler: open modal, clear fields when "No"
   function handleAssetDisposalChange(tx, value) {
-    // User selected "No"
     if (value === "" || value === "NONE") {
       updateTransaction(tx.id, {
         assetdisposaltype: null,
@@ -458,13 +465,11 @@ export default function Transactions() {
         assetbalancingcharge: null,
         assetbalancingallowance: null,
       }).then(() => {
-        // ✅ Refresh SWR cache so cleared disposal fields show immediately
         mutate("/api/transactions");
       });
       return;
     }
 
-    // User selected a pool → open modal with that pool type
     setAssetModalTx({
       ...tx,
       assetdisposaltype: value,
@@ -497,6 +502,33 @@ export default function Transactions() {
             </button>
           ))}
         </div>
+
+        {period === "custom" && (
+          <div className="mt-4 flex flex-wrap gap-3 items-center">
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">
+                From
+              </label>
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-sm"
+                value={customFrom}
+                onChange={(e) => setCustomFrom(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-500 mb-1">
+                To
+              </label>
+              <input
+                type="date"
+                className="border rounded px-2 py-1 text-sm"
+                value={customTo}
+                onChange={(e) => setCustomTo(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Chart */}
         <ResponsiveCard title="Transactions Master View">
@@ -657,7 +689,6 @@ export default function Transactions() {
                           updateBusinessCategory(tx.id, e.target.value)
                         }
                       >
-                        <option value="Uncategorised">Uncategorised</option>
                         {CT_CATEGORY_OPTIONS.map((cat) => (
                           <option key={cat} value={cat}>
                             {cat}
@@ -710,7 +741,7 @@ export default function Transactions() {
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
-                        value={tx.assetdisposaltype || "NONE"} // ✅ aligned with schema
+                        value={tx.assetdisposaltype || "NONE"}
                         onChange={(e) =>
                           handleAssetDisposalChange(tx, e.target.value)
                         }
@@ -731,9 +762,8 @@ export default function Transactions() {
                         onChange={(e) =>
                           updateTransaction(tx.id, {
                             includedinct: e.target.checked,
-                            manualctoverride: true, // ✅ locks user override
+                            manualctoverride: true,
                           }).then(() => {
-                            // ✅ Refresh SWR cache so CT flag updates instantly
                             mutate("/api/transactions");
                           })
                         }
@@ -759,13 +789,11 @@ export default function Transactions() {
           transaction={assetModalTx}
           onClose={() => setAssetModalOpen(false)}
           onSave={(payload) => {
-            // ✅ Disposal always CT + locks override
             updateTransaction(assetModalTx.id, {
               ...payload,
               includedinct: true,
               manualctoverride: true,
             }).then(() => {
-              // ✅ Refresh SWR cache so disposal fields + CT update instantly
               mutate("/api/transactions");
             });
             setAssetModalOpen(false);
@@ -781,10 +809,8 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
   const [purchasePrice, setPurchasePrice] = useState("");
   const [capitalClaimed, setCapitalClaimed] = useState("");
 
-  // ✅ Disposal proceeds from the transaction amount
   const disposalValue = Math.abs(Number(transaction.amount));
 
-  // ✅ Use the calculation engine
   const result =
     purchasePrice !== "" && capitalClaimed !== ""
       ? computeAssetDisposal({
@@ -801,13 +827,13 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
 
   const handleSave = () => {
     onSave({
-      assetdisposaltype: transaction.assetdisposaltype, // ✅ unchanged
-      assetpurchaseprice: purchasePrice === "" ? null : Number(purchasePrice), // ✅ FIXED
+      assetdisposaltype: transaction.assetdisposaltype,
+      assetpurchaseprice: purchasePrice === "" ? null : Number(purchasePrice),
       assetcapitalclaimed:
-        capitalClaimed === "" ? null : Number(capitalClaimed), // ✅ FIXED
-      assettwdv: twdv, // ✅ FIXED
-      assetbalancingcharge: balancingCharge, // ✅ FIXED
-      assetbalancingallowance: balancingAllowance, // ✅ FIXED
+        capitalClaimed === "" ? null : Number(capitalClaimed),
+      assettwdv: twdv,
+      assetbalancingcharge: balancingCharge,
+      assetbalancingallowance: balancingAllowance,
     });
   };
 
