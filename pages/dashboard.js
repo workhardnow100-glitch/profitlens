@@ -1,13 +1,6 @@
 // pages/dashboard.js
 import React, { useEffect, useState, useMemo } from "react";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
@@ -18,11 +11,27 @@ import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveChart from "../components/ResponsiveChart";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
 
-// ✅ NEW IMPORT
+// ✅ Accountant access
 import { AccountantAccessPanel } from "../components/AccountantAccessPanel";
 
-// ✅ ROUTE GUARD IMPORT
+// ✅ Route guard
 import { useRouteGuard } from "../hooks/useRouteGuard";
+
+// ✅ CT_MAP + system categories: single source of truth for ALL dropdowns
+import { CT_MAP } from "../lib/constants/ctMap";
+import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
+
+// ✅ Unified category options (CT_MAP + system + Uncategorised)
+const CT_CATEGORY_OPTIONS = Array.from(
+  new Set([
+    ...CT_MAP.income,
+    ...CT_MAP.allowable,
+    ...CT_MAP.disallowable,
+    ...CT_MAP.ignore,
+    ...SYSTEM_CATEGORIES,
+    "Uncategorised",
+  ])
+).sort();
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
@@ -45,7 +54,6 @@ export default function Dashboard() {
   const [recent, setRecent] = useState([]);
   const [signedUrls, setSignedUrls] = useState({});
   const [breakdown, setBreakdown] = useState({});
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -82,9 +90,10 @@ export default function Dashboard() {
         setSeries(
           data.series || { months: [], revenue: [], expenses: [] }
         );
+        // ✅ recent entries already carry `category` derived from business_category
         setRecent(data.recent || []);
+        // ✅ breakdown keys are business_category values — aligned with CT_MAP
         setBreakdown(data.breakdown || {});
-        setCategories(data.categories || []);
 
         const urls = {};
         for (const r of data.recent || []) {
@@ -361,7 +370,7 @@ export default function Dashboard() {
                   }}
                   className="border rounded px-2 py-1"
                 >
-                  {categories.map((cat) => (
+                  {CT_CATEGORY_OPTIONS.map((cat) => (
                     <option key={cat} value={cat}>
                       {cat}
                     </option>
