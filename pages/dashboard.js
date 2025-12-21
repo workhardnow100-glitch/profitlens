@@ -340,7 +340,8 @@ export default function Dashboard() {
               <td className="p-2 border">£{r.amount}</td>
               <td className="p-2 border">
                 <select
-                  value={r.category}
+                  value={r.business_category || "Uncategorised"}
+
                   onChange={async (e) => {
                     const newCategory = e.target.value;
                     try {
