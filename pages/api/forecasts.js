@@ -1,3 +1,4 @@
+// pages/api/forecasts.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -18,7 +19,7 @@ function formatMonthLabel(key) {
   }).format(new Date(Number(year), Number(month) - 1));
 }
 
-// ✅ Build unified allowed category list
+// ✅ Unified allowed categories
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -28,7 +29,7 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
-// ✅ Build lowercase sets for classification
+// ✅ Lowercase sets for classification
 const MAP = {
   income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
   allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
@@ -38,13 +39,13 @@ const MAP = {
 
 export default async function handler(req, res) {
   try {
-    // ✅ MATCH DASHBOARD — session guard
+    // ✅ Session guard
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // ✅ MATCH DASHBOARD — role + subscription guard
+    // ✅ Role + subscription guard
     const isFounder = session.user.role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
       session.user.subscriptionStatus
@@ -54,14 +55,28 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ✅ MATCH DASHBOARD — clientId guard
-    const clientId = session.user.clientId;
+    // ✅ Accountant‑aware client ID (matches Reports/Profile)
+    const clientId =
+      session.user.actingAsClientId || session.user.clientId;
+
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
+    // ✅ Optional: audit log for accountants
+    if (session.user.role === "accountant") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_FORECASTS",
+          details: "Viewed forecasts",
+        },
+      ]);
+    }
+
     // ✅ Fetch transactions
-    const { data: transactions, error } = await supabaseAdmin
+    const { data: transactions = [], error } = await supabaseAdmin
       .from("transactions")
       .select("date, amount, business_category, is_reversal")
       .eq("client_id", clientId);
@@ -86,7 +101,7 @@ export default async function handler(req, res) {
     const monthly = {};
     const categoriesTotals = {};
 
-    // ✅ Initialise category totals
+    // ✅ Initialise category totals for all allowed categories
     for (const cat of ALLOWED_CATEGORIES) {
       categoriesTotals[cat] = { revenue: 0, expenses: 0 };
     }
@@ -99,10 +114,13 @@ export default async function handler(req, res) {
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
 
+      // ✅ Unified category handling
       let category = tx.business_category?.trim() || "Uncategorised";
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
+
+      // ✅ Skip system/ignored categories entirely
       if (MAP.ignore.has(lower)) continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
@@ -111,8 +129,9 @@ export default async function handler(req, res) {
         monthly[key].revenue += amount;
         categoriesTotals[category].revenue += amount;
       } else if (amount < 0) {
-        monthly[key].expenses += -amount;
-        categoriesTotals[category].expenses += -amount;
+        const abs = Math.abs(amount);
+        monthly[key].expenses += abs;
+        categoriesTotals[category].expenses += abs;
       }
     }
 
@@ -122,6 +141,7 @@ export default async function handler(req, res) {
     const expenses = keys.map((k) => monthly[k].expenses);
     const net = revenue.map((r, i) => r - expenses[i]);
 
+    // ✅ Use recent months for projection (last 3, if available)
     const recentRevenue = revenue.slice(-3);
     const recentExpenses = expenses.slice(-3);
 
@@ -137,14 +157,15 @@ export default async function handler(req, res) {
 
     const avgNet = avgRevenue - avgExpenses;
 
-    const categories = Object.entries(categoriesTotals).map(
-      ([name, vals]) => ({
+    // ✅ Category‑level breakdown (ignoring system categories)
+    const categories = Object.entries(categoriesTotals)
+      .filter(([name]) => !MAP.ignore.has(name.toLowerCase()))
+      .map(([name, vals]) => ({
         name,
         revenue: `£${vals.revenue.toFixed(2)}`,
         expenses: `£${vals.expenses.toFixed(2)}`,
         net: `£${(vals.revenue - vals.expenses).toFixed(2)}`,
-      })
-    );
+      }));
 
     return res.status(200).json({
       forecast: [
