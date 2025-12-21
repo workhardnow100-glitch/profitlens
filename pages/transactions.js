@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
@@ -407,6 +407,9 @@ export default function Transactions() {
       business_category: newCategory,
       auto_ct: autoCT,
     });
+
+    // ✅ Refresh SWR cache so category + CT updates show without manual reload
+    mutate("/api/transactions");
   }
 
   async function updateVATForTx(tx, newRate) {
@@ -423,6 +426,9 @@ export default function Transactions() {
         vat_amount: vatAmount,
       }),
     });
+
+    // ✅ Refresh SWR cache so VAT rate + VAT amount update instantly
+    mutate("/api/transactions");
   }
 
   async function updateCISForTx(tx, newValue) {
@@ -435,6 +441,9 @@ export default function Transactions() {
         amount: tx.amount,
       }),
     });
+
+    // ✅ Refresh SWR cache so CIS status updates instantly
+    mutate("/api/transactions");
   }
 
   // ✅ Asset Disposal handler: open modal, clear fields when "No"
@@ -448,6 +457,9 @@ export default function Transactions() {
         assettwdv: null,
         assetbalancingcharge: null,
         assetbalancingallowance: null,
+      }).then(() => {
+        // ✅ Refresh SWR cache so cleared disposal fields show immediately
+        mutate("/api/transactions");
       });
       return;
     }
@@ -720,6 +732,9 @@ export default function Transactions() {
                           updateTransaction(tx.id, {
                             includedinct: e.target.checked,
                             manualctoverride: true, // ✅ locks user override
+                          }).then(() => {
+                            // ✅ Refresh SWR cache so CT flag updates instantly
+                            mutate("/api/transactions");
                           })
                         }
                       />
@@ -749,6 +764,9 @@ export default function Transactions() {
               ...payload,
               includedinct: true,
               manualctoverride: true,
+            }).then(() => {
+              // ✅ Refresh SWR cache so disposal fields + CT update instantly
+              mutate("/api/transactions");
             });
             setAssetModalOpen(false);
           }}
