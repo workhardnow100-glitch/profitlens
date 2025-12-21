@@ -1,3 +1,4 @@
+// pages/api/upload/bulk.js
 import formidable from "formidable";
 import fs from "fs";
 import path from "path";
@@ -47,7 +48,11 @@ function parseFileBuffer(filename, buffer) {
   const ext = path.extname(filename).toLowerCase();
   if (ext === ".csv") {
     const text = buffer.toString("utf8");
-    return parseCsv(text, { columns: true, skip_empty_lines: true, trim: true });
+    return parseCsv(text, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+    });
   }
   if (ext === ".xlsx") {
     const wb = XLSX.read(buffer, { type: "buffer" });
@@ -57,67 +62,27 @@ function parseFileBuffer(filename, buffer) {
   throw new Error(`Unsupported file type: ${ext}`);
 }
 
-// ✅ Descriptive category inference
-function inferCategory(type = "", description = "") {
-  const normalized = type?.trim().toUpperCase() || "";
-  const desc = description?.trim() || "";
-
-  const rules = [
-    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
-    { regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO\b/i, category: "Dining & Takeaway" },
-    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
-    { regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i, category: "Transport" },
-    { regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i, category: "Travel" },
-    { regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i, category: "Fuel" },
-    { regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i, category: "Mobile & Internet" },
-    { regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i, category: "Utilities" },
-    { regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i, category: "Subscriptions" },
-    { regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i, category: "Advertising" },
-    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Tax Payment" },
-    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Healthcare" },
-    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance Premium" },
-    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
-    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
-    { regex: /\bSAVETHECHANGE\b/i, category: "Savings Deposit" },
-    { regex: /\bRETURNED\s*DD\b/i, category: "Returned DD" },
-    { regex: /\bREFUND|REIMBURSEMENT\b/i, category: "Refund" },
-  ];
-
-  for (const rule of rules) {
-    if (rule.regex.test(desc)) return rule.category;
-  }
-
-  switch (normalized) {
-    case "FPO": return "Payment";
-    case "TFR": return "Transfer Between Accounts";
-    case "CHG": return "Bank Fees";
-    case "DEB": return "Debit";
-    case "DD": return "Direct Debit";
-    case "SO": return "Standing Order";
-    case "INT": return "Interest Income";
-    case "FPI": return "Transfer In";
-    case "BP": return "Savings";
-    case "DEP": return "Bank Charge Waived";
-    case "PAY": return "Charges";
-    case "FEE": return "Bank Account Fee";
-    case "CPT": return "Cash Withdrawal";
-    default: return "other";
-  }
-}
-
 function getValue(row, keys = []) {
   for (const k of keys) {
-    if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== "") {
+    if (
+      row[k] !== undefined &&
+      row[k] !== null &&
+      String(row[k]).trim() !== ""
+    ) {
       return row[k];
     }
   }
   return null;
 }
 
+// ✅ Detect reversal pairs
 function detectReversalPairs(rows) {
   const pairs = new Map();
   rows.forEach((row, i) => {
-    const desc = String(getValue(row, ["Transaction Description", "Description", "Details"]) || "").toUpperCase();
+    const desc = String(
+      getValue(row, ["Transaction Description", "Description", "Details"]) ||
+        ""
+    ).toUpperCase();
     const isReturned = /RETURNED\s*DD/.test(desc);
     const amount =
       toNumber(getValue(row, ["Credit Amount", "Credit", "Cr"])) ||
@@ -125,7 +90,13 @@ function detectReversalPairs(rows) {
     if (!isReturned || amount === null) return;
     const matchIndex = rows.findIndex((other, j) => {
       if (i === j) return false;
-      const otherDesc = String(getValue(other, ["Transaction Description", "Description", "Details"]) || "").toUpperCase();
+      const otherDesc = String(
+        getValue(other, [
+          "Transaction Description",
+          "Description",
+          "Details",
+        ]) || ""
+      ).toUpperCase();
       const otherAmount =
         toNumber(getValue(other, ["Debit Amount", "Debit", "Dr"])) ||
         toNumber(getValue(other, ["Credit Amount", "Credit", "Cr"]));
@@ -143,11 +114,122 @@ function detectReversalPairs(rows) {
   return pairs;
 }
 
-// ✅ FIXED normalizeRow — aligned with new schema
+// ✅ Infer descriptive category (raw only, for suggestions)
+function inferCategory(type = "", description = "") {
+  const normalized = type?.trim().toUpperCase() || "";
+  const desc = description?.trim() || "";
+
+  const rules = [
+    {
+      regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i,
+      category: "Groceries",
+    },
+    {
+      regex:
+        /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO\b/i,
+      category: "Dining & Takeaway",
+    },
+    { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
+    {
+      regex: /\bUBER|LYFT|TAXI|TRAINLINE|NATIONAL\s*RAIL|TFL\b/i,
+      category: "Transport",
+    },
+    {
+      regex: /\bRYANAIR|EASYJET|JET2|BRITISH\s*AIRWAYS\b/i,
+      category: "Travel",
+    },
+    {
+      regex: /\bBP|SHELL|ESSO|TEXACO|PETROL|FUEL\b/i,
+      category: "Fuel",
+    },
+    {
+      regex: /\bBT|VODAFONE|O2|EE|THREE|SKY|VIRGIN\s*MEDIA\b/i,
+      category: "Mobile & Internet",
+    },
+    {
+      regex:
+        /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i,
+      category: "Utilities",
+    },
+    {
+      regex:
+        /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i,
+      category: "Subscriptions",
+    },
+    {
+      regex:
+        /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i,
+      category: "Advertising",
+    },
+    {
+      regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i,
+      category: "Tax Payment",
+    },
+    {
+      regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i,
+      category: "Healthcare",
+    },
+    {
+      regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i,
+      category: "Insurance Premium",
+    },
+    {
+      regex:
+        /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i,
+      category: "Entertainment",
+    },
+    {
+      regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i,
+      category: "Fitness",
+    },
+    { regex: /\bSAVETHECHANGE\b/i, category: "Savings Deposit" },
+    { regex: /\bRETURNED\s*DD\b/i, category: "Returned DD" },
+    { regex: /\bREFUND|REIMBURSEMENT\b/i, category: "Refund" },
+  ];
+
+  for (const rule of rules) {
+    if (rule.regex.test(desc)) return rule.category;
+  }
+
+  switch (normalized) {
+    case "FPO":
+      return "Payment";
+    case "TFR":
+      return "Transfer Between Accounts";
+    case "CHG":
+      return "Bank Fees";
+    case "DEB":
+      return "Debit";
+    case "DD":
+      return "Direct Debit";
+    case "SO":
+      return "Standing Order";
+    case "INT":
+      return "Interest Income";
+    case "FPI":
+      return "Transfer In";
+    case "BP":
+      return "Savings";
+    case "DEP":
+      return "Bank Charge Waived";
+    case "PAY":
+      return "Charges";
+    case "FEE":
+      return "Bank Account Fee";
+    case "CPT":
+      return "Cash Withdrawal";
+    default:
+      return "Other";
+  }
+}
+
+// ✅ Normalise a row — unified, with raw_category, no business_category
 function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const debit = toNumber(getValue(row, ["Debit Amount", "Debit", "Dr"]));
   const credit = toNumber(getValue(row, ["Credit Amount", "Credit", "Cr"]));
-  const balance = toNumber(getValue(row, ["Balance", "Closing Balance", "Bal"]));
+  const balance = toNumber(
+    getValue(row, ["Balance", "Closing Balance", "Bal"])
+  );
 
   let amount = null;
   if (debit !== null && credit !== null) {
@@ -161,12 +243,22 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
   const rawDate = getValue(row, ["Transaction Date", "Date"]);
   const date = toISODate(rawDate);
 
-  const description = String(getValue(row, ["Transaction Description", "Description", "Details"]) || "").trim();
-  const type = String(getValue(row, ["Transaction Type", "Type", "Code"]) || "").trim().toUpperCase();
-  const account_number = String(getValue(row, ["Account Number", "Account"]) || "").trim();
-  const sort_code = String(getValue(row, ["Sort Code", "SortCode"]) || "").trim();
+  const description = String(
+    getValue(row, ["Transaction Description", "Description", "Details"]) || ""
+  ).trim();
+  const type = String(
+    getValue(row, ["Transaction Type", "Type", "Code"]) || ""
+  )
+    .trim()
+    .toUpperCase();
+  const account_number = String(
+    getValue(row, ["Account Number", "Account"]) || ""
+  ).trim();
+  const sort_code = String(
+    getValue(row, ["Sort Code", "SortCode"]) || ""
+  ).trim();
 
-  const descriptiveCategory = inferCategory(type, description);
+  const raw_category = inferCategory(type, description);
 
   const reversal_group_id = reversalPairs?.get(i) || null;
   const is_reversal = !!reversal_group_id;
@@ -179,8 +271,11 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     credit_amount: credit ?? null,
     balance: balance ?? null,
 
-    // ✅ NEW: single category field
-    business_category: descriptiveCategory,
+    // ✅ Unified engine: business_category always null at ingestion
+    business_category: null,
+
+    // ✅ Suggestion engine: raw category preserved
+    raw_category,
 
     type: type || null,
     account_number: account_number || null,
@@ -194,17 +289,6 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     user_id: userId,
     created_at: nowIso,
   };
-}
-
-// ✅ FIXED category breakdown
-function groupByCategory(rows) {
-  const map = {};
-  for (const r of rows) {
-    const cat = r.business_category || "other";
-    const amt = r.amount ?? 0;
-    map[cat] = (map[cat] || 0) + amt;
-  }
-  return map;
 }
 
 function quarterFromDateStr(dateStr) {
@@ -230,9 +314,14 @@ export default async function handler(req, res) {
       const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
       if (!email) return res.status(400).json({ error: "Missing email" });
 
+      const rawClientId = Array.isArray(fields.clientId)
+        ? fields.clientId[0]
+        : fields.clientId || null;
+
+      // ✅ Fetch user with role + default client
       const { data: user, error: userErr } = await supabaseAdmin
         .from("app_users")
-        .select("id, default_client_id")
+        .select("id, default_client_id, role")
         .eq("email", email)
         .single();
 
@@ -240,10 +329,36 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      const clientId = user.default_client_id;
       const userId = user.id;
+      const role = user.role || "user";
 
-      const uploaded = Array.isArray(files.files) ? files.files : [files.files].filter(Boolean);
+      let clientId = user.default_client_id;
+
+      // ✅ Accountant-aware: validate clientId against user_clients
+      if (role === "accountant" && rawClientId) {
+        const { data: links, error: linkErr } = await supabaseAdmin
+          .from("user_clients")
+          .select("client_id")
+          .eq("user_id", userId)
+          .eq("client_id", rawClientId);
+
+        if (linkErr) {
+          console.warn(
+            "user_clients lookup failed (non-fatal):",
+            linkErr.message
+          );
+        } else if (links && links.length > 0) {
+          clientId = rawClientId;
+        }
+      }
+
+      if (!clientId) {
+        return res.status(400).json({ error: "No client associated with user" });
+      }
+
+      const uploaded = Array.isArray(files.files)
+        ? files.files
+        : [files.files].filter(Boolean);
       if (!uploaded.length) {
         return res.status(400).json({ error: "No files uploaded" });
       }
@@ -254,7 +369,8 @@ export default async function handler(req, res) {
       for (const file of uploaded) {
         try {
           const buffer = fs.readFileSync(file.filepath);
-          const originalName = file.originalFilename || file.newFilename || "upload";
+          const originalName =
+            file.originalFilename || file.newFilename || "upload";
           const contentType = file.mimetype || "application/octet-stream";
           const objectName = `${uuid()}-${originalName}`;
           const storagePath = `statements/${clientId}/${objectName}`;
@@ -263,26 +379,36 @@ export default async function handler(req, res) {
             .from("statements")
             .upload(storagePath, buffer, { contentType, upsert: false });
 
-          if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
+          if (uploadErr) {
+            throw new Error(`Storage upload failed: ${uploadErr.message}`);
+          }
 
           const rows = parseFileBuffer(originalName, buffer);
           const reversalPairs = detectReversalPairs(rows);
           const nowIso = new Date().toISOString();
 
           const normalized = rows
-            .map((r, i) => normalizeRow(r, i, clientId, userId, nowIso, reversalPairs))
+            .map((r, i) =>
+              normalizeRow(r, i, clientId, userId, nowIso, reversalPairs)
+            )
             .filter(Boolean);
 
           if (!normalized.length) {
-            failures.push({ file: originalName, error: "No valid transactions" });
+            failures.push({
+              file: originalName,
+              error: "No valid transactions",
+            });
             continue;
           }
 
-          const totalAmount = normalized.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+          const totalAmount = normalized.reduce(
+            (sum, r) => sum + (r.amount ?? 0),
+            0
+          );
           const accountNumber = normalized[0].account_number;
           const sortCode = normalized[0].sort_code;
 
-          // ✅ Insert statement (TEXT id + UUID id_uuid)
+          // ✅ Insert statement
           const { data: statement, error: stmtErr } = await supabaseAdmin
             .from("statements")
             .insert({
@@ -297,16 +423,22 @@ export default async function handler(req, res) {
             .select("*")
             .single();
 
-          if (stmtErr) throw new Error(`Statement insert failed: ${stmtErr.message}`);
+          if (stmtErr) {
+            throw new Error(`Statement insert failed: ${stmtErr.message}`);
+          }
 
-          // ✅ FIXED: use statement_id_uuid
+          // ✅ Use statement_id_uuid for transactions
           const txPayload = normalized.map((r) => ({
             ...r,
             statement_id_uuid: statement.id_uuid,
           }));
 
-          const { error: txErr } = await supabaseAdmin.from("transactions").insert(txPayload);
-          if (txErr) throw new Error(`Transaction insert failed: ${txErr.message}`);
+          const { error: txErr } = await supabaseAdmin
+            .from("transactions")
+            .insert(txPayload);
+          if (txErr) {
+            throw new Error(`Transaction insert failed: ${txErr.message}`);
+          }
 
           const revenue = txPayload
             .filter((r) => r.amount > 0 && !r.is_reversal)
@@ -318,10 +450,14 @@ export default async function handler(req, res) {
 
           const netProfit = revenue + expenses;
 
-          const sortedDates = txPayload.map((r) => r.date).filter(Boolean).sort();
+          const sortedDates = txPayload
+            .map((r) => r.date)
+            .filter(Boolean)
+            .sort();
           const periodStart = sortedDates[0] || null;
           const periodEnd = sortedDates[sortedDates.length - 1] || null;
 
+          // ✅ Insert into reports (no category breakdown — unified engine handles categories later)
           await supabaseAdmin.from("reports").insert({
             client_id: clientId,
             user_id: userId,
@@ -333,7 +469,7 @@ export default async function handler(req, res) {
               revenue,
               expenses,
               net_profit: netProfit,
-              category_breakdown: groupByCategory(txPayload),
+              category_breakdown: {}, // unified APIs compute categories
               file_path: storagePath,
               account_number: accountNumber,
               sort_code: sortCode,
@@ -342,9 +478,11 @@ export default async function handler(req, res) {
             created_at: nowIso,
           });
 
-          const nextQuarter = quarterFromDateStr(periodEnd || toISODate(new Date()));
+          // ✅ Forecast stub (unchanged behaviour)
+          const nextQuarter = quarterFromDateStr(
+            periodEnd || toISODate(new Date())
+          );
 
-          // ✅ Optional: migrate to UUID version later
           await supabaseAdmin.from("forecasts").insert({
             client_id: clientId,
             user_id: userId,
@@ -353,33 +491,44 @@ export default async function handler(req, res) {
             expenses: expenses * 1.05,
             net_profit: netProfit * 1.1,
             method: "heuristic",
-            source_statement_id: statement.id, // still allowed
+            source_statement_id: statement.id,
             created_at: nowIso,
           });
 
+          // ✅ Dashboard metrics RPC (non‑fatal)
           try {
-            const { error: rpcErr } = await supabaseAdmin.rpc("update_dashboard_metrics", {
-              client_id: clientId,
-            });
+            const { error: rpcErr } = await supabaseAdmin.rpc(
+              "update_dashboard_metrics",
+              { client_id: clientId }
+            );
             if (rpcErr) {
               console.warn("Dashboard RPC failed (non-fatal):", rpcErr.message);
             }
           } catch (e) {
-            console.warn("Dashboard RPC invoke error (non-fatal):", e?.message || e);
+            console.warn(
+              "Dashboard RPC invoke error (non-fatal):",
+              e?.message || e
+            );
           }
 
+          // ✅ Mark statement as complete
           await supabaseAdmin
             .from("statements")
             .update({ status: txPayload.length ? "complete" : "empty" })
             .eq("id", statement.id);
 
-          await supabaseAdmin.from("audit").insert([{
-            client_id: clientId,
-            user_id: userId,
-            action: "UPLOAD_STATEMENT",
-            details: `File: ${originalName}, Transactions: ${txPayload.length}, Revenue: ${revenue}, Expenses: ${expenses}, Net: ${netProfit}`,
-          }]);
+          // ✅ Audit log
+          await supabaseAdmin.from("audit").insert([
+            {
+              client_id: clientId,
+              user_id: userId,
+              action: "UPLOAD_STATEMENT",
+              details: `File: ${originalName}, Transactions: ${txPayload.length}, Revenue: ${revenue}, Expenses: ${expenses}, Net: ${netProfit}`,
+              created_at: nowIso,
+            },
+          ]);
 
+          // ✅ Push result for this file
           results.push({
             file: originalName,
             storage_path: storagePath,
@@ -395,10 +544,14 @@ export default async function handler(req, res) {
           });
         } catch (fileErr) {
           console.error("❌ File ingestion failed:", fileErr.message);
-          failures.push({ file: file.originalFilename, error: fileErr.message });
+          failures.push({
+            file: file.originalFilename,
+            error: fileErr.message,
+          });
         }
       }
 
+      // ✅ Final response
       return res.status(200).json({
         message: "Upload and ingestion complete",
         results,
