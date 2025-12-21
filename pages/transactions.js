@@ -415,9 +415,10 @@ export default function Transactions() {
     else autoCT = false;
 
     await updateTransaction(id, {
-      business_category: newCategory,
-      auto_ct: autoCT,
-    });
+  category: newCategory,
+  auto_ct: autoCT,
+});
+
 
     mutate("/api/transactions");
   }
