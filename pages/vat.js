@@ -16,20 +16,45 @@ export default function VATPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  // ✅ VAT Stagger state
   const [vatStagger, setVatStagger] = useState(null);
 
-  // ✅ VAT adjustment draft state
   const [newAdj, setNewAdj] = useState({ box: 1, amount: "", reason: "" });
 
+  const [submissionId, setSubmissionId] = useState(null);
+  const [mtdSubmitting, setMtdSubmitting] = useState(false);
+  const [mtdValidating, setMtdValidating] = useState(false);
+
+  // Tax Hub overview (for compare + reconciliation)
+  const [vatOverview, setVatOverview] = useState(null);
+
+  // ---------------------------------------------------------
+  // AUTH
+  // ---------------------------------------------------------
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
   }, [session, status, router]);
 
-  // ✅ Load VAT stagger from Tax Hub API
+  // ---------------------------------------------------------
+  // AUTO‑LOAD PERIOD IF COMING FROM TAX HUB
+  // ---------------------------------------------------------
   useEffect(() => {
-    async function loadStagger() {
+    if (!router.isReady) return;
+    const qFrom = router.query.from;
+    const qTo = router.query.to;
+
+    if (qFrom && qTo) {
+      setFrom(qFrom);
+      setTo(qTo);
+      fetchVAT(qFrom, qTo);
+    }
+  }, [router.isReady, router.query]);
+
+  // ---------------------------------------------------------
+  // LOAD VAT STAGGER + VAT OVERVIEW (Tax Hub periods)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    async function loadStaggerAndOverview() {
       if (!session?.user) return;
 
       try {
@@ -41,15 +66,18 @@ export default function VATPage() {
 
         const data = await res.json();
         if (data.vatStagger) setVatStagger(data.vatStagger);
+        setVatOverview(data);
       } catch (err) {
-        console.error("Error loading VAT stagger:", err);
+        console.error("Error loading VAT overview:", err);
       }
     }
 
-    loadStagger();
+    loadStaggerAndOverview();
   }, [session]);
 
-  // ✅ Fetch VAT summary (uses new HMRC-shaped API)
+  // ---------------------------------------------------------
+  // FETCH VAT SUMMARY
+  // ---------------------------------------------------------
   async function fetchVAT(customFrom, customTo) {
     const start = customFrom || from;
     const end = customTo || to;
@@ -72,12 +100,10 @@ export default function VATPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to fetch VAT summary");
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to fetch VAT summary");
 
-      // ✅ Keep API's locked/submitted/status as source of truth
       setResult(data);
+      setSubmissionId(null);
     } catch (err) {
       console.error(err);
       alert("Error fetching VAT summary: " + err.message);
@@ -86,17 +112,22 @@ export default function VATPage() {
     }
   }
 
-  // 🚧 Submit VAT to HMRC (placeholder until HMRC APIs wired)
-  async function submitVAT() {
+  // ---------------------------------------------------------
+  // VALIDATE VAT (MTD)
+  // ---------------------------------------------------------
+  async function validateMTD() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
       return;
     }
-    if (!confirm("Submit this VAT period? This will lock the period.")) return;
+    if (!result) {
+      alert("Load the VAT summary first.");
+      return;
+    }
 
-    setLoading(true);
+    setMtdValidating(true);
     try {
-      const res = await fetch("/api/vat/submit", {
+      const res = await fetch("/api/mtd/vat/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -107,32 +138,73 @@ export default function VATPage() {
       });
 
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to validate VAT return");
 
-      if (data.success) {
-        alert("VAT submitted successfully. Period locked.");
-        setResult((prev) =>
-          prev
-            ? {
-                ...prev,
-                locked: true,
-                submitted: true,
-                status: "filed",
-                hmrcSubmission: data.hmrcResponse || prev.hmrcSubmission,
-              }
-            : prev
-        );
-      } else {
-        alert("Error submitting VAT: " + (data.error || "Unknown error"));
-      }
+      if (!data.submissionId) throw new Error("No submissionId returned");
+
+      setSubmissionId(data.submissionId);
+
+      if (data.summary) setResult(data.summary);
+
+      alert("VAT return validated for MTD. You can now submit to HMRC.");
+    } catch (err) {
+      console.error(err);
+      alert("Error validating VAT return: " + err.message);
+    } finally {
+      setMtdValidating(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // SUBMIT VAT (MTD)
+  // ---------------------------------------------------------
+  async function submitVAT() {
+    if (!submissionId) {
+      alert("Please validate the VAT return for MTD first.");
+      return;
+    }
+    if (!confirm("Submit this VAT period to HMRC? This will lock the period.")) {
+      return;
+    }
+
+    setMtdSubmitting(true);
+    try {
+      const res = await fetch("/api/mtd/vat/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success)
+        throw new Error(data.error || "HMRC submission failed");
+
+      alert("VAT submitted to HMRC successfully. Period locked.");
+
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              locked: true,
+              submitted: true,
+              status: "submitted",
+              hmrcReference: data.hmrcReference,
+              processingDate: data.processingDate,
+              hmrcSubmission: data.hmrcResponse,
+            }
+          : prev
+      );
     } catch (err) {
       console.error(err);
       alert("Submission failed: " + err.message);
     } finally {
-      setLoading(false);
+      setMtdSubmitting(false);
     }
   }
 
-  // ✅ Add VAT adjustment
+  // ---------------------------------------------------------
+  // ADD ADJUSTMENT
+  // ---------------------------------------------------------
   async function addAdjustment() {
     if (!result) return;
     if (!newAdj.amount) {
@@ -157,16 +229,93 @@ export default function VATPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to add adjustment");
 
-      // ✅ Re-fetch VAT summary to update boxes + adjustment list
       await fetchVAT(from, to);
-
-
-      // Reset form
       setNewAdj({ box: 1, amount: "", reason: "" });
     } catch (err) {
       console.error(err);
       alert("Error adding adjustment: " + err.message);
     }
+  }
+
+  // ---------------------------------------------------------
+  // DOWNLOAD HMRC RECEIPT (PDF)
+  // ---------------------------------------------------------
+  async function downloadReceipt() {
+    if (!result?.submitted) {
+      alert("HMRC receipt is only available after submission.");
+      return;
+    }
+    if (!from || !to) {
+      alert("Missing VAT period dates.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/mtd/vat/receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: session.user.clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to generate HMRC receipt");
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `VAT-Receipt-${from}-to-${to}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("Error downloading HMRC receipt: " + err.message);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // CURRENT + PREVIOUS PERIOD (from Tax Hub overview)
+  // ---------------------------------------------------------
+  let currentVatPeriod = null;
+  let previousVatPeriod = null;
+  let periodPayments = [];
+  let periodPaymentsTotal = 0;
+
+  if (vatOverview?.vat && from && to) {
+    const vatPeriods = vatOverview.vat;
+    const idx = vatPeriods.findIndex(
+      (p) => p.periodStart === from && p.periodEnd === to
+    );
+    if (idx !== -1) {
+      currentVatPeriod = vatPeriods[idx];
+      if (idx + 1 < vatPeriods.length) {
+        previousVatPeriod = vatPeriods[idx + 1];
+      }
+    }
+  }
+
+  // Reconcile payments for this VAT period
+  if (vatOverview?.vatPayments && from && to) {
+    const startDate = new Date(from);
+    const endDate = new Date(to);
+    periodPayments = vatOverview.vatPayments.filter((p) => {
+      if (!p.payment_date) return false;
+      const d = new Date(p.payment_date);
+      return d >= startDate && d <= endDate;
+    });
+
+    periodPaymentsTotal = periodPayments.reduce((sum, p) => {
+      const amount = Number(p.amount || 0);
+      return sum + (p.direction === "payment" ? amount : -amount);
+    }, 0);
   }
 
   if (!session?.user) return null;
@@ -176,10 +325,21 @@ export default function VATPage() {
     ? `${result.status || "draft"}${result.submitted ? " (submitted)" : ""}`
     : "";
 
+  // ---------------------------------------------------------
+  // RENDER
+  // ---------------------------------------------------------
   return (
     <ResponsiveLayout currentPageName="VAT Return">
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">VAT Return (Making Tax Digital)</h1>
+
+        {/* Back to Tax Hub */}
+        <button
+          onClick={() => router.push("/tax-hub")}
+          className="bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm"
+        >
+          ← Back to Tax Hub
+        </button>
 
         {/* Controls */}
         <ResponsiveCard title="Select VAT Period">
@@ -198,7 +358,8 @@ export default function VATPage() {
               className="border p-2 rounded"
               disabled={locked}
             />
-            <div className="flex gap-2">
+
+            <div className="flex flex-col sm:flex-row gap-2">
               <button
                 onClick={() => fetchVAT()}
                 className="bg-blue-600 text-white rounded px-4 py-2"
@@ -206,14 +367,30 @@ export default function VATPage() {
               >
                 {loading ? "Loading…" : "Get VAT Summary"}
               </button>
+
               {result && !locked && (
-                <button
-                  onClick={submitVAT}
-                  className="bg-green-600 text-white px-4 py-2 rounded"
-                  disabled={loading}
-                >
-                  {loading ? "Submitting…" : "Submit to HMRC"}
-                </button>
+                <>
+                  <button
+                    onClick={validateMTD}
+                    className="bg-yellow-500 text-white px-4 py-2 rounded"
+                    disabled={mtdValidating || mtdSubmitting}
+                  >
+                    {mtdValidating ? "Validating…" : "Validate VAT (MTD)"}
+                  </button>
+
+                  <button
+                    onClick={submitVAT}
+                    className="bg-green-600 text-white px-4 py-2 rounded"
+                    disabled={mtdSubmitting || !submissionId}
+                    title={
+                      submissionId
+                        ? ""
+                        : "Validate the VAT return for MTD before submitting"
+                    }
+                  >
+                    {mtdSubmitting ? "Submitting…" : "Submit to HMRC (MTD)"}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -221,21 +398,51 @@ export default function VATPage() {
           {result && (
             <p className="mt-2 text-sm text-gray-600">
               Period: {result.period} • Status: {statusLabel}
+              {submissionId && !locked && (
+                <> • MTD: validated (submission id: {submissionId})</>
+              )}
             </p>
           )}
         </ResponsiveCard>
 
-        {/* ✅ VAT STAGGER BADGE */}
+        {/* VAT STAGGER BADGE */}
         {vatStagger && (
           <div className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm font-medium">
             VAT Stagger: {vatStagger}
           </div>
         )}
 
-        {/* Results */}
+        {/* RESULTS */}
         {result && (
           <>
-            {/* Draft VAT Return Snapshot (print-style summary) */}
+            {/* HMRC Submission Details */}
+            {(result.hmrcReference || result.processingDate || result.submitted) && (
+              <ResponsiveCard title="HMRC Submission Details">
+                <div className="space-y-2 text-sm">
+                  <p>
+                    <strong>HMRC Reference:</strong>{" "}
+                    {result.hmrcReference || "N/A"}
+                  </p>
+                  <p>
+                    <strong>Processing Date:</strong>{" "}
+                    {result.processingDate || "N/A"}
+                  </p>
+                  <p>
+                    <strong>Status:</strong>{" "}
+                    {result.submitted ? "Submitted (MTD)" : "Not Submitted"}
+                  </p>
+                  <button
+                    onClick={downloadReceipt}
+                    className="bg-blue-600 text-white px-4 py-2 rounded mt-2"
+                    disabled={!result.submitted}
+                  >
+                    Download HMRC Receipt (PDF)
+                  </button>
+                </div>
+              </ResponsiveCard>
+            )}
+
+            {/* Draft VAT Return Snapshot */}
             <ResponsiveCard
               title={`Draft VAT Return Summary ${locked ? "(Locked)" : ""}`}
             >
@@ -283,6 +490,52 @@ export default function VATPage() {
               </div>
             </ResponsiveCard>
 
+            {/* Compare With Previous Period */}
+            <ResponsiveCard title="Compare With Previous Period">
+              {currentVatPeriod ? (
+                <div className="text-sm space-y-2">
+                  <p className="font-semibold">
+                    Current period: {currentVatPeriod.periodLabel}
+                  </p>
+                  <p>
+                    Net VAT (current): £
+                    {Number(
+                      currentVatPeriod.netVat ??
+                        result.boxes?.box5 ??
+                        0
+                    ).toFixed(2)}
+                  </p>
+
+                  {previousVatPeriod ? (
+                    <>
+                      <p className="font-semibold mt-2">
+                        Previous period: {previousVatPeriod.periodLabel}
+                      </p>
+                      <p>
+                        Net VAT (previous): £
+                        {Number(previousVatPeriod.netVat || 0).toFixed(2)}
+                      </p>
+                      <p className="mt-2">
+                        Change: £
+                        {Number(
+                          (currentVatPeriod.netVat || 0) -
+                            (previousVatPeriod.netVat || 0)
+                        ).toFixed(2)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-gray-600">
+                      No previous VAT period found in Tax Hub.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  This period is not yet visible in Tax Hub VAT periods.
+                </p>
+              )}
+            </ResponsiveCard>
+
             {/* Raw VAT Boxes Table (for detailed review) */}
             <ResponsiveCard
               title={`VAT Boxes Detail ${locked ? "(Locked)" : ""}`}
@@ -307,7 +560,7 @@ export default function VATPage() {
               </table>
             </ResponsiveCard>
 
-            {/* ✅ VAT Adjustments (Collapsible Master Panel) */}
+            {/* VAT Adjustments */}
             <ResponsiveCard title="VAT Adjustments">
               <details className="group">
                 <summary className="cursor-pointer text-lg font-semibold text-blue-700 group-open:text-blue-900">
@@ -405,7 +658,50 @@ export default function VATPage() {
               />
             </ResponsiveCard>
 
-            {/* HMRC Submission Info (future real integration) */}
+            {/* VAT Payments & Reconciliation */}
+            <ResponsiveCard title="VAT Payments & Reconciliation">
+              {currentVatPeriod ? (
+                <div className="space-y-3 text-sm">
+                  <p>
+                    <strong>Net VAT due for this period:</strong>{" "}
+                    £{Number(currentVatPeriod.netVat || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <strong>Total VAT payments in this period:</strong>{" "}
+                    £{Number(periodPaymentsTotal || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <strong>Difference:</strong>{" "}
+                    £{Number(
+                      (currentVatPeriod.netVat || 0) - (periodPaymentsTotal || 0)
+                    ).toFixed(2)}
+                  </p>
+
+                  {periodPayments.length > 0 ? (
+                    <ResponsiveTable
+                      columns={[
+                        { header: "Date", accessor: "payment_date" },
+                        { header: "Direction", accessor: "direction" },
+                        { header: "Amount (£)", accessor: "amount" },
+                        { header: "Reference", accessor: "reference" },
+                      ]}
+                      data={periodPayments}
+                    />
+                  ) : (
+                    <p className="text-gray-600">
+                      No VAT payments recorded for this period.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  This period is not yet visible in Tax Hub VAT periods, so
+                  reconciliation is not available.
+                </p>
+              )}
+            </ResponsiveCard>
+
+            {/* HMRC Submission Info (raw JSON) */}
             {result.hmrcSubmission && (
               <ResponsiveCard title="HMRC Submission">
                 <div className="space-y-2">
@@ -422,18 +718,17 @@ export default function VATPage() {
                   </pre>
                 </div>
               </ResponsiveCard>
-             )}
+            )}
           </>
         )}
       </div>
 
-      {/* ✅ Filing Disclaimer (Strong Version for HMRC Submission Pages) */}
+      {/* Filing Disclaimer */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
         ProfitLens does not provide tax advice. All calculations are estimates
         only. Users are solely responsible for verifying all figures and
         ensuring accuracy before submitting any tax filings to HMRC.
       </p>
-
     </ResponsiveLayout>
   );
 }

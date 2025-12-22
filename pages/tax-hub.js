@@ -1,3 +1,4 @@
+// pages/tax-hub.js
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -41,6 +42,10 @@ export default function TaxHub() {
   const [vatStagger, setVatStagger] = useState(1);
   const [showOlderVatPeriods, setShowOlderVatPeriods] = useState(false);
   const [showOlderCisPeriods, setShowOlderCisPeriods] = useState(false);
+
+  // ✅ MTD VAT per-period state: submissionId + loading flags
+  // key = `${periodStart}_${periodEnd}`
+  const [mtdVatState, setMtdVatState] = useState({});
 
   useEffect(() => {
     if (status === "loading") return;
@@ -95,6 +100,8 @@ export default function TaxHub() {
       });
 
       if (data.vatStagger) setVatStagger(data.vatStagger);
+      // Reset MTD VAT state whenever periods are refreshed to avoid stale submissionIds
+      setMtdVatState({});
     } catch (err) {
       console.error("Tax Hub periods error:", err);
       alert("Error fetching tax periods: " + err.message);
@@ -168,6 +175,19 @@ export default function TaxHub() {
     (p) => p.status === "Overdue"
   ).length;
 
+  // Helpers for MTD VAT state
+  const getVatKey = (p) => `${p.periodStart}_${p.periodEnd}`;
+
+  const updateMtdVatState = (key, patch) => {
+    setMtdVatState((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] || {}),
+        ...patch,
+      },
+    }));
+  };
+
   return (
     <ResponsiveLayout currentPageName="Tax Hub">
       <div className="p-6 space-y-6">
@@ -180,10 +200,12 @@ export default function TaxHub() {
               periods.
             </p>
             <a
-              href="/api/hmrc/auth"
+              href={`/api/hmrc/oauth/start?clientId=${encodeURIComponent(
+                session.user.clientId
+              )}`}
               className="bg-orange-600 text-white px-4 py-2 rounded"
             >
-              Authorize HMRC
+              Connect to HMRC
             </a>
           </div>
         )}
@@ -285,8 +307,8 @@ export default function TaxHub() {
                           period.
                         </p>
                         <p>
-                          3. When you are happy, click “Submit” to send it to
-                          HMRC.
+                          3. When you are happy, click “Validate VAT (MTD)” and
+                          then “Submit to HMRC (MTD)”.
                         </p>
                         <p>4. Repeat for the next oldest overdue period.</p>
                         <p className="mt-1 text-xs text-gray-600">
@@ -607,10 +629,23 @@ export default function TaxHub() {
                                   new Date(other.periodEnd) <
                                     new Date(p.periodEnd) && !other.submitted
                               );
-                              const canSubmit =
+
+                              const canSubmitBase =
                                 !p.locked &&
                                 p.hmrcAuthorized &&
                                 !hasUnsubmittedOlder;
+
+                              const periodKey = getVatKey(p);
+                              const mtd = mtdVatState[periodKey] || {};
+                              const isValidating = !!mtd.validating;
+                              const isSubmitting = !!mtd.submitting;
+                              const hasSubmissionId = !!mtd.submissionId;
+
+                              const canValidate = canSubmitBase && !isValidating && !isSubmitting;
+                              const canSubmit =
+                                canSubmitBase &&
+                                hasSubmissionId &&
+                                !isSubmitting;
 
                               return (
                                 <li
@@ -644,6 +679,22 @@ export default function TaxHub() {
                                       >
                                         {p.status}
                                       </span>
+                                      {hasSubmissionId && !p.locked && (
+                                        <>
+                                          {" • "}
+                                          <span className="text-blue-700 font-semibold">
+                                            MTD validated
+                                          </span>
+                                        </>
+                                      )}
+                                      {p.locked && (
+                                        <>
+                                          {" • "}
+                                          <span className="text-green-700 font-semibold">
+                                            Locked
+                                          </span>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
 
@@ -658,25 +709,31 @@ export default function TaxHub() {
                                     >
                                       View
                                     </button>
+
+                                    {/* Step 1: Validate VAT (MTD) */}
                                     <button
                                       className={`px-2 py-1 rounded text-white ${
-                                        canSubmit
-                                          ? "bg-green-600"
+                                        canValidate
+                                          ? "bg-yellow-500"
                                           : "bg-gray-400 cursor-not-allowed"
                                       }`}
-                                      disabled={!canSubmit}
+                                      disabled={!canValidate}
                                       onClick={async () => {
-                                        if (!canSubmit) return;
+                                        if (!canValidate) return;
                                         if (
                                           !confirm(
-                                            `Submit VAT period ${p.periodLabel} to HMRC?`
+                                            `Validate VAT period ${p.periodLabel} for MTD?`
                                           )
                                         )
                                           return;
 
+                                        updateMtdVatState(periodKey, {
+                                          validating: true,
+                                        });
+
                                         try {
                                           const res = await fetch(
-                                            `/api/vat/submit`,
+                                            `/api/mtd/vat/validate`,
                                             {
                                               method: "POST",
                                               headers: {
@@ -694,27 +751,104 @@ export default function TaxHub() {
 
                                           const data = await res.json();
 
-                                          if (data.success) {
-                                            alert(
-                                              `VAT period submitted and locked successfully.`
-                                            );
-                                            fetchPeriods();
-                                          } else {
-                                            alert(
-                                              "Submission failed: " +
-                                                data.error
+                                          if (!res.ok || !data.submissionId) {
+                                            throw new Error(
+                                              data.error ||
+                                                "Failed to validate VAT return"
                                             );
                                           }
+
+                                          updateMtdVatState(periodKey, {
+                                            submissionId: data.submissionId,
+                                          });
+
+                                          alert(
+                                            `VAT period ${p.periodLabel} validated for MTD. You can now submit to HMRC.`
+                                          );
+                                        } catch (err) {
+                                          console.error(err);
+                                          alert(
+                                            "Validation error: " + err.message
+                                          );
+                                        } finally {
+                                          updateMtdVatState(periodKey, {
+                                            validating: false,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {isValidating
+                                        ? "Validating…"
+                                        : "Validate VAT (MTD)"}
+                                    </button>
+
+                                    {/* Step 2: Submit to HMRC (MTD) */}
+                                    <button
+                                      className={`px-2 py-1 rounded text-white ${
+                                        canSubmit
+                                          ? "bg-green-600"
+                                          : "bg-gray-400 cursor-not-allowed"
+                                      }`}
+                                      disabled={!canSubmit}
+                                      onClick={async () => {
+                                        if (!canSubmit) return;
+                                        if (
+                                          !confirm(
+                                            `Submit VAT period ${p.periodLabel} to HMRC (MTD)?`
+                                          )
+                                        )
+                                          return;
+
+                                        updateMtdVatState(periodKey, {
+                                          submitting: true,
+                                        });
+
+                                        try {
+                                          const res = await fetch(
+                                            `/api/mtd/vat/submit`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                submissionId: mtd.submissionId,
+                                              }),
+                                            }
+                                          );
+
+                                          const data = await res.json();
+
+                                          if (!res.ok || !data.success) {
+                                            throw new Error(
+                                              data.error ||
+                                                "HMRC submission failed"
+                                            );
+                                          }
+
+                                          alert(
+                                            `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
+                                          );
+
+                                          // Refresh periods to pick up locked/submitted state and HMRC reference
+                                          await fetchPeriods();
                                         } catch (err) {
                                           console.error(err);
                                           alert(
                                             "Submission error: " +
                                               err.message
                                           );
+                                        } finally {
+                                          updateMtdVatState(periodKey, {
+                                            submitting: false,
+                                          });
                                         }
                                       }}
                                     >
-                                      Submit
+                                      {isSubmitting
+                                        ? "Submitting…"
+                                        : "Submit to HMRC (MTD)"}
                                     </button>
                                   </div>
                                 </li>
@@ -785,7 +919,7 @@ export default function TaxHub() {
                                       >
                                         View
                                       </button>
-                                      {/* You can add submit here with same blocking logic if desired */}
+                                      {/* Older VAT periods kept as view-only for now; filing done via active list respecting chronological rules */}
                                     </div>
                                   </li>
                                 ))}
@@ -1144,7 +1278,7 @@ export default function TaxHub() {
                     <p>No periods available.</p>
                   )
                 )}
-                  </ResponsiveCard>
+              </ResponsiveCard>
             ))}
           </div>
         )}
@@ -1156,7 +1290,6 @@ export default function TaxHub() {
         only. Users are solely responsible for verifying all figures and
         ensuring accuracy before submitting any tax filings to HMRC.
       </p>
-
     </ResponsiveLayout>
   );
 }
