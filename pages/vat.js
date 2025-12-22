@@ -26,11 +26,17 @@ export default function VATPage() {
 
   const [vatOverview, setVatOverview] = useState(null);
 
+  // ---------------------------------------------------------
+  // AUTH
+  // ---------------------------------------------------------
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
   }, [session, status, router]);
 
+  // ---------------------------------------------------------
+  // AUTO‑LOAD PERIOD IF COMING FROM TAX HUB
+  // ---------------------------------------------------------
   useEffect(() => {
     if (!router.isReady) return;
     const qFrom = router.query.from;
@@ -43,6 +49,9 @@ export default function VATPage() {
     }
   }, [router.isReady, router.query]);
 
+  // ---------------------------------------------------------
+  // LOAD VAT STAGGER + VAT OVERVIEW
+  // ---------------------------------------------------------
   useEffect(() => {
     async function loadStaggerAndOverview() {
       if (!session?.user) return;
@@ -65,6 +74,43 @@ export default function VATPage() {
     loadStaggerAndOverview();
   }, [session]);
 
+  // ---------------------------------------------------------
+  // SAVE VAT NUMBER
+  // ---------------------------------------------------------
+  async function saveVatNumber() {
+    if (!vatOverview?.tempVatNumber) {
+      alert("Please enter a VAT number.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/tax-hub/save-vat-number", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: session.user.clientId,
+          vatNumber: vatOverview.tempVatNumber,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save VAT number");
+
+      alert("VAT number saved successfully.");
+
+      // Update local state so UI refreshes
+      setVatOverview((prev) => ({
+        ...prev,
+        vat_number: vatOverview.tempVatNumber,
+      }));
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // FETCH VAT SUMMARY
+  // ---------------------------------------------------------
   async function fetchVAT(customFrom, customTo) {
     const start = customFrom || from;
     const end = customTo || to;
@@ -99,6 +145,9 @@ export default function VATPage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // VALIDATE VAT (MTD)
+  // ---------------------------------------------------------
   async function validateMTD() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
@@ -139,6 +188,9 @@ export default function VATPage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // SUBMIT VAT (MTD)
+  // ---------------------------------------------------------
   async function submitVAT() {
     if (!submissionId) {
       alert("Please validate the VAT return for MTD first.");
@@ -183,6 +235,9 @@ export default function VATPage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // ADD ADJUSTMENT
+  // ---------------------------------------------------------
   async function addAdjustment() {
     if (!result) return;
     if (!newAdj.amount) {
@@ -215,6 +270,9 @@ export default function VATPage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // DOWNLOAD HMRC RECEIPT
+  // ---------------------------------------------------------
   async function downloadReceipt() {
     if (!result?.submitted) {
       alert("HMRC receipt is only available after submission.");
@@ -256,6 +314,9 @@ export default function VATPage() {
     }
   }
 
+  // ---------------------------------------------------------
+  // PERIOD + PAYMENTS
+  // ---------------------------------------------------------
   let currentVatPeriod = null;
   let previousVatPeriod = null;
   let periodPayments = [];
@@ -296,6 +357,9 @@ export default function VATPage() {
     ? `${result.status || "draft"}${result.submitted ? " (submitted)" : ""}`
     : "";
 
+  // ---------------------------------------------------------
+  // RENDER
+  // ---------------------------------------------------------
   return (
     <ResponsiveLayout currentPageName="VAT Return">
       <div className="p-6 space-y-6">
@@ -309,8 +373,37 @@ export default function VATPage() {
           ← Back to Tax Hub
         </button>
 
+        {/* VAT Number Input */}
+        {!vatOverview?.vat_number && (
+          <div className="mt-4 p-4 border rounded bg-yellow-50">
+            <label className="block text-sm font-medium mb-2">
+              VAT Number (VRN)
+            </label>
+
+            <input
+              type="text"
+              value={vatOverview?.tempVatNumber || ""}
+              onChange={(e) =>
+                setVatOverview((prev) => ({
+                  ...prev,
+                  tempVatNumber: e.target.value,
+                }))
+              }
+              placeholder="Enter 9‑digit VAT number"
+              className="border p-2 rounded w-full"
+            />
+
+            <button
+              onClick={saveVatNumber}
+              className="mt-3 bg-blue-600 text-white px-4 py-2 rounded"
+            >
+              Save VAT Number
+            </button>
+          </div>
+        )}
+
         {/* HMRC Authorisation */}
-        {!vatOverview?.hmrcConnected && (
+        {vatOverview?.vat_number && !vatOverview?.hmrcConnected && (
           <div className="mt-4">
             <button
               onClick={() =>
@@ -391,14 +484,17 @@ export default function VATPage() {
           )}
         </ResponsiveCard>
 
+        {/* VAT STAGGER BADGE */}
         {vatStagger && (
           <div className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm font-medium">
             VAT Stagger: {vatStagger}
           </div>
         )}
 
+        {/* RESULTS */}
         {result && (
           <>
+            {/* HMRC Submission Details */}
             {(result.hmrcReference || result.processingDate || result.submitted) && (
               <ResponsiveCard title="HMRC Submission Details">
                 <div className="space-y-2 text-sm">
@@ -425,6 +521,7 @@ export default function VATPage() {
               </ResponsiveCard>
             )}
 
+            {/* Draft VAT Return Snapshot */}
             <ResponsiveCard
               title={`Draft VAT Return Summary ${locked ? "(Locked)" : ""}`}
             >
@@ -453,21 +550,21 @@ export default function VATPage() {
                 </div>
                 <div>
                   <p>
-                    <span className="font-semibold">Box 6 – Total sales (net):</span>{" "}
-                    £{Number(result.boxes?.box6 || 0).toFixed(2)}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Box 7 – Total purchases (net):</span>{" "}
-                    £{Number(result.boxes?.box7 || 0).toFixed(2)}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Box 8 – EU supplies (net):</span>{" "}
-                    £{Number(result.boxes?.box8 || 0).toFixed(2)}
-                  </p>
-                  <p>
-                    <span className="font-semibold">Box 9 – EU acquisitions (net):</span>{" "}
-                    £{Number(result.boxes?.box9 || 0).toFixed(2)}
-                  </p>
+  <span className="font-semibold">Box 6 – Total sales (net):</span>{" "}
+  £{Number(result.boxes?.box6 || 0).toFixed(2)}
+</p>
+<p>
+  <span className="font-semibold">Box 7 – Total purchases (net):</span>{" "}
+  £{Number(result.boxes?.box7 || 0).toFixed(2)}
+</p>
+<p>
+  <span className="font-semibold">Box 8 – EU supplies (net):</span>{" "}
+  £{Number(result.boxes?.box8 || 0).toFixed(2)}
+</p>
+<p>
+  <span className="font-semibold">Box 9 – EU acquisitions (net):</span>{" "}
+  £{Number(result.boxes?.box9 || 0).toFixed(2)}
+</p>
                 </div>
               </div>
             </ResponsiveCard>
@@ -535,7 +632,7 @@ export default function VATPage() {
                         {Number(value || 0).toFixed(2)}
                       </td>
                     </tr>
-                                    ))}
+                  ))}
                 </tbody>
               </table>
             </ResponsiveCard>
@@ -653,7 +750,8 @@ export default function VATPage() {
                   <p>
                     <strong>Difference:</strong>{" "}
                     £{Number(
-                      (currentVatPeriod.netVat || 0) - (periodPaymentsTotal || 0)
+                      (currentVatPeriod.netVat || 0) -
+                        (periodPaymentsTotal || 0)
                     ).toFixed(2)}
                   </p>
 
@@ -712,4 +810,3 @@ export default function VATPage() {
     </ResponsiveLayout>
   );
 }
-
