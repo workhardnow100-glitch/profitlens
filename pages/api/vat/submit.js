@@ -52,13 +52,14 @@ export default async function handler(req, res) {
     }
 
     // ✅ 1. Fetch all VAT transactions for this period
-    const { data: vatTxs, error: txError } = await supabaseAdmin
-      .from("transactions")
-      .select("id, category, vat_amount, tax_locked, date")
-      .eq("client_id", clientId)
-      .eq("hmrc_category_id", "vat") // canonical VAT category
-      .gte("date", periodStart)
-      .lte("date", periodEnd);
+   const { data: vatTxs, error: txError } = await supabaseAdmin
+  .from("transactions")
+  .select("id, business_category, vat_amount, tax_locked, date")
+  .eq("client_id", clientId)
+  .eq("includedinvat", true)
+  .gte("date", periodStart)
+  .lte("date", periodEnd);
+
 
     if (txError) throw txError;
 
