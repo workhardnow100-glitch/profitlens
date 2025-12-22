@@ -1,5 +1,5 @@
 // pages/api/hmrc/oauth/callback.js
-import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { supabaseAdmin } from "../../../../lib/supabase-admin";
 
 const HMRC_TOKEN_URL = "https://test-api.service.hmrc.gov.uk/oauth/token";
 
