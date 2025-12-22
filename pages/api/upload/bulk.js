@@ -6,7 +6,7 @@ import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { classifyFromRaw } from "../../../lib/categor/Engine.js";
+import { classifyFromRaw } from "../../../lib/category/Engine.js";
 
 export const config = {
   api: { bodyParser: false },
