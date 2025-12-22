@@ -40,17 +40,18 @@ export default async function handler(req, res) {
 
   try {
     // ---------------------------------------------------------
-    // 1. Fetch VAT transactions
-    // ---------------------------------------------------------
-    const { data: vatTxs, error: txError } = await supabaseAdmin
-      .from("transactions")
-      .select("id, category, vat_amount, tax_locked, date")
-      .eq("client_id", clientId)
-      .eq("hmrc_category_id", "vat")
-      .gte("date", periodStart)
-      .lte("date", periodEnd);
+// 1. Fetch VAT transactions
+// ---------------------------------------------------------
+const { data: vatTxs, error: txError } = await supabaseAdmin
+  .from("transactions")
+  .select("id, business_category, vat_amount, tax_locked, date")
+  .eq("client_id", clientId)
+  .eq("includedinvat", true)
+  .gte("date", periodStart)
+  .lte("date", periodEnd);
 
-    if (txError) throw txError;
+if (txError) throw txError;
+
 
     if (!vatTxs || vatTxs.length === 0) {
       return res
