@@ -32,7 +32,7 @@ export default async function handler(req, res) {
 
   const clientIdEnv = process.env.HMRC_CLIENT_ID_SANDBOX;
   const clientSecret = process.env.HMRC_CLIENT_SECRET_SANDBOX;
-  const redirectUri = process.env.HMRC_REDIRECT_URI;
+  const redirectUri = process.env.HMRC_REDIRECT_URI_SANDBOX;
 
   if (!clientIdEnv || !clientSecret || !redirectUri) {
     console.error("HMRC OAuth env not configured");

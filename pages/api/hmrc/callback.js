@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   const { code, state } = req.query;
   const clientId = process.env.HMRC_CLIENT_ID;
   const clientSecret = process.env.HMRC_CLIENT_SECRET;
-  const redirectUri = process.env.HMRC_REDIRECT_URI;
+  const redirectUri = process.env.HMRC_REDIRECT_URI_SANDBOX;
 
   const tokenRes = await fetch("https://test-api.service.hmrc.gov.uk/oauth/token", {
     method: "POST",
