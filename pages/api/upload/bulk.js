@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "xlsx";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { classifyFromRaw } from "../../../lib/categoryEngine.js";
 
 export const config = {
   api: { bodyParser: false },
@@ -271,8 +272,14 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     credit_amount: credit ?? null,
     balance: balance ?? null,
 
-    // ✅ Unified engine: business_category always null at ingestion
-    business_category: null,
+  // ✅ Auto-classify only when null (always null at ingestion)
+business_category: classifyFromRaw({
+  raw_category,
+  type,
+  description,
+  amount,
+}),
+
 
     // ✅ Suggestion engine: raw category preserved
     raw_category,
