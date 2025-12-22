@@ -24,20 +24,13 @@ export default function VATPage() {
   const [mtdSubmitting, setMtdSubmitting] = useState(false);
   const [mtdValidating, setMtdValidating] = useState(false);
 
-  // Tax Hub overview (for compare + reconciliation)
   const [vatOverview, setVatOverview] = useState(null);
 
-  // ---------------------------------------------------------
-  // AUTH
-  // ---------------------------------------------------------
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
   }, [session, status, router]);
 
-  // ---------------------------------------------------------
-  // AUTO‑LOAD PERIOD IF COMING FROM TAX HUB
-  // ---------------------------------------------------------
   useEffect(() => {
     if (!router.isReady) return;
     const qFrom = router.query.from;
@@ -50,9 +43,6 @@ export default function VATPage() {
     }
   }, [router.isReady, router.query]);
 
-  // ---------------------------------------------------------
-  // LOAD VAT STAGGER + VAT OVERVIEW (Tax Hub periods)
-  // ---------------------------------------------------------
   useEffect(() => {
     async function loadStaggerAndOverview() {
       if (!session?.user) return;
@@ -75,9 +65,6 @@ export default function VATPage() {
     loadStaggerAndOverview();
   }, [session]);
 
-  // ---------------------------------------------------------
-  // FETCH VAT SUMMARY
-  // ---------------------------------------------------------
   async function fetchVAT(customFrom, customTo) {
     const start = customFrom || from;
     const end = customTo || to;
@@ -112,9 +99,6 @@ export default function VATPage() {
     }
   }
 
-  // ---------------------------------------------------------
-  // VALIDATE VAT (MTD)
-  // ---------------------------------------------------------
   async function validateMTD() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
@@ -155,9 +139,6 @@ export default function VATPage() {
     }
   }
 
-  // ---------------------------------------------------------
-  // SUBMIT VAT (MTD)
-  // ---------------------------------------------------------
   async function submitVAT() {
     if (!submissionId) {
       alert("Please validate the VAT return for MTD first.");
@@ -202,9 +183,6 @@ export default function VATPage() {
     }
   }
 
-  // ---------------------------------------------------------
-  // ADD ADJUSTMENT
-  // ---------------------------------------------------------
   async function addAdjustment() {
     if (!result) return;
     if (!newAdj.amount) {
@@ -237,9 +215,6 @@ export default function VATPage() {
     }
   }
 
-  // ---------------------------------------------------------
-  // DOWNLOAD HMRC RECEIPT (PDF)
-  // ---------------------------------------------------------
   async function downloadReceipt() {
     if (!result?.submitted) {
       alert("HMRC receipt is only available after submission.");
@@ -281,9 +256,6 @@ export default function VATPage() {
     }
   }
 
-  // ---------------------------------------------------------
-  // CURRENT + PREVIOUS PERIOD (from Tax Hub overview)
-  // ---------------------------------------------------------
   let currentVatPeriod = null;
   let previousVatPeriod = null;
   let periodPayments = [];
@@ -302,7 +274,6 @@ export default function VATPage() {
     }
   }
 
-  // Reconcile payments for this VAT period
   if (vatOverview?.vatPayments && from && to) {
     const startDate = new Date(from);
     const endDate = new Date(to);
@@ -325,9 +296,6 @@ export default function VATPage() {
     ? `${result.status || "draft"}${result.submitted ? " (submitted)" : ""}`
     : "";
 
-  // ---------------------------------------------------------
-  // RENDER
-  // ---------------------------------------------------------
   return (
     <ResponsiveLayout currentPageName="VAT Return">
       <div className="p-6 space-y-6">
@@ -340,6 +308,24 @@ export default function VATPage() {
         >
           ← Back to Tax Hub
         </button>
+
+        {/* HMRC Authorisation */}
+        {!vatOverview?.hmrcConnected && (
+          <div className="mt-4">
+            <button
+              onClick={() =>
+                (window.location.href = `/api/hmrc/oauth/start?clientId=${session.user.clientId}`)
+              }
+              className="bg-purple-600 text-white px-4 py-2 rounded"
+            >
+              Authorise HMRC (Required for MTD)
+            </button>
+
+            <p className="text-sm text-gray-600 mt-1">
+              You must authorise HMRC before validating or submitting VAT returns.
+            </p>
+          </div>
+        )}
 
         {/* Controls */}
         <ResponsiveCard title="Select VAT Period">
@@ -405,17 +391,14 @@ export default function VATPage() {
           )}
         </ResponsiveCard>
 
-        {/* VAT STAGGER BADGE */}
         {vatStagger && (
           <div className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded text-sm font-medium">
             VAT Stagger: {vatStagger}
           </div>
         )}
 
-        {/* RESULTS */}
         {result && (
           <>
-            {/* HMRC Submission Details */}
             {(result.hmrcReference || result.processingDate || result.submitted) && (
               <ResponsiveCard title="HMRC Submission Details">
                 <div className="space-y-2 text-sm">
@@ -442,7 +425,6 @@ export default function VATPage() {
               </ResponsiveCard>
             )}
 
-            {/* Draft VAT Return Snapshot */}
             <ResponsiveCard
               title={`Draft VAT Return Summary ${locked ? "(Locked)" : ""}`}
             >
@@ -490,7 +472,6 @@ export default function VATPage() {
               </div>
             </ResponsiveCard>
 
-            {/* Compare With Previous Period */}
             <ResponsiveCard title="Compare With Previous Period">
               {currentVatPeriod ? (
                 <div className="text-sm space-y-2">
@@ -536,7 +517,6 @@ export default function VATPage() {
               )}
             </ResponsiveCard>
 
-            {/* Raw VAT Boxes Table (for detailed review) */}
             <ResponsiveCard
               title={`VAT Boxes Detail ${locked ? "(Locked)" : ""}`}
             >
@@ -555,7 +535,7 @@ export default function VATPage() {
                         {Number(value || 0).toFixed(2)}
                       </td>
                     </tr>
-                  ))}
+                                    ))}
                 </tbody>
               </table>
             </ResponsiveCard>
@@ -732,3 +712,4 @@ export default function VATPage() {
     </ResponsiveLayout>
   );
 }
+
