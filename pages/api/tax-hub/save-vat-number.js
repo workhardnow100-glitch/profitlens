@@ -1,5 +1,5 @@
 // pages/api/tax-hub/save-vat-number.js
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../../lib/supabaseClient";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
