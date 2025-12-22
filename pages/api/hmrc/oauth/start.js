@@ -1,7 +1,8 @@
 // pages/api/hmrc/oauth/start.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../../../auth/[...nextauth]";
-import { supabaseAdmin } from "../../../../../lib/supabase-admin";
+import { authOptions } from "../../../auth/[...nextauth]";
+import { supabaseAdmin } from "../../../../lib/supabase-admin";
+
 
 const HMRC_AUTH_URL = "https://test-api.service.hmrc.gov.uk/oauth/authorize";
 
