@@ -51,17 +51,19 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ✅ 1. Fetch all VAT transactions for this period
-   const { data: vatTxs, error: txError } = await supabaseAdmin
+ // ---------------------------------------------------------
+// 1. Fetch VAT transactions
+// ---------------------------------------------------------
+const { data: vatTxs, error: txError } = await supabaseAdmin
   .from("transactions")
   .select("id, business_category, vat_amount, tax_locked, date")
   .eq("client_id", clientId)
-  .eq("includedinvat", true)
+  .not("vat_amount", "is", null)
   .gte("date", periodStart)
   .lte("date", periodEnd);
 
+if (txError) throw txError;
 
-    if (txError) throw txError;
 
     if (!vatTxs || vatTxs.length === 0) {
       return res.status(400).json({ error: "No VAT transactions in this period" });
