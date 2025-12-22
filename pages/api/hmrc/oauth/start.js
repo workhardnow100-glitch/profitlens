@@ -1,6 +1,6 @@
 // pages/api/hmrc/oauth/start.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../../auth/[...nextauth]";
+import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 
 
