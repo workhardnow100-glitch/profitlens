@@ -46,7 +46,7 @@ export default function ProfilePage() {
   const [transactions, setTransactions] = useState([]);
   const [hmrcCategories, setHmrcCategories] = useState([]);
   const [account, setAccount] = useState(null);
-  const [client, setClient] = useState(null); // ✅ NEW: client state
+  const [client, setClient] = useState(null); // ✅ client state
   const [totalsByType, setTotalsByType] = useState({
     sole_trader: {},
     limited_company: {},
@@ -103,7 +103,7 @@ export default function ProfilePage() {
         setTransactions(json.transactions || []);
         setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
-        setClient(json.client || null); // ✅ NEW: client from API
+        setClient(json.client || null); // ✅ client from API
         setTotalsByType(
           json.totalsByType || { sole_trader: {}, limited_company: {} }
         );
@@ -174,7 +174,7 @@ export default function ProfilePage() {
     return Array.from(years).sort((a, b) => b - a);
   }, [transactions]);
 
-  // Filtered transactions by selectedYear (A1, Y1, F1)
+  // Filtered transactions by selectedYear
   const filteredTransactions = useMemo(() => {
     if (!selectedYear) return transactions || [];
     return (transactions || []).filter((tx) => {
@@ -199,7 +199,7 @@ export default function ProfilePage() {
     return result;
   }, [byMonth, selectedYear]);
 
-  // Client-side summary for selected year (overrides API summary for UI)
+  // Client-side summary for selected year
   const yearSummary = useMemo(() => {
     let totalIncome = 0;
     let totalExpenses = 0;
@@ -249,7 +249,7 @@ export default function ProfilePage() {
         incomeMap[cat] = (incomeMap[cat] || 0) + amount;
       } else if (amount < 0) {
         const abs = Math.abs(amount);
-        // Expense view filter (allowable vs disallowable vs all)
+        // Expense view filter
         if (expenseView === "allowable" && !ALLOWABLE_SET.has(cat)) continue;
         if (
           expenseView === "disallowable" &&
@@ -266,7 +266,7 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, expenseView]);
 
-  // HMRC breakdown (Option C, filtered by year, F1)
+  // HMRC breakdown (filtered by year)
   const hmrcBreakdown = useMemo(() => {
     let allowable = 0;
     let disallowable = 0;
@@ -523,6 +523,60 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
+  // 🔵 UNIVERSAL PDF HANDLER
+  async function handleDownloadPdf() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "profile",
+          year: selectedYear || new Date().getFullYear(),
+          profileSummary: {
+            totalIncome: yearSummary.totalIncome,
+            totalExpenses: yearSummary.totalExpenses,
+            netProfit: yearSummary.netProfit,
+          },
+          companyDetails: {
+            name: client?.name || "",
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
+    } catch (err) {
+      console.error("Error generating PDF:", err);
+    }
+  }
+
+  // 🟣 TAX REPORT PDF HANDLER
+  async function handleDownloadTaxReport() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reports",
+          year: selectedYear || new Date().getFullYear(),
+          companyDetails: {
+            name: client?.name || "",
+          },
+          totals: {
+            income: yearSummary.totalIncome,
+            expenses: yearSummary.totalExpenses,
+            net: yearSummary.netProfit,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
+    } catch (err) {
+      console.error("Error generating tax report PDF:", err);
+    }
+  }
+
   if (status === "loading" || loading)
     return <p className="p-8">Loading...</p>;
   if (!session?.user) return null;
@@ -535,7 +589,7 @@ export default function ProfilePage() {
           Account details, HMRC categories, and transaction summaries.
         </p>
 
-        {/* Global year filter (Y1, A1, D1) */}
+        {/* Global year filter */}
         <div className="mt-4 flex flex-wrap items-center gap-4">
           <div>
             <label className="text-sm text-slate-600 mr-2">
@@ -645,129 +699,66 @@ export default function ProfilePage() {
         </ResponsiveCard>
 
         {/* Account info */}
-<ResponsiveCard title="Account details">
-  <p>
-    <span className="font-medium">Account number:</span>{" "}
-    {account?.account_number || "—"}
-  </p>
-  <p>
-    <span className="font-medium">Sort code:</span>{" "}
-    {account?.sort_code || "—"}
-  </p>
-</ResponsiveCard>
+        <ResponsiveCard title="Account details">
+          <p>
+            <span className="font-medium">Account number:</span>{" "}
+            {account?.account_number || "—"}
+          </p>
+          <p>
+            <span className="font-medium">Sort code:</span>{" "}
+            {account?.sort_code || "—"}
+          </p>
+        </ResponsiveCard>
 
+        {/* Export buttons (P2) */}
+        <div className="flex flex-wrap gap-4 mt-6">
+          <button
+            onClick={handleDownloadPdf}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
+          >
+            Download PDF
+          </button>
 
-{/* 🔵 UNIVERSAL PDF HANDLER */}
-<script>
-{`
-async function handleDownloadPdf() {
-  try {
-    const res = await fetch("/api/pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "profile",
-        year: new Date().getFullYear(),
-        profileSummary: {
-          totalIncome: yearSummary.totalIncome,
-          totalExpenses: yearSummary.totalExpenses,
-          netProfit: yearSummary.netProfit,
-        },
-        companyDetails: {
-          name: clientName,
-        },
-      }),
-    });
+          <button
+            onClick={handleExportCSV}
+            className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
+          >
+            Export CSV
+          </button>
 
-    const data = await res.json();
-    if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
-  } catch (err) {
-    console.error("Error generating PDF:", err);
-  }
-}
+          <button
+            onClick={handleDownloadTaxReport}
+            className="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700 transition"
+          >
+            Download Tax Report
+          </button>
+        </div>
 
-async function handleDownloadTaxReport() {
-  try {
-    const res = await fetch("/api/pdf", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "reports",
-        year: new Date().getFullYear(),
-        companyDetails: {
-          name: clientName,
-        },
-        totals: {
-          income: yearSummary.totalIncome,
-          expenses: yearSummary.totalExpenses,
-          net: yearSummary.netProfit,
-        },
-        categories: categoryBreakdown,
-      }),
-    });
+        {error && <p className="text-red-500 mt-6">Error: {error}</p>}
 
-    const data = await res.json();
-    if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
-  } catch (err) {
-    console.error("Error generating tax report PDF:", err);
-  }
-}
-`}
-</script>
-
-
-{/* Export buttons (P2) */}
-<div className="flex flex-wrap gap-4 mt-6">
-  <button
-    onClick={handleDownloadPdf}
-    className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
-  >
-    Download PDF
-  </button>
-
-  <button
-    onClick={handleExportCSV}
-    className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
-  >
-    Export CSV
-  </button>
-
-  <button
-    onClick={handleDownloadTaxReport}
-    className="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700 transition"
-  >
-    Download Tax Report
-  </button>
-</div>
-
-
-{error && <p className="text-red-500 mt-6">Error: {error}</p>}
-
-
-{/* Summary (year filtered) */}
-<ResponsiveCard title="Summary (filtered by year)">
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
-    <div className="border border-slate-200 rounded p-3">
-      <p className="text-sm text-slate-600">Total Income</p>
-      <p className="text-slate-800 font-semibold">
-        £{Number(yearSummary.totalIncome).toFixed(2)}
-      </p>
-    </div>
-    <div className="border border-slate-200 rounded p-3">
-      <p className="text-sm text-slate-600">Total Expenses</p>
-      <p className="text-slate-800 font-semibold">
-        £{Number(yearSummary.totalExpenses).toFixed(2)}
-      </p>
-    </div>
-    <div className="border border-slate-200 rounded p-3">
-      <p className="text-sm text-slate-600">Net Profit</p>
-      <p className="text-slate-800 font-semibold">
-        £{Number(yearSummary.netProfit).toFixed(2)}
-      </p>
-    </div>
-  </div>
-</ResponsiveCard>
-
+        {/* Summary (year filtered) */}
+        <ResponsiveCard title="Summary (filtered by year)">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+            <div className="border border-slate-200 rounded p-3">
+              <p className="text-sm text-slate-600">Total Income</p>
+              <p className="text-slate-800 font-semibold">
+                £{Number(yearSummary.totalIncome).toFixed(2)}
+              </p>
+            </div>
+            <div className="border border-slate-200 rounded p-3">
+              <p className="text-sm text-slate-600">Total Expenses</p>
+              <p className="text-slate-800 font-semibold">
+                £{Number(yearSummary.totalExpenses).toFixed(2)}
+              </p>
+            </div>
+            <div className="border border-slate-200 rounded p-3">
+              <p className="text-sm text-slate-600">Net Profit</p>
+              <p className="text-slate-800 font-semibold">
+                £{Number(yearSummary.netProfit).toFixed(2)}
+              </p>
+            </div>
+          </div>
+        </ResponsiveCard>
 
         {/* HMRC – Sole Trader + Limited Company breakdown */}
         <div ref={taxReportRef}>
