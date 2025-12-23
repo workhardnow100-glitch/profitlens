@@ -88,10 +88,11 @@ export default async function handler(req, res) {
       return res.status(500).send("Failed to save HMRC tokens.");
     }
 
-    // Redirect back to your app UI (adjust path as needed)
+    // ⭐ FIXED REDIRECT ⭐
     return res.redirect(
-      `/tax-hub/vat?clientId=${encodeURIComponent(clientId)}&hmrc=connected`
+      `/vat?clientId=${encodeURIComponent(clientId)}&hmrc=connected`
     );
+
   } catch (err) {
     console.error("HMRC callback error:", err);
     return res.status(500).send("Internal server error.");
