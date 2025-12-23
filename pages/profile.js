@@ -645,64 +645,129 @@ export default function ProfilePage() {
         </ResponsiveCard>
 
         {/* Account info */}
-        <ResponsiveCard title="Account details">
-          <p>
-            <span className="font-medium">Account number:</span>{" "}
-            {account?.account_number || "—"}
-          </p>
-          <p>
-            <span className="font-medium">Sort code:</span>{" "}
-            {account?.sort_code || "—"}
-          </p>
-        </ResponsiveCard>
+<ResponsiveCard title="Account details">
+  <p>
+    <span className="font-medium">Account number:</span>{" "}
+    {account?.account_number || "—"}
+  </p>
+  <p>
+    <span className="font-medium">Sort code:</span>{" "}
+    {account?.sort_code || "—"}
+  </p>
+</ResponsiveCard>
 
-        {/* Export buttons (P2) */}
-        <div className="flex flex-wrap gap-4 mt-6">
-          <button
-            onClick={handlePrintFull}
-            className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
-          >
-            Download PDF
-          </button>
-          <button
-            onClick={handleExportCSV}
-            className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={handlePrintTaxReport}
-            className="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700 transition"
-          >
-            Download Tax Report
-          </button>
-        </div>
 
-        {error && <p className="text-red-500 mt-6">Error: {error}</p>}
+{/* 🔵 UNIVERSAL PDF HANDLER */}
+<script>
+{`
+async function handleDownloadPdf() {
+  try {
+    const res = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "profile",
+        year: new Date().getFullYear(),
+        profileSummary: {
+          totalIncome: yearSummary.totalIncome,
+          totalExpenses: yearSummary.totalExpenses,
+          netProfit: yearSummary.netProfit,
+        },
+        companyDetails: {
+          name: clientName,
+        },
+      }),
+    });
 
-        {/* Summary (year filtered) */}
-        <ResponsiveCard title="Summary (filtered by year)">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
-            <div className="border border-slate-200 rounded p-3">
-              <p className="text-sm text-slate-600">Total Income</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(yearSummary.totalIncome).toFixed(2)}
-              </p>
-            </div>
-            <div className="border border-slate-200 rounded p-3">
-              <p className="text-sm text-slate-600">Total Expenses</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(yearSummary.totalExpenses).toFixed(2)}
-              </p>
-            </div>
-            <div className="border border-slate-200 rounded p-3">
-              <p className="text-sm text-slate-600">Net Profit</p>
-              <p className="text-slate-800 font-semibold">
-                £{Number(yearSummary.netProfit).toFixed(2)}
-              </p>
-            </div>
-          </div>
-        </ResponsiveCard>
+    const data = await res.json();
+    if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
+  } catch (err) {
+    console.error("Error generating PDF:", err);
+  }
+}
+
+async function handleDownloadTaxReport() {
+  try {
+    const res = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "reports",
+        year: new Date().getFullYear(),
+        companyDetails: {
+          name: clientName,
+        },
+        totals: {
+          income: yearSummary.totalIncome,
+          expenses: yearSummary.totalExpenses,
+          net: yearSummary.netProfit,
+        },
+        categories: categoryBreakdown,
+      }),
+    });
+
+    const data = await res.json();
+    if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
+  } catch (err) {
+    console.error("Error generating tax report PDF:", err);
+  }
+}
+`}
+</script>
+
+
+{/* Export buttons (P2) */}
+<div className="flex flex-wrap gap-4 mt-6">
+  <button
+    onClick={handleDownloadPdf}
+    className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
+  >
+    Download PDF
+  </button>
+
+  <button
+    onClick={handleExportCSV}
+    className="bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700 transition"
+  >
+    Export CSV
+  </button>
+
+  <button
+    onClick={handleDownloadTaxReport}
+    className="bg-purple-600 text-white px-4 py-2 rounded text-sm hover:bg-purple-700 transition"
+  >
+    Download Tax Report
+  </button>
+</div>
+
+
+{error && <p className="text-red-500 mt-6">Error: {error}</p>}
+
+
+{/* Summary (year filtered) */}
+<ResponsiveCard title="Summary (filtered by year)">
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+    <div className="border border-slate-200 rounded p-3">
+      <p className="text-sm text-slate-600">Total Income</p>
+      <p className="text-slate-800 font-semibold">
+        £{Number(yearSummary.totalIncome).toFixed(2)}
+      </p>
+    </div>
+    <div className="border border-slate-200 rounded p-3">
+      <p className="text-sm text-slate-600">Total Expenses</p>
+      <p className="text-slate-800 font-semibold">
+        £{Number(yearSummary.totalExpenses).toFixed(2)}
+      </p>
+    </div>
+    <div className="border border-slate-200 rounded p-3">
+      <p className="text-sm text-slate-600">Net Profit</p>
+      <p className="text-slate-800 font-semibold">
+        £{Number(yearSummary.netProfit).toFixed(2)}
+      </p>
+    </div>
+  </div>
+</ResponsiveCard>
+
 
         {/* HMRC – Sole Trader + Limited Company breakdown */}
         <div ref={taxReportRef}>
