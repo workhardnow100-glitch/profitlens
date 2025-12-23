@@ -617,245 +617,211 @@ export default function TaxHub() {
 
                     {vatPeriods.length > 0 ? (
                       <div className="mt-2 space-y-4">
-                        {/* Active / recent VAT periods */}
-                        <div>
-                          <h4 className="font-semibold mb-2">
-                            Active VAT Periods
-                          </h4>
-                          <ul className="space-y-2">
-                            {activeVatPeriods.map((p) => {
-                              const hasUnsubmittedOlder = vatPeriods.some(
-                                (other) =>
-                                  new Date(other.periodEnd) <
-                                    new Date(p.periodEnd) && !other.submitted
-                              );
+                       {/* Active / recent VAT periods */}
+<div>
+  <h4 className="font-semibold mb-2">Active VAT Periods</h4>
+  <ul className="space-y-2">
+    {activeVatPeriods.map((p) => {
+      const periodKey = getVatKey(p);
+      const mtd = mtdVatState[periodKey] || {};
 
-                              const canSubmitBase =
-                                !p.locked &&
-                                p.hmrcAuthorized &&
-                                !hasUnsubmittedOlder;
+      const isValidating = !!mtd.validating;
+      const isSubmitting = !!mtd.submitting;
+      const hasSubmissionId = !!mtd.submissionId;
 
-                              const periodKey = getVatKey(p);
-                              const mtd = mtdVatState[periodKey] || {};
-                              const isValidating = !!mtd.validating;
-                              const isSubmitting = !!mtd.submitting;
-                              const hasSubmissionId = !!mtd.submissionId;
+      // ⭐ VAT PAGE LOGIC (simple + reliable)
+      const canValidate = !isValidating && !isSubmitting;
+      const canSubmit = hasSubmissionId && !isSubmitting;
 
-                              const canValidate = canSubmitBase && !isValidating && !isSubmitting;
-                              const canSubmit =
-                                canSubmitBase &&
-                                hasSubmissionId &&
-                                !isSubmitting;
+      return (
+        <li
+          key={periodKey}
+          className="border p-3 rounded bg-white space-y-2"
+        >
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="font-semibold">{p.periodLabel}</p>
+              <p className="text-sm text-gray-600">
+                Status: {p.status}
+              </p>
+            </div>
 
-                              return (
-                                <li
-                                  key={p.periodStart}
-                                  className="flex justify-between items-center border p-2 rounded"
-                                >
-                                  <div>
-                                    <div>{p.periodLabel}</div>
-                                    <div className="text-xs text-gray-600">
-                                      Net VAT:{" "}
-                                      <span
-                                        className={
-                                          p.netVat > 0
-                                            ? "text-red-600 font-semibold"
-                                            : p.netVat < 0
-                                            ? "text-blue-600 font-semibold"
-                                            : "text-gray-700 font-semibold"
-                                        }
-                                      >
-                                        £{p.netVat.toFixed(2)}
-                                      </span>
-                                      {" • "}
-                                      <span
-                                        className={
-                                          p.status === "Overdue"
-                                            ? "text-red-600 font-semibold"
-                                            : p.status === "Submitted"
-                                            ? "text-green-700 font-semibold"
-                                            : "text-gray-800 font-semibold"
-                                        }
-                                      >
-                                        {p.status}
-                                      </span>
-                                      {hasSubmissionId && !p.locked && (
-                                        <>
-                                          {" • "}
-                                          <span className="text-blue-700 font-semibold">
-                                            MTD validated
-                                          </span>
-                                        </>
-                                      )}
-                                      {p.locked && (
-                                        <>
-                                          {" • "}
-                                          <span className="text-green-700 font-semibold">
-                                            Locked
-                                          </span>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
+            <button
+              className="bg-blue-600 text-white px-3 py-1 rounded"
+              onClick={() =>
+                router.push(
+                  `/vat?from=${p.periodStart}&to=${p.periodEnd}`
+                )
+              }
+            >
+              View
+            </button>
+          </div>
 
-                                  <div className="flex gap-2 items-center">
-                                    <button
-                                      className="bg-blue-600 text-white px-2 py-1 rounded"
-                                      onClick={() =>
-                                        router.push(
-                                          `/vat?from=${p.periodStart}&to=${p.periodEnd}`
-                                        )
-                                      }
-                                    >
-                                      View
-                                    </button>
+          {/* ⭐ PDF Download Button */}
+          <button
+            className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
+            onClick={async () => {
+              try {
+                const res = await fetch("/api/vat/pdf", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    clientId: session.user.clientId,
+                    periodStart: p.periodStart,
+                    periodEnd: p.periodEnd,
+                  }),
+                });
 
-                                    {/* Step 1: Validate VAT (MTD) */}
-                                    <button
-                                      className={`px-2 py-1 rounded text-white ${
-                                        canValidate
-                                          ? "bg-yellow-500"
-                                          : "bg-gray-400 cursor-not-allowed"
-                                      }`}
-                                      disabled={!canValidate}
-                                      onClick={async () => {
-                                        if (!canValidate) return;
-                                        if (
-                                          !confirm(
-                                            `Validate VAT period ${p.periodLabel} for MTD?`
-                                          )
-                                        )
-                                          return;
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error);
 
-                                        updateMtdVatState(periodKey, {
-                                          validating: true,
-                                        });
+                // Open PDF in new tab
+                window.open(data.url, "_blank");
+              } catch (err) {
+                alert("PDF error: " + err.message);
+              }
+            }}
+          >
+            Download VAT PDF
+          </button>
 
-                                        try {
-                                          const res = await fetch(
-                                            `/api/mtd/vat/validate`,
-                                            {
-                                              method: "POST",
-                                              headers: {
-                                                "Content-Type":
-                                                  "application/json",
-                                              },
-                                              body: JSON.stringify({
-                                                clientId:
-                                                  session.user.clientId,
-                                                periodStart: p.periodStart,
-                                                periodEnd: p.periodEnd,
-                                              }),
-                                            }
-                                          );
+          {/* MTD Buttons */}
+          <div className="flex gap-2">
+            {/* Validate VAT (MTD) */}
+            <button
+              className={`px-2 py-1 rounded text-white ${
+                canValidate
+                  ? "bg-yellow-500"
+                  : "bg-gray-400 cursor-not-allowed"
+              }`}
+              disabled={!canValidate}
+              onClick={async () => {
+                if (!canValidate) return;
+                if (
+                  !confirm(
+                    `Validate VAT period ${p.periodLabel} for MTD?`
+                  )
+                )
+                  return;
 
-                                          const data = await res.json();
+                updateMtdVatState(periodKey, {
+                  validating: true,
+                });
 
-                                          if (!res.ok || !data.submissionId) {
-                                            throw new Error(
-                                              data.error ||
-                                                "Failed to validate VAT return"
-                                            );
-                                          }
+                try {
+                  const res = await fetch(
+                    `/api/mtd/vat/validate`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        clientId: session.user.clientId,
+                        periodStart: p.periodStart,
+                        periodEnd: p.periodEnd,
+                      }),
+                    }
+                  );
 
-                                          updateMtdVatState(periodKey, {
-                                            submissionId: data.submissionId,
-                                          });
+                  const data = await res.json();
 
-                                          alert(
-                                            `VAT period ${p.periodLabel} validated for MTD. You can now submit to HMRC.`
-                                          );
-                                        } catch (err) {
-                                          console.error(err);
-                                          alert(
-                                            "Validation error: " + err.message
-                                          );
-                                        } finally {
-                                          updateMtdVatState(periodKey, {
-                                            validating: false,
-                                          });
-                                        }
-                                      }}
-                                    >
-                                      {isValidating
-                                        ? "Validating…"
-                                        : "Validate VAT (MTD)"}
-                                    </button>
+                  if (!res.ok || !data.submissionId) {
+                    throw new Error(
+                      data.error ||
+                        "Failed to validate VAT return"
+                    );
+                  }
 
-                                    {/* Step 2: Submit to HMRC (MTD) */}
-                                    <button
-                                      className={`px-2 py-1 rounded text-white ${
-                                        canSubmit
-                                          ? "bg-green-600"
-                                          : "bg-gray-400 cursor-not-allowed"
-                                      }`}
-                                      disabled={!canSubmit}
-                                      onClick={async () => {
-                                        if (!canSubmit) return;
-                                        if (
-                                          !confirm(
-                                            `Submit VAT period ${p.periodLabel} to HMRC (MTD)?`
-                                          )
-                                        )
-                                          return;
+                  updateMtdVatState(periodKey, {
+                    submissionId: data.submissionId,
+                  });
 
-                                        updateMtdVatState(periodKey, {
-                                          submitting: true,
-                                        });
+                  alert(
+                    `VAT period ${p.periodLabel} validated for MTD. You can now submit to HMRC.`
+                  );
+                } catch (err) {
+                  alert("Validation error: " + err.message);
+                } finally {
+                  updateMtdVatState(periodKey, {
+                    validating: false,
+                  });
+                }
+              }}
+            >
+              {isValidating ? "Validating…" : "Validate VAT (MTD)"}
+            </button>
 
-                                        try {
-                                          const res = await fetch(
-                                            `/api/mtd/vat/submit`,
-                                            {
-                                              method: "POST",
-                                              headers: {
-                                                "Content-Type":
-                                                  "application/json",
-                                              },
-                                              body: JSON.stringify({
-                                                submissionId: mtd.submissionId,
-                                              }),
-                                            }
-                                          );
+            {/* Submit to HMRC (MTD) */}
+            <button
+              className={`px-2 py-1 rounded text-white ${
+                canSubmit
+                  ? "bg-green-600"
+                  : "bg-gray-400 cursor-not-allowed"
+              }`}
+              disabled={!canSubmit}
+              onClick={async () => {
+                if (!canSubmit) return;
+                if (
+                  !confirm(
+                    `Submit VAT period ${p.periodLabel} to HMRC (MTD)?`
+                  )
+                )
+                  return;
 
-                                          const data = await res.json();
+                updateMtdVatState(periodKey, {
+                  submitting: true,
+                });
 
-                                          if (!res.ok || !data.success) {
-                                            throw new Error(
-                                              data.error ||
-                                                "HMRC submission failed"
-                                            );
-                                          }
+                try {
+                  const res = await fetch(
+                    `/api/mtd/vat/submit`,
+                    {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({
+                        submissionId: mtd.submissionId,
+                      }),
+                    }
+                  );
 
-                                          alert(
-                                            `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
-                                          );
+                  const data = await res.json();
 
-                                          // Refresh periods to pick up locked/submitted state and HMRC reference
-                                          await fetchPeriods();
-                                        } catch (err) {
-                                          console.error(err);
-                                          alert(
-                                            "Submission error: " +
-                                              err.message
-                                          );
-                                        } finally {
-                                          updateMtdVatState(periodKey, {
-                                            submitting: false,
-                                          });
-                                        }
-                                      }}
-                                    >
-                                      {isSubmitting
-                                        ? "Submitting…"
-                                        : "Submit to HMRC (MTD)"}
-                                    </button>
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
+                  if (!res.ok || !data.success) {
+                    throw new Error(
+                      data.error ||
+                        "HMRC submission failed"
+                    );
+                  }
+
+                  alert(
+                    `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
+                  );
+
+                  await fetchPeriods();
+                } catch (err) {
+                  alert(
+                    "Submission error: " + err.message
+                  );
+                } finally {
+                  updateMtdVatState(periodKey, {
+                    submitting: false,
+                  });
+                }
+              }}
+            >
+              {isSubmitting ? "Submitting…" : "Submit to HMRC (MTD)"}
+            </button>
+          </div>
+        </li>
+      );
+    })}
+  </ul>
+</div>
+
 
                         {/* Older VAT periods (collapsible) */}
                         {olderVatPeriods.length > 0 && (
