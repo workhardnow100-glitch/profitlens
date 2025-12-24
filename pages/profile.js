@@ -541,7 +541,7 @@ export default function ProfilePage() {
 
       <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
 
-      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveFeild} />
+      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
       
       <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
 
