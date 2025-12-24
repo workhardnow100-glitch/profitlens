@@ -659,32 +659,41 @@ export default function TaxHub() {
           </div>
 
           {/* ⭐ PDF Download Button */}
-          <button
-            className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
-            onClick={async () => {
-              try {
-                const res = await fetch("/api/vat/pdf", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    clientId: session.user.clientId,
-                    periodStart: p.periodStart,
-                    periodEnd: p.periodEnd,
-                  }),
-                });
+<button
+  className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
+  onClick={async () => {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "vat",
+          clientId: session.user.clientId,
 
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error);
+          // VAT period
+          periodStart: p.periodStart,
+          periodEnd: p.periodEnd,
 
-                // Open PDF in new tab
-                window.open(data.url, "_blank");
-              } catch (err) {
-                alert("PDF error: " + err.message);
-              }
-            }}
-          >
-            Download VAT PDF
-          </button>
+          // FULL VAT PAYLOAD
+          vatBoxes: p.vatBoxes,
+          totals: p.totals,
+          companyDetails: p.companyDetails,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      window.open(data.pdf.url, "_blank");
+    } catch (err) {
+      alert("PDF error: " + err.message);
+    }
+  }}
+>
+  Download VAT PDF
+</button>
+
+
 
           {/* MTD Buttons */}
           <div className="flex gap-2">
