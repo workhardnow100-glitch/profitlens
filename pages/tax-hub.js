@@ -663,7 +663,9 @@ export default function TaxHub() {
   className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
   onClick={async () => {
     try {
-      // 1. Fetch VAT summary (this contains the REAL box values)
+      //
+      // 1. Fetch VAT summary (REAL box values, transactions, adjustments)
+      //
       const summaryRes = await fetch("/api/vat/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -677,7 +679,23 @@ export default function TaxHub() {
       const summary = await summaryRes.json();
       if (!summaryRes.ok) throw new Error(summary.error);
 
-      // 2. Generate PDF using the summary data
+      //
+      // 2. Fetch client profile (name, email, phone, address, VAT number, etc.)
+      //
+      const profileRes = await fetch("/api/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: session.user.clientId,
+        }),
+      });
+
+      const profile = await profileRes.json();
+      if (!profileRes.ok) throw new Error(profile.error);
+
+      //
+      // 3. Generate VAT PDF using the summary + profile data
+      //
       const pdfRes = await fetch("/api/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -687,16 +705,22 @@ export default function TaxHub() {
           periodStart: p.periodStart,
           periodEnd: p.periodEnd,
 
+          // VAT data
           vatBoxes: summary.boxes,
           transactions: summary.transactions,
           adjustments: summary.adjustments,
-          companyDetails: summary.companyDetails || {},
+
+          // Full client identity block
+          companyDetails: profile.client || {},
         }),
       });
 
       const pdf = await pdfRes.json();
       if (!pdfRes.ok) throw new Error(pdf.error);
 
+      //
+      // 4. Open the generated PDF
+      //
       window.open(pdf.pdf.url, "_blank");
     } catch (err) {
       alert("PDF error: " + err.message);
@@ -705,6 +729,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
