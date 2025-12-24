@@ -674,10 +674,10 @@ export default function TaxHub() {
           periodStart: p.periodStart,
           periodEnd: p.periodEnd,
 
-          // FULL VAT PAYLOAD
-          vatBoxes: p.vatBoxes,
-          totals: p.totals,
-          companyDetails: p.companyDetails,
+          // CORRECT VAT PAYLOAD
+          vatBoxes: p.boxes,
+          transactions: p.transactions,
+          adjustments: p.adjustments,
         }),
       });
 
@@ -692,6 +692,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
