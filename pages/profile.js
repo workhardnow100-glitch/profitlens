@@ -38,6 +38,8 @@ const ALLOWABLE_SET = new Set(CT_MAP.allowable);
 const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
 
 export default function ProfilePage() {
+  const { data, mutate } = useSWR("/api/profile");
+
   const { data: session, status } = useSession();
   const router = useRouter();
 
@@ -523,7 +525,7 @@ export default function ProfilePage() {
     link.click();
     document.body.removeChild(link);
   };
-  async function saveField(field, value) {
+async function saveField(field, value) {
   await fetch("/api/profile", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -533,8 +535,13 @@ export default function ProfilePage() {
     }),
   });
 
-  mutate(); // 🔥 instantly refreshes the profile data
+  if (typeof mutate === "function") {
+    mutate(); // 🔥 instantly refreshes the profile data
+  } else {
+    console.warn("mutate() is not defined — ensure useSWR is returning it.");
+  }
 }
+
 
 
 // 🔵 UNIVERSAL PROFILE PDF HANDLER – FULL PAGE MIRROR
