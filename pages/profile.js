@@ -523,32 +523,47 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
-  // 🔵 UNIVERSAL PDF HANDLER
-  async function handleDownloadPdf() {
-    try {
-      const res = await fetch("/api/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "profile",
-          year: selectedYear || new Date().getFullYear(),
-          profileSummary: {
-            totalIncome: yearSummary.totalIncome,
-            totalExpenses: yearSummary.totalExpenses,
-            netProfit: yearSummary.netProfit,
-          },
-          companyDetails: {
-            name: client?.name || "",
-          },
-        }),
-      });
+// 🔵 UNIVERSAL PROFILE PDF HANDLER – FULL PAGE MIRROR
+async function handleDownloadPdf() {
+  try {
+    const res = await fetch("/api/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "profile",
+        // mirror the filters the user actually sees
+        selectedYear: selectedYear || null,
+        expenseView,
 
-      const data = await res.json();
-      if (data?.pdf?.url) window.open(data.pdf.url, "_blank");
-    } catch (err) {
-      console.error("Error generating PDF:", err);
+        // top-level entities
+        client,
+        account,
+
+        // summary + HMRC breakdown
+        yearSummary,
+        hmrcBreakdown,
+
+        // chart data (we'll render as tables in PDF)
+        incomeByCategory,
+        expensesByCategory,
+
+        // full detail lists
+        filteredTransactions,
+        filteredByMonth,
+      }),
+    });
+
+    const data = await res.json();
+    if (data?.pdf?.url) {
+      window.open(data.pdf.url, "_blank");
+    } else {
+      console.error("PDF generation failed:", data);
     }
+  } catch (err) {
+    console.error("Error generating PDF:", err);
   }
+}
+
 
   // 🟣 TAX REPORT PDF HANDLER
   async function handleDownloadTaxReport() {

@@ -1,6 +1,7 @@
 // pages/api/pdf.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
+
 import { generateVatPdf } from "../../lib/pdf/templates/vat";
 import { generateProfilePdf } from "../../lib/pdf/templates/profile";
 import { generateCt600Pdf } from "../../lib/pdf/templates/ct600";
@@ -20,20 +21,36 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // 🔵 FULL PAYLOAD (Profile now sends everything)
     const {
       type,
       clientId: rawClientId,
+
+      // VAT
       periodStart,
       periodEnd,
-      year,
-      taxYear,
-      // domain-specific payloads
       vatBoxes,
       totals,
-      companyDetails,
-      profileSummary,
+
+      // CT600
       ctSummary,
-      // optional filename override
+
+      // Profile (NEW FULL PAYLOAD)
+      client,
+      account,
+      selectedYear,
+      expenseView,
+      yearSummary,
+      hmrcBreakdown,
+      incomeByCategory,
+      expensesByCategory,
+      filteredTransactions,
+      filteredByMonth,
+
+      // Shared
+      companyDetails,
+      year,
+      taxYear,
       filename,
     } = req.body || {};
 
@@ -73,13 +90,23 @@ export default async function handler(req, res) {
         break;
 
       case "profile":
+        // 🔵 SEND FULL PROFILE PAYLOAD TO THE TEMPLATE
         record = await generateProfilePdf({
           clientId,
-          year,
           filename: baseFilename,
           createdBy,
-          profileSummary,
-          companyDetails,
+
+          // full-page mirror data
+          client,
+          account,
+          selectedYear,
+          expenseView,
+          yearSummary,
+          hmrcBreakdown,
+          incomeByCategory,
+          expensesByCategory,
+          filteredTransactions,
+          filteredByMonth,
         });
         break;
 
@@ -119,3 +146,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to generate PDF" });
   }
 }
+
