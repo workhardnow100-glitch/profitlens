@@ -664,7 +664,7 @@ export default function TaxHub() {
   onClick={async () => {
     try {
       //
-      // 1. Fetch VAT summary (REAL box values, transactions, adjustments)
+      // 1. Fetch VAT summary
       //
       const summaryRes = await fetch("/api/vat/summary", {
         method: "POST",
@@ -680,21 +680,18 @@ export default function TaxHub() {
       if (!summaryRes.ok) throw new Error(summary.error);
 
       //
-      // 2. Fetch client profile (name, email, phone, address, VAT number, etc.)
+      // 2. Fetch client details DIRECTLY from Supabase
       //
-      const profileRes = await fetch("/api/profile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: session.user.clientId,
-        }),
-      });
+      const { data: client, error: clientError } = await supabase
+        .from("clients")
+        .select("id, name, email, phone, address, postcode, business_name, company_number, vat_number")
+        .eq("id", session.user.clientId)
+        .single();
 
-      const profile = await profileRes.json();
-      if (!profileRes.ok) throw new Error(profile.error);
+      if (clientError) throw clientError;
 
       //
-      // 3. Generate VAT PDF using the summary + profile data
+      // 3. Generate VAT PDF
       //
       const pdfRes = await fetch("/api/pdf", {
         method: "POST",
@@ -705,13 +702,12 @@ export default function TaxHub() {
           periodStart: p.periodStart,
           periodEnd: p.periodEnd,
 
-          // VAT data
           vatBoxes: summary.boxes,
           transactions: summary.transactions,
           adjustments: summary.adjustments,
 
           // Full client identity block
-          companyDetails: profile.client || {},
+          companyDetails: client || {},
         }),
       });
 
@@ -719,7 +715,7 @@ export default function TaxHub() {
       if (!pdfRes.ok) throw new Error(pdf.error);
 
       //
-      // 4. Open the generated PDF
+      // 4. Open PDF
       //
       window.open(pdf.pdf.url, "_blank");
     } catch (err) {
@@ -729,6 +725,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
