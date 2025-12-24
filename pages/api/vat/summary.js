@@ -151,6 +151,15 @@ export default async function handler(req, res) {
     box3=box1+box2;
     box5=box3-box4;
 
+    // ⭐ NEW: Fetch client details for VAT PDF
+    const { data: clientDetails, error: clientErr } = await supabase
+      .from("clients")
+      .select("id, name, email, phone, address, postcode, business_name, company_number, vat_number")
+      .eq("id", clientId)
+      .single();
+
+    if (clientErr) throw clientErr;
+
     return res.status(200).json({
       period:`${periodStart} → ${periodEnd}`,
       locked:effectiveLocked,
@@ -163,7 +172,8 @@ export default async function handler(req, res) {
         box7:+box7.toFixed(2),box8:+box8.toFixed(2),box9:+box9.toFixed(2)
       },
       transactions:vatTransactions,
-      adjustments
+      adjustments,
+      clientDetails // ⭐ NEW FIELD
     });
   } catch(err){
     console.error("VAT summary error:",err);

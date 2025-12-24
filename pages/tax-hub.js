@@ -663,9 +663,7 @@ export default function TaxHub() {
   className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
   onClick={async () => {
     try {
-      //
-      // 1. Fetch VAT summary
-      //
+      // 1. Fetch VAT summary (now includes clientDetails)
       const summaryRes = await fetch("/api/vat/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -679,20 +677,7 @@ export default function TaxHub() {
       const summary = await summaryRes.json();
       if (!summaryRes.ok) throw new Error(summary.error);
 
-      //
-      // 2. Fetch client details DIRECTLY from Supabase
-      //
-      const { data: client, error: clientError } = await supabase
-        .from("clients")
-        .select("id, name, email, phone, address, postcode, business_name, company_number, vat_number")
-        .eq("id", session.user.clientId)
-        .single();
-
-      if (clientError) throw clientError;
-
-      //
-      // 3. Generate VAT PDF
-      //
+      // 2. Generate VAT PDF using summary + clientDetails
       const pdfRes = await fetch("/api/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -706,17 +691,13 @@ export default function TaxHub() {
           transactions: summary.transactions,
           adjustments: summary.adjustments,
 
-          // Full client identity block
-          companyDetails: client || {},
+          companyDetails: summary.clientDetails || {},
         }),
       });
 
       const pdf = await pdfRes.json();
       if (!pdfRes.ok) throw new Error(pdf.error);
 
-      //
-      // 4. Open PDF
-      //
       window.open(pdf.pdf.url, "_blank");
     } catch (err) {
       alert("PDF error: " + err.message);
@@ -725,6 +706,8 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
+
 
 
 
