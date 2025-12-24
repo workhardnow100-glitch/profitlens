@@ -38,7 +38,6 @@ const ALLOWABLE_SET = new Set(CT_MAP.allowable);
 const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
 
 export default function ProfilePage() {
-  const { data, mutate } = useSWR("/api/profile");
 
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -49,7 +48,7 @@ export default function ProfilePage() {
   const [transactions, setTransactions] = useState([]);
   const [hmrcCategories, setHmrcCategories] = useState([]);
   const [account, setAccount] = useState(null);
-  const [client, setClient] = useState(null); // ✅ client state
+  const [client, setClient] = useState(null);
   const [totalsByType, setTotalsByType] = useState({
     sole_trader: {},
     limited_company: {},
@@ -69,10 +68,13 @@ export default function ProfilePage() {
   const [hcReady, setHcReady] = useState(false);
 
   const [selectedYear, setSelectedYear] = useState(null);
-  const [expenseView, setExpenseView] = useState("all"); // all | allowable | disallowable
+  const [expenseView, setExpenseView] = useState("all");
 
   const reportRef = useRef();
   const taxReportRef = useRef();
+
+  // ⭐ Allow saveField() to call fetchProfile()
+  let fetchProfile;
 
   // Access control
   useEffect(() => {
@@ -92,7 +94,7 @@ export default function ProfilePage() {
 
   // Fetch profile data
   useEffect(() => {
-    const fetchProfile = async () => {
+    fetchProfile = async () => {
       if (status !== "authenticated") return;
       setLoading(true);
       setError(null);
@@ -106,7 +108,7 @@ export default function ProfilePage() {
         setTransactions(json.transactions || []);
         setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
-        setClient(json.client || null); // ✅ client from API
+        setClient(json.client || null);
         setTotalsByType(
           json.totalsByType || { sole_trader: {}, limited_company: {} }
         );
@@ -120,7 +122,6 @@ export default function ProfilePage() {
           }
         );
 
-        // Default year: current calendar year (D1)
         const todayYear = new Date().getFullYear();
         const yearsFromData = new Set(
           (json.transactions || [])
@@ -140,6 +141,7 @@ export default function ProfilePage() {
         setLoading(false);
       }
     };
+
     fetchProfile();
   }, [status]);
 
@@ -167,7 +169,7 @@ export default function ProfilePage() {
     })();
   }, []);
 
-  // Year options from data
+  // Year options
   const yearOptions = useMemo(() => {
     const years = new Set(
       (transactions || [])
@@ -177,7 +179,7 @@ export default function ProfilePage() {
     return Array.from(years).sort((a, b) => b - a);
   }, [transactions]);
 
-  // Filtered transactions by selectedYear
+  // Filtered transactions
   const filteredTransactions = useMemo(() => {
     if (!selectedYear) return transactions || [];
     return (transactions || []).filter((tx) => {
@@ -187,12 +189,11 @@ export default function ProfilePage() {
     });
   }, [transactions, selectedYear]);
 
-  // Filtered byMonth derived from API byMonth + selectedYear
+  // Filtered byMonth
   const filteredByMonth = useMemo(() => {
     if (!selectedYear) return byMonth || {};
     const result = {};
     Object.entries(byMonth || {}).forEach(([monthKey, vals]) => {
-      // monthKey is "YYYY-MM"
       const [yearStr] = monthKey.split("-");
       const year = Number(yearStr);
       if (year === selectedYear) {
@@ -202,7 +203,7 @@ export default function ProfilePage() {
     return result;
   }, [byMonth, selectedYear]);
 
-  // Client-side summary for selected year
+  // Year summary
   const yearSummary = useMemo(() => {
     let totalIncome = 0;
     let totalExpenses = 0;
@@ -237,7 +238,7 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions]);
 
-  // Income / expense aggregations for charts (based on filteredTransactions)
+  // Income / expense aggregations
   const { incomeByCategory, expensesByCategory } = useMemo(() => {
     const incomeMap = {};
     const expenseMap = {};
@@ -252,7 +253,6 @@ export default function ProfilePage() {
         incomeMap[cat] = (incomeMap[cat] || 0) + amount;
       } else if (amount < 0) {
         const abs = Math.abs(amount);
-        // Expense view filter
         if (expenseView === "allowable" && !ALLOWABLE_SET.has(cat)) continue;
         if (
           expenseView === "disallowable" &&
@@ -269,7 +269,7 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, expenseView]);
 
-  // HMRC breakdown (filtered by year)
+  // HMRC breakdown
   const hmrcBreakdown = useMemo(() => {
     let allowable = 0;
     let disallowable = 0;
@@ -316,184 +316,7 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, yearSummary]);
 
-  // Income drilldown chart
-  const incomeChartOptions = useMemo(() => {
-    if (!hcReady || !Highcharts) return null;
-    const entries = Object.entries(incomeByCategory || {});
-    if (!entries.length) return null;
-
-    const topSeriesData = entries.map(([cat, total]) => ({
-      name: cat,
-      y: Number(total || 0),
-      drilldown: `income-${cat}`,
-    }));
-
-    const drilldownSeries = entries.map(([cat]) => {
-      const points = (filteredTransactions || [])
-        .filter(
-          (tx) =>
-            tx.business_category?.trim() === cat &&
-            Number(tx.amount || 0) > 0
-        )
-        .map((tx) => ({
-          name: tx.description || tx.date || tx.id,
-          y: Number(tx.amount || 0),
-        }));
-
-      return {
-        id: `income-${cat}`,
-        name: `Income – ${cat}`,
-        data: points.map((p) => [p.name, p.y]),
-      };
-    });
-
-    return {
-      chart: {
-        type: "column",
-      },
-      title: {
-        text: "Income by Category",
-      },
-      xAxis: {
-        type: "category",
-      },
-      legend: {
-        enabled: false,
-      },
-      plotOptions: {
-        series: {
-          borderWidth: 0,
-          dataLabels: {
-            enabled: true,
-            format: "£{point.y:.2f}",
-          },
-        },
-      },
-      tooltip: {
-        headerFormat:
-          '<span style="font-size:11px">{series.name}</span><br>',
-        pointFormat:
-          '<span style="color:{point.color}">{point.name}</span>: <b>£{point.y:.2f}</b><br/>',
-      },
-      series: [
-        {
-          name: "Income",
-          colorByPoint: true,
-          data: topSeriesData,
-        },
-      ],
-      drilldown: {
-        series: drilldownSeries,
-      },
-      credits: { enabled: false },
-    };
-  }, [hcReady, Highcharts, incomeByCategory, filteredTransactions]);
-
-  // Expenses drilldown chart
-  const expensesChartOptions = useMemo(() => {
-    if (!hcReady || !Highcharts) return null;
-    const entries = Object.entries(expensesByCategory || {});
-    if (!entries.length) return null;
-
-    const topSeriesData = entries.map(([cat, total]) => ({
-      name: cat,
-      y: Number(total || 0),
-      drilldown: `expenses-${cat}`,
-    }));
-
-    const drilldownSeries = entries.map(([cat]) => {
-      const points = (filteredTransactions || [])
-        .filter((tx) => {
-          const catMatch = tx.business_category?.trim() === cat;
-          const isExpense = Number(tx.amount || 0) < 0;
-          if (!catMatch || !isExpense) return false;
-
-          const categoryName =
-            (tx.business_category && tx.business_category.trim()) ||
-            "Uncategorised";
-
-          if (
-            expenseView === "allowable" &&
-            !ALLOWABLE_SET.has(categoryName)
-          )
-            return false;
-          if (
-            expenseView === "disallowable" &&
-            !DISALLOWABLE_SET.has(categoryName)
-          )
-            return false;
-          return true;
-        })
-        .map((tx) => ({
-          name: tx.description || tx.date || tx.id,
-          y: Math.abs(Number(tx.amount || 0)),
-        }));
-
-      return {
-        id: `expenses-${cat}`,
-        name: `Expenses – ${cat}`,
-        data: points.map((p) => [p.name, p.y]),
-      };
-    });
-
-    return {
-      chart: {
-        type: "column",
-      },
-      title: {
-        text: "Expenses by Category",
-      },
-      xAxis: {
-        type: "category",
-      },
-      legend: {
-        enabled: false,
-      },
-      plotOptions: {
-        series: {
-          borderWidth: 0,
-          dataLabels: {
-            enabled: true,
-            format: "£{point.y:.2f}",
-          },
-        },
-      },
-      tooltip: {
-        headerFormat:
-          '<span style="font-size:11px">{series.name}</span><br>',
-        pointFormat:
-          '<span style="color:{point.color}">{point.name}</span>: <b>£{point.y:.2f}</b><br/>',
-      },
-      series: [
-        {
-          name: "Expenses",
-          colorByPoint: true,
-          data: topSeriesData,
-        },
-      ],
-      drilldown: {
-        series: drilldownSeries,
-      },
-      credits: { enabled: false },
-    };
-  }, [
-    hcReady,
-    Highcharts,
-    expensesByCategory,
-    filteredTransactions,
-    expenseView,
-  ]);
-
-  const handlePrintFull = useReactToPrint({
-    content: () => reportRef.current,
-    documentTitle: "HMRC Profile Report",
-  });
-
-  const handlePrintTaxReport = useReactToPrint({
-    content: () => taxReportRef.current,
-    documentTitle: "HMRC Tax Report",
-  });
-
+  // CSV export
   const handleExportCSV = () => {
     const rows = [
       [
@@ -525,68 +348,57 @@ export default function ProfilePage() {
     link.click();
     document.body.removeChild(link);
   };
-async function saveField(field, value) {
-  await fetch("/api/profile", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      updateClient: true,
-      [field]: value,
-    }),
-  });
 
-  if (typeof mutate === "function") {
-    mutate(); // 🔥 instantly refreshes the profile data
-  } else {
-    console.warn("mutate() is not defined — ensure useSWR is returning it.");
-  }
-}
-
-
-
-// 🔵 UNIVERSAL PROFILE PDF HANDLER – FULL PAGE MIRROR
-async function handleDownloadPdf() {
-  try {
-    const res = await fetch("/api/pdf", {
+  // ⭐ FIXED saveField — now refreshes profile instantly
+  async function saveField(field, value) {
+    await fetch("/api/profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        type: "profile",
-        // mirror the filters the user actually sees
-        selectedYear: selectedYear || null,
-        expenseView,
-
-        // top-level entities
-        client,
-        account,
-
-        // summary + HMRC breakdown
-        yearSummary,
-        hmrcBreakdown,
-
-        // chart data (we'll render as tables in PDF)
-        incomeByCategory,
-        expensesByCategory,
-
-        // full detail lists
-        filteredTransactions,
-        filteredByMonth,
+        updateClient: true,
+        [field]: value,
       }),
     });
 
-    const data = await res.json();
-    if (data?.pdf?.url) {
-      window.open(data.pdf.url, "_blank");
+    if (typeof fetchProfile === "function") {
+      fetchProfile();
     } else {
-      console.error("PDF generation failed:", data);
+      console.warn("fetchProfile() is not available yet.");
     }
-  } catch (err) {
-    console.error("Error generating PDF:", err);
   }
-}
 
+  // PDF handlers
+  async function handleDownloadPdf() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "profile",
+          selectedYear: selectedYear || null,
+          expenseView,
+          client,
+          account,
+          yearSummary,
+          hmrcBreakdown,
+          incomeByCategory,
+          expensesByCategory,
+          filteredTransactions,
+          filteredByMonth,
+        }),
+      });
 
-  // 🟣 TAX REPORT PDF HANDLER
+      const data = await res.json();
+      if (data?.pdf?.url) {
+        window.open(data.pdf.url, "_blank");
+      } else {
+        console.error("PDF generation failed:", data);
+      }
+    } catch (err) {
+      console.error("Error generating PDF:", err);
+    }
+  }
+
   async function handleDownloadTaxReport() {
     try {
       const res = await fetch("/api/pdf", {
@@ -729,8 +541,8 @@ async function handleDownloadPdf() {
 
       <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
 
-      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
-
+      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveFeild} />
+      
       <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
 
       <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
