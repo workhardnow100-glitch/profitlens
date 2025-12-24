@@ -1,7 +1,6 @@
 // pages/reports.js
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
-import { useReactToPrint } from "react-to-print";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
@@ -30,8 +29,6 @@ export default function Reports() {
   const [transactions, setTransactions] = useState([]);
   const [showTransactions, setShowTransactions] = useState(true);
 
-  const reportRef = useRef();
-
   const { data: session, status } = useSession();
   const router = useRouter();
 
@@ -58,11 +55,6 @@ export default function Reports() {
     }
   }, [session, status, router]);
 
-  const handlePrint = useReactToPrint({
-    content: () => reportRef.current,
-    documentTitle: "ProfitLens Monthly Report",
-  });
-
   // ✅ Fetch reports
   useEffect(() => {
     if (status !== "authenticated") return;
@@ -75,7 +67,7 @@ export default function Reports() {
 
         setReports(json.reports?.monthly || []);
         setCategories(json.categories || []);
-        setClients(json.clients || []); // ✅ income-only clients from API
+        setClients(json.clients || []); // income-only clients from API
         setError(null);
       } catch (err) {
         setError(err.message || "Failed to load reports");
@@ -131,6 +123,36 @@ export default function Reports() {
       r.transactions?.some((tx) => tx.category === selectedCategory)
     );
   }, [reports, selectedCategory]);
+
+  // 🔵 UNIVERSAL REPORTS PDF HANDLER – FULL PAGE MIRROR
+  async function handleDownloadReportsPdf() {
+    try {
+      const res = await fetch("/api/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "reports",
+
+          // filters
+          selectedCategory,
+          selectedClient,
+
+          // full data as seen in UI
+          filteredReports,
+          transactions,
+        }),
+      });
+
+      const data = await res.json();
+      if (data?.pdf?.url) {
+        window.open(data.pdf.url, "_blank");
+      } else {
+        console.error("PDF generation failed:", data);
+      }
+    } catch (err) {
+      console.error("Error generating PDF:", err);
+    }
+  }
 
   // ✅ Chart: Income vs Expenses vs Net
   const timeSeriesOptions = useMemo(() => {
@@ -296,11 +318,12 @@ export default function Reports() {
       credits: { enabled: false },
     };
   }, [transactions, ignoredCategories]);
+
   // ✅ Chart: Heatmap (spending intensity)
   const heatmapOptions = useMemo(() => {
     if (!filteredReports.length) return null;
 
-    const categories = filteredReports.map((r) => r.label);
+    const categoriesX = filteredReports.map((r) => r.label);
     const catSet = new Set();
 
     filteredReports.forEach((r) =>
@@ -328,7 +351,7 @@ export default function Reports() {
     return {
       chart: { type: "heatmap", height: 320 },
       title: { text: "Spending Intensity" },
-      xAxis: { categories },
+      xAxis: { categories: categoriesX },
       yAxis: { categories: catList, title: null },
       colorAxis: { min: 0, minColor: "#f0f9ff", maxColor: "#0ea5e9" },
       series: [{ data }],
@@ -372,7 +395,7 @@ export default function Reports() {
         </select>
 
         <button
-          onClick={handlePrint}
+          onClick={handleDownloadReportsPdf}
           className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 transition"
         >
           Download PDF
@@ -465,8 +488,8 @@ export default function Reports() {
         </ResponsiveCard>
       )}
 
-      {/* Printable report cards */}
-      <div ref={reportRef} className="mt-8 space-y-6">
+      {/* Reports list (monthly cards) */}
+      <div className="mt-8 space-y-6">
         {error && (
           <p className="text-red-500">Failed to load report data: {error}</p>
         )}
@@ -516,7 +539,7 @@ export default function Reports() {
         ))}
       </div>
 
-      {/* ✅ In‑App Disclaimer */}
+      {/* In‑App Disclaimer */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
         ProfitLens provides estimates only. Always verify figures before filing
         with HMRC. Nothing displayed here constitutes tax, accounting, or legal

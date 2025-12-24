@@ -5,10 +5,9 @@ import { authOptions } from "./auth/[...nextauth]";
 import { generateVatPdf } from "../../lib/pdf/templates/vat";
 import { generateProfilePdf } from "../../lib/pdf/templates/profile";
 import { generateCt600Pdf } from "../../lib/pdf/templates/ct600";
-// import others as you create them:
+import { generateReportsPdf } from "../../lib/pdf/templates/reports";
 // import { generateSaPdf } from "../../lib/pdf/templates/sa";
 // import { generateCisPdf } from "../../lib/pdf/templates/cis";
-// import { generateReportsPdf } from "../../lib/pdf/templates/reports";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -21,7 +20,7 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // 🔵 FULL PAYLOAD (Profile now sends everything)
+    // 🔵 FULL PAYLOAD (Profile + Reports + VAT + CT600)
     const {
       type,
       clientId: rawClientId,
@@ -35,7 +34,7 @@ export default async function handler(req, res) {
       // CT600
       ctSummary,
 
-      // Profile (NEW FULL PAYLOAD)
+      // Profile
       client,
       account,
       selectedYear,
@@ -46,6 +45,12 @@ export default async function handler(req, res) {
       expensesByCategory,
       filteredTransactions,
       filteredByMonth,
+
+      // Reports
+      selectedCategory,
+      selectedClient,
+      filteredReports,
+      transactions,
 
       // Shared
       companyDetails,
@@ -90,13 +95,11 @@ export default async function handler(req, res) {
         break;
 
       case "profile":
-        // 🔵 SEND FULL PROFILE PAYLOAD TO THE TEMPLATE
         record = await generateProfilePdf({
           clientId,
           filename: baseFilename,
           createdBy,
 
-          // full-page mirror data
           client,
           account,
           selectedYear,
@@ -121,16 +124,25 @@ export default async function handler(req, res) {
         });
         break;
 
+      case "reports":
+        record = await generateReportsPdf({
+          clientId,
+          filename: baseFilename,
+          createdBy,
+
+          selectedCategory,
+          selectedClient,
+          filteredReports,
+          transactions,
+        });
+        break;
+
       // case "sa":
       //   record = await generateSaPdf(...);
       //   break;
 
       // case "cis":
       //   record = await generateCisPdf(...);
-      //   break;
-
-      // case "reports":
-      //   record = await generateReportsPdf(...);
       //   break;
 
       default:
@@ -146,4 +158,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to generate PDF" });
   }
 }
-
