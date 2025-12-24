@@ -675,7 +675,7 @@ export default function TaxHub() {
           periodEnd: p.periodEnd,
 
           // CORRECT VAT PAYLOAD
-          vatBoxes: p.boxes,
+          vatBoxes: p.boxes,          // ← THIS is the real data
           transactions: p.transactions,
           adjustments: p.adjustments,
         }),
@@ -692,6 +692,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
