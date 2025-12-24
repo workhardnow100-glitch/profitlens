@@ -100,24 +100,45 @@ export default async function handler(req, res) {
 
       if (hmrcError) throw hmrcError;
 
-      // FIXED: Fetch account details for the ACTUAL CLIENT
+      // Fetch account details
       const { data: account, error: accError } = await supabaseAdmin
         .from("accounts")
         .select("account_number, sort_code")
-        .eq("owner_id", clientId)   // ← FIXED HERE
+        .eq("owner_id", clientId)
         .single();
 
       if (accError && accError.code !== "PGRST116") throw accError;
 
-      // Fetch client details
+      // ⭐ Fetch FULL client identity block
       const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
-        .select("id, name, email, phone, address, postcode, business_type")
+        .select(`
+          id,
+          name,
+          email,
+          phone,
+          address,
+          postcode,
+          business_type,
+          business_name,
+          trading_name,
+          company_number,
+          vat_number,
+          utr_number,
+          registered_address,
+          industry,
+          website,
+          contact_person,
+          contact_phone,
+          contact_email,
+          notes
+        `)
         .eq("id", clientId)
         .single();
 
       if (clientError) throw clientError;
 
+      // Build summary
       const businessType = client?.business_type || "sole_trader";
 
       const totalsByType = {

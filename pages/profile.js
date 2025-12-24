@@ -666,52 +666,125 @@ async function handleDownloadPdf() {
           </div>
         </div>
 
-        {/* ✅ Business Profile */}
-        <ResponsiveCard title="Business Profile">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <p className="text-sm text-slate-600">Business Name</p>
-              <p className="font-medium text-slate-900">
-                {client?.name || "—"}
-              </p>
-            </div>
+{/* ✅ Business Profile */}
+<ResponsiveCard title="Business Profile">
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-            <div>
-              <p className="text-sm text-slate-600">Business Type</p>
-              <p className="font-medium text-slate-900">
-                {client?.business_type || "—"}
-              </p>
-            </div>
+    {/* Business Name */}
+    <div>
+      <p className="text-sm text-slate-600">Business Name</p>
+      <p className="font-medium text-slate-900">
+        {client?.business_name || client?.name || "—"}
+      </p>
+    </div>
 
-            <div>
-              <p className="text-sm text-slate-600">Address</p>
-              <p className="font-medium text-slate-900">
-                {client?.address || "—"}
-              </p>
-            </div>
+    {/* Trading Name */}
+    <div>
+      <p className="text-sm text-slate-600">Trading Name</p>
+      <p className="font-medium text-slate-900">
+        {client?.trading_name || "—"}
+      </p>
+    </div>
 
-            <div>
-              <p className="text-sm text-slate-600">Postcode</p>
-              <p className="font-medium text-slate-900">
-                {client?.postcode || "—"}
-              </p>
-            </div>
+    {/* Business Type */}
+    <div>
+      <p className="text-sm text-slate-600">Business Type</p>
+      <p className="font-medium text-slate-900">
+        {client?.business_type || "—"}
+      </p>
+    </div>
 
-            <div>
-              <p className="text-sm text-slate-600">Phone Number</p>
-              <p className="font-medium text-slate-900">
-                {client?.phone || "—"}
-              </p>
-            </div>
+    {/* Company Number */}
+    <div>
+      <p className="text-sm text-slate-600">Company Number</p>
+      <p className="font-medium text-slate-900">
+        {client?.company_number || "—"}
+      </p>
+    </div>
 
-            <div>
-              <p className="text-sm text-slate-600">Email</p>
-              <p className="font-medium text-slate-900">
-                {client?.email || "—"}
-              </p>
-            </div>
-          </div>
-        </ResponsiveCard>
+    {/* VAT Number */}
+    <div>
+      <p className="text-sm text-slate-600">VAT Number</p>
+      <p className="font-medium text-slate-900">
+        {client?.vat_number || "—"}
+      </p>
+    </div>
+
+    {/* UTR Number */}
+    <div>
+      <p className="text-sm text-slate-600">UTR Number</p>
+      <p className="font-medium text-slate-900">
+        {client?.utr_number || "—"}
+      </p>
+    </div>
+
+    {/* Registered Address */}
+    <div>
+      <p className="text-sm text-slate-600">Registered Address</p>
+      <p className="font-medium text-slate-900">
+        {client?.registered_address || client?.address || "—"}
+      </p>
+    </div>
+
+    {/* Postcode */}
+    <div>
+      <p className="text-sm text-slate-600">Postcode</p>
+      <p className="font-medium text-slate-900">
+        {client?.postcode || "—"}
+      </p>
+    </div>
+
+    {/* Industry */}
+    <div>
+      <p className="text-sm text-slate-600">Industry</p>
+      <p className="font-medium text-slate-900">
+        {client?.industry || "—"}
+      </p>
+    </div>
+
+    {/* Website */}
+    <div>
+      <p className="text-sm text-slate-600">Website</p>
+      <p className="font-medium text-slate-900">
+        {client?.website || "—"}
+      </p>
+    </div>
+
+    {/* Contact Person */}
+    <div>
+      <p className="text-sm text-slate-600">Contact Person</p>
+      <p className="font-medium text-slate-900">
+        {client?.contact_person || "—"}
+      </p>
+    </div>
+
+    {/* Contact Phone */}
+    <div>
+      <p className="text-sm text-slate-600">Contact Phone</p>
+      <p className="font-medium text-slate-900">
+        {client?.contact_phone || "—"}
+      </p>
+    </div>
+
+    {/* Contact Email */}
+    <div>
+      <p className="text-sm text-slate-600">Contact Email</p>
+      <p className="font-medium text-slate-900">
+        {client?.contact_email || "—"}
+      </p>
+    </div>
+
+    {/* Notes */}
+    <div className="md:col-span-2">
+      <p className="text-sm text-slate-600">Notes</p>
+      <p className="font-medium text-slate-900 whitespace-pre-line">
+        {client?.notes || "—"}
+      </p>
+    </div>
+
+  </div>
+</ResponsiveCard>
+
 
         {/* Account info */}
         <ResponsiveCard title="Account details">
