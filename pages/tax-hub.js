@@ -663,28 +663,41 @@ export default function TaxHub() {
   className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
   onClick={async () => {
     try {
-      const res = await fetch("/api/pdf", {
+      // 1. Fetch VAT summary (this contains boxes, transactions, adjustments)
+      const summaryRes = await fetch("/api/vat/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: session.user.clientId,
+          periodStart: p.periodStart,
+          periodEnd: p.periodEnd,
+        }),
+      });
+
+      const summary = await summaryRes.json();
+      if (!summaryRes.ok) throw new Error(summary.error);
+
+      // 2. Generate PDF using the summary data
+      const pdfRes = await fetch("/api/pdf", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "vat",
           clientId: session.user.clientId,
-
-          // VAT period
           periodStart: p.periodStart,
           periodEnd: p.periodEnd,
 
-          // CORRECT VAT PAYLOAD
-          vatBoxes: p.boxes,          // ← THIS is the real data
-          transactions: p.transactions,
-          adjustments: p.adjustments,
+          vatBoxes: summary.boxes,
+          transactions: summary.transactions,
+          adjustments: summary.adjustments,
+          companyDetails: summary.companyDetails || {},
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const pdf = await pdfRes.json();
+      if (!pdfRes.ok) throw new Error(pdf.error);
 
-      window.open(data.pdf.url, "_blank");
+      window.open(pdf.pdf.url, "_blank");
     } catch (err) {
       alert("PDF error: " + err.message);
     }
@@ -692,6 +705,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
