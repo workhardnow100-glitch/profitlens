@@ -16,6 +16,7 @@ import ResponsiveTable from "../components/ResponsiveTable";
 
 import { CT_MAP } from "../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
+import EditableField from "../components/EditableField";
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
