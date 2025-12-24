@@ -522,6 +522,17 @@ export default function ProfilePage() {
     link.click();
     document.body.removeChild(link);
   };
+  async function saveField(field, value) {
+  await fetch("/api/profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      updateClient: true,
+      [field]: value,
+    }),
+  });
+}
+
 
 // 🔵 UNIVERSAL PROFILE PDF HANDLER – FULL PAGE MIRROR
 async function handleDownloadPdf() {
@@ -670,120 +681,109 @@ async function handleDownloadPdf() {
 <ResponsiveCard title="Business Profile">
   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-    {/* Business Name */}
-    <div>
-      <p className="text-sm text-slate-600">Business Name</p>
-      <p className="font-medium text-slate-900">
-        {client?.business_name || client?.name || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Business Name"
+      value={client?.business_name}
+      field="business_name"
+      onSave={saveField}
+    />
 
-    {/* Trading Name */}
-    <div>
-      <p className="text-sm text-slate-600">Trading Name</p>
-      <p className="font-medium text-slate-900">
-        {client?.trading_name || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Trading Name"
+      value={client?.trading_name}
+      field="trading_name"
+      onSave={saveField}
+    />
 
-    {/* Business Type */}
-    <div>
-      <p className="text-sm text-slate-600">Business Type</p>
-      <p className="font-medium text-slate-900">
-        {client?.business_type || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Business Type"
+      value={client?.business_type}
+      field="business_type"
+      onSave={saveField}
+    />
 
-    {/* Company Number */}
-    <div>
-      <p className="text-sm text-slate-600">Company Number</p>
-      <p className="font-medium text-slate-900">
-        {client?.company_number || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Company Number"
+      value={client?.company_number}
+      field="company_number"
+      onSave={saveField}
+    />
 
-    {/* VAT Number */}
-    <div>
-      <p className="text-sm text-slate-600">VAT Number</p>
-      <p className="font-medium text-slate-900">
-        {client?.vat_number || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="VAT Number"
+      value={client?.vat_number}
+      field="vat_number"
+      onSave={saveField}
+    />
 
-    {/* UTR Number */}
-    <div>
-      <p className="text-sm text-slate-600">UTR Number</p>
-      <p className="font-medium text-slate-900">
-        {client?.utr_number || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="UTR Number"
+      value={client?.utr_number}
+      field="utr_number"
+      onSave={saveField}
+    />
 
-    {/* Registered Address */}
-    <div>
-      <p className="text-sm text-slate-600">Registered Address</p>
-      <p className="font-medium text-slate-900">
-        {client?.registered_address || client?.address || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Registered Address"
+      value={client?.registered_address}
+      field="registered_address"
+      onSave={saveField}
+    />
 
-    {/* Postcode */}
-    <div>
-      <p className="text-sm text-slate-600">Postcode</p>
-      <p className="font-medium text-slate-900">
-        {client?.postcode || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Postcode"
+      value={client?.postcode}
+      field="postcode"
+      onSave={saveField}
+    />
 
-    {/* Industry */}
-    <div>
-      <p className="text-sm text-slate-600">Industry</p>
-      <p className="font-medium text-slate-900">
-        {client?.industry || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Industry"
+      value={client?.industry}
+      field="industry"
+      onSave={saveField}
+    />
 
-    {/* Website */}
-    <div>
-      <p className="text-sm text-slate-600">Website</p>
-      <p className="font-medium text-slate-900">
-        {client?.website || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Website"
+      value={client?.website}
+      field="website"
+      onSave={saveField}
+    />
 
-    {/* Contact Person */}
-    <div>
-      <p className="text-sm text-slate-600">Contact Person</p>
-      <p className="font-medium text-slate-900">
-        {client?.contact_person || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Contact Person"
+      value={client?.contact_person}
+      field="contact_person"
+      onSave={saveField}
+    />
 
-    {/* Contact Phone */}
-    <div>
-      <p className="text-sm text-slate-600">Contact Phone</p>
-      <p className="font-medium text-slate-900">
-        {client?.contact_phone || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Contact Phone"
+      value={client?.contact_phone}
+      field="contact_phone"
+      onSave={saveField}
+    />
 
-    {/* Contact Email */}
-    <div>
-      <p className="text-sm text-slate-600">Contact Email</p>
-      <p className="font-medium text-slate-900">
-        {client?.contact_email || "—"}
-      </p>
-    </div>
+    <EditableField
+      label="Contact Email"
+      value={client?.contact_email}
+      field="contact_email"
+      onSave={saveField}
+    />
 
-    {/* Notes */}
     <div className="md:col-span-2">
-      <p className="text-sm text-slate-600">Notes</p>
-      <p className="font-medium text-slate-900 whitespace-pre-line">
-        {client?.notes || "—"}
-      </p>
+      <EditableField
+        label="Notes"
+        value={client?.notes}
+        field="notes"
+        onSave={saveField}
+      />
     </div>
 
   </div>
 </ResponsiveCard>
+
 
 
         {/* Account info */}

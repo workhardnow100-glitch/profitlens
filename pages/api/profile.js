@@ -26,7 +26,7 @@ export default async function handler(req, res) {
 
   try {
     // AUDIT LOG — Accountant viewing profile
-    if (session.user.role === "accountant") {
+    if (session.user.role === "accountant" && req.method === "GET") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
@@ -37,8 +37,35 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // POST — Update category
-    if (req.method === "POST") {
+    // ⭐ POST — Update client identity fields
+    if (req.method === "POST" && req.body.updateClient) {
+      const updateFields = { ...req.body };
+      delete updateFields.updateClient;
+
+      const { error } = await supabaseAdmin
+        .from("clients")
+        .update(updateFields)
+        .eq("id", clientId);
+
+      if (error) throw error;
+
+      // Accountant audit log
+      if (session.user.role === "accountant") {
+        await supabaseAdmin.from("audit").insert([
+          {
+            client_id: clientId,
+            actor_email: session.user.email,
+            action: "ACCOUNTANT_UPDATE_CLIENT_PROFILE",
+            details: `Updated client identity fields: ${Object.keys(updateFields).join(", ")}`,
+          },
+        ]);
+      }
+
+      return res.status(200).json({ success: true });
+    }
+
+    // ⭐ POST — Update transaction category (existing behaviour)
+    if (req.method === "POST" && !req.body.updateClient) {
       const { transactionId, newCategory } = req.body;
 
       if (!transactionId || !newCategory) {
@@ -77,7 +104,7 @@ export default async function handler(req, res) {
       req.method = "GET";
     }
 
-    // GET — Profile data
+    // ⭐ GET — Profile data
     if (req.method === "GET") {
       // Fetch transactions
       const { data: transactions, error: txError } = await supabaseAdmin
