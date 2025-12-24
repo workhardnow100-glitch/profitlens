@@ -8,7 +8,6 @@ import React, {
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
-import { useReactToPrint } from "react-to-print";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
@@ -72,8 +71,8 @@ export default function ProfilePage() {
   const reportRef = useRef();
   const taxReportRef = useRef();
 
-  // Allow saveField() to call fetchProfile()
-  let fetchProfile;
+  // ⭐ FIX: fetchProfile stored in a ref so saveField always calls the latest version
+  const fetchProfileRef = useRef(null);
 
   // Access control
   useEffect(() => {
@@ -93,7 +92,7 @@ export default function ProfilePage() {
 
   // Fetch profile data
   useEffect(() => {
-    fetchProfile = async () => {
+    fetchProfileRef.current = async () => {
       if (status !== "authenticated") return;
       setLoading(true);
       setError(null);
@@ -141,10 +140,10 @@ export default function ProfilePage() {
       }
     };
 
-    fetchProfile();
+    fetchProfileRef.current();
   }, [status]);
 
-  // Highcharts + drilldown
+  // Highcharts loader
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -490,7 +489,7 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
-  // saveField – refresh profile after edit
+  // ⭐ saveField now ALWAYS refreshes the page instantly
   async function saveField(field, value) {
     await fetch("/api/profile", {
       method: "POST",
@@ -501,10 +500,8 @@ export default function ProfilePage() {
       }),
     });
 
-    if (typeof fetchProfile === "function") {
-      fetchProfile();
-    } else {
-      console.warn("fetchProfile() is not available yet.");
+    if (fetchProfileRef.current) {
+      fetchProfileRef.current();
     }
   }
 
@@ -574,6 +571,8 @@ export default function ProfilePage() {
     <ResponsiveLayout>
       <div className="p-8" ref={reportRef}>
         <h2 className="text-2xl font-bold text-slate-800">Your Profile</h2>
+        
+                  {/* Global year filter (continued from Part 1) */}
         <p className="text-slate-600 mt-2">
           Account details, HMRC categories, and transaction summaries.
         </p>
@@ -640,127 +639,59 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* ✅ Business Profile */}
+        {/* Business Profile */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
           {/* Personal Details */}
           <ResponsiveCard title="Personal Details">
             <div className="grid grid-cols-1 gap-4">
-              <EditableField
-                label="Full Name"
-                value={client?.name}
-                field="name"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Address"
-                value={client?.address}
-                field="address"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Postcode"
-                value={client?.postcode}
-                field="postcode"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Phone Number"
-                value={client?.phone}
-                field="phone"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Email"
-                value={client?.email}
-                field="email"
-                onSave={saveField}
-              />
-              <EditableField
-                label="UTR Number"
-                value={client?.utr_number}
-                field="utr_number"
-                onSave={saveField}
-              />
+
+              <EditableField label="Full Name" value={client?.name} field="name" onSave={saveField} />
+
+              <EditableField label="Address" value={client?.address} field="address" onSave={saveField} />
+
+              <EditableField label="Postcode" value={client?.postcode} field="postcode" onSave={saveField} />
+
+              <EditableField label="Phone Number" value={client?.phone} field="phone" onSave={saveField} />
+
+              <EditableField label="Email" value={client?.email} field="email" onSave={saveField} />
+
+              <EditableField label="UTR Number" value={client?.utr_number} field="utr_number" onSave={saveField} />
+
             </div>
           </ResponsiveCard>
 
           {/* Business Details */}
           <ResponsiveCard title="Business Details">
             <div className="grid grid-cols-1 gap-4">
-              <EditableField
-                label="Business Name"
-                value={client?.business_name}
-                field="business_name"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Trading Name"
-                value={client?.trading_name}
-                field="trading_name"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Business Type"
-                value={client?.business_type}
-                field="business_type"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Company Number"
-                value={client?.company_number}
-                field="company_number"
-                onSave={saveField}
-              />
-              <EditableField
-                label="VAT Number"
-                value={client?.vat_number}
-                field="vat_number"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Registered Business Address"
-                value={client?.registered_address}
-                field="registered_address"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Industry"
-                value={client?.industry}
-                field="industry"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Website"
-                value={client?.website}
-                field="website"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Contact Person"
-                value={client?.contact_person}
-                field="contact_person"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Business Email"
-                value={client?.contact_email}
-                field="contact_email"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Business Phone"
-                value={client?.contact_phone}
-                field="contact_phone"
-                onSave={saveField}
-              />
-              <EditableField
-                label="Notes"
-                value={client?.notes}
-                field="notes"
-                onSave={saveField}
-              />
+
+              <EditableField label="Business Name" value={client?.business_name} field="business_name" onSave={saveField} />
+
+              <EditableField label="Trading Name" value={client?.trading_name} field="trading_name" onSave={saveField} />
+
+              <EditableField label="Business Type" value={client?.business_type} field="business_type" onSave={saveField} />
+
+              <EditableField label="Company Number" value={client?.company_number} field="company_number" onSave={saveField} />
+
+              <EditableField label="VAT Number" value={client?.vat_number} field="vat_number" onSave={saveField} />
+
+              <EditableField label="Registered Business Address" value={client?.registered_address} field="registered_address" onSave={saveField} />
+
+              <EditableField label="Industry" value={client?.industry} field="industry" onSave={saveField} />
+
+              <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
+
+              <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
+              
+              <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
+
+              <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
+
+              <EditableField label="Notes" value={client?.notes} field="notes" onSave={saveField} />
+
             </div>
           </ResponsiveCard>
+
         </div>
 
         {/* Account info */}
@@ -1023,7 +954,7 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* ✅ In‑App Disclaimer */}
+        {/* Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
           ProfitLens provides estimates only. Always verify figures before filing
           with HMRC. Nothing displayed here constitutes tax, accounting, or legal
