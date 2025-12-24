@@ -679,112 +679,59 @@ async function handleDownloadPdf() {
         </div>
 
 {/* ✅ Business Profile */}
-<ResponsiveCard title="Business Profile">
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-    <EditableField
-      label="Business Name"
-      value={client?.business_name}
-      field="business_name"
-      onSave={saveField}
-    />
+  {/* Personal Details */}
+  <ResponsiveCard title="Personal Details">
+    <div className="grid grid-cols-1 gap-4">
 
-    <EditableField
-      label="Trading Name"
-      value={client?.trading_name}
-      field="trading_name"
-      onSave={saveField}
-    />
+      <EditableField label="Full Name" value={client?.name} field="name" onSave={saveField} />
 
-    <EditableField
-      label="Business Type"
-      value={client?.business_type}
-      field="business_type"
-      onSave={saveField}
-    />
+      <EditableField label="Address" value={client?.address} field="address" onSave={saveField} />
 
-    <EditableField
-      label="Company Number"
-      value={client?.company_number}
-      field="company_number"
-      onSave={saveField}
-    />
+      <EditableField label="Postcode" value={client?.postcode} field="postcode" onSave={saveField} />
 
-    <EditableField
-      label="VAT Number"
-      value={client?.vat_number}
-      field="vat_number"
-      onSave={saveField}
-    />
+      <EditableField label="Phone Number" value={client?.phone} field="phone" onSave={saveField} />
 
-    <EditableField
-      label="UTR Number"
-      value={client?.utr_number}
-      field="utr_number"
-      onSave={saveField}
-    />
+      <EditableField label="Email" value={client?.email} field="email" onSave={saveField} />
 
-    <EditableField
-      label="Registered Address"
-      value={client?.registered_address}
-      field="registered_address"
-      onSave={saveField}
-    />
+      <EditableField label="UTR Number" value={client?.utr_number} field="utr_number" onSave={saveField} />
 
-    <EditableField
-      label="Postcode"
-      value={client?.postcode}
-      field="postcode"
-      onSave={saveField}
-    />
-
-    <EditableField
-      label="Industry"
-      value={client?.industry}
-      field="industry"
-      onSave={saveField}
-    />
-
-    <EditableField
-      label="Website"
-      value={client?.website}
-      field="website"
-      onSave={saveField}
-    />
-
-    <EditableField
-      label="Contact Person"
-      value={client?.contact_person}
-      field="contact_person"
-      onSave={saveField}
-    />
-
-    <EditableField
-      label="Contact Phone"
-      value={client?.contact_phone}
-      field="contact_phone"
-      onSave={saveField}
-    />
-
-    <EditableField
-      label="Contact Email"
-      value={client?.contact_email}
-      field="contact_email"
-      onSave={saveField}
-    />
-
-    <div className="md:col-span-2">
-      <EditableField
-        label="Notes"
-        value={client?.notes}
-        field="notes"
-        onSave={saveField}
-      />
     </div>
+  </ResponsiveCard>
 
-  </div>
-</ResponsiveCard>
+  {/* Business Details */}
+  <ResponsiveCard title="Business Details">
+    <div className="grid grid-cols-1 gap-4">
 
+      <EditableField label="Business Name" value={client?.business_name} field="business_name" onSave={saveField} />
+
+      <EditableField label="Trading Name" value={client?.trading_name} field="trading_name" onSave={saveField} />
+
+      <EditableField label="Business Type" value={client?.business_type} field="business_type" onSave={saveField} />
+
+      <EditableField label="Company Number" value={client?.company_number} field="company_number" onSave={saveField} />
+
+      <EditableField label="VAT Number" value={client?.vat_number} field="vat_number" onSave={saveField} />
+
+      <EditableField label="Registered Business Address" value={client?.registered_address} field="registered_address" onSave={saveField} />
+
+      <EditableField label="Industry" value={client?.industry} field="industry" onSave={saveField} />
+
+      <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
+
+      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
+
+      <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
+
+      <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
+
+      <EditableField label="Notes" value={client?.notes} field="notes" onSave={saveField} />
+
+    </div>
+  </ResponsiveCard>
+
+</div>
 
 
         {/* Account info */}
