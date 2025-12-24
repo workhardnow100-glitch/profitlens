@@ -38,7 +38,6 @@ const ALLOWABLE_SET = new Set(CT_MAP.allowable);
 const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
 
 export default function ProfilePage() {
-
   const { data: session, status } = useSession();
   const router = useRouter();
 
@@ -73,7 +72,7 @@ export default function ProfilePage() {
   const reportRef = useRef();
   const taxReportRef = useRef();
 
-  // ⭐ Allow saveField() to call fetchProfile()
+  // Allow saveField() to call fetchProfile()
   let fetchProfile;
 
   // Access control
@@ -316,6 +315,148 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, yearSummary]);
 
+  // Income drilldown chart options
+  const incomeChartOptions = useMemo(() => {
+    if (!hcReady || !Highcharts) return null;
+
+    const entries = Object.entries(incomeByCategory || {});
+    if (!entries.length) return null;
+
+    const topSeriesData = entries.map(([cat, total]) => ({
+      name: cat,
+      y: Number(total || 0),
+      drilldown: `income-${cat}`,
+    }));
+
+    const drilldownSeries = entries.map(([cat]) => {
+      const points = (filteredTransactions || [])
+        .filter(
+          (tx) =>
+            tx.business_category?.trim() === cat &&
+            Number(tx.amount || 0) > 0
+        )
+        .map((tx) => ({
+          name: tx.description || tx.date || tx.id,
+          y: Number(tx.amount || 0),
+        }));
+
+      return {
+        id: `income-${cat}`,
+        name: `Income – ${cat}`,
+        data: points.map((p) => [p.name, p.y]),
+      };
+    });
+
+    return {
+      chart: { type: "column" },
+      title: { text: "Income by Category" },
+      xAxis: { type: "category" },
+      legend: { enabled: false },
+      plotOptions: {
+        series: {
+          borderWidth: 0,
+          dataLabels: { enabled: true, format: "£{point.y:.2f}" },
+        },
+      },
+      tooltip: {
+        headerFormat:
+          '<span style="font-size:11px">{series.name}</span><br>',
+        pointFormat:
+          '<span style="color:{point.color}">{point.name}</span>: <b>£{point.y:.2f}</b><br/>',
+      },
+      series: [
+        {
+          name: "Income",
+          colorByPoint: true,
+          data: topSeriesData,
+        },
+      ],
+      drilldown: { series: drilldownSeries },
+      credits: { enabled: false },
+    };
+  }, [hcReady, Highcharts, incomeByCategory, filteredTransactions]);
+
+  // Expenses drilldown chart options
+  const expensesChartOptions = useMemo(() => {
+    if (!hcReady || !Highcharts) return null;
+
+    const entries = Object.entries(expensesByCategory || {});
+    if (!entries.length) return null;
+
+    const topSeriesData = entries.map(([cat, total]) => ({
+      name: cat,
+      y: Number(total || 0),
+      drilldown: `expenses-${cat}`,
+    }));
+
+    const drilldownSeries = entries.map(([cat]) => {
+      const points = (filteredTransactions || [])
+        .filter((tx) => {
+          const catMatch = tx.business_category?.trim() === cat;
+          const isExpense = Number(tx.amount || 0) < 0;
+          if (!catMatch || !isExpense) return false;
+
+          const categoryName =
+            (tx.business_category && tx.business_category.trim()) ||
+            "Uncategorised";
+
+          if (expenseView === "allowable" && !ALLOWABLE_SET.has(categoryName))
+            return false;
+          if (
+            expenseView === "disallowable" &&
+            !DISALLOWABLE_SET.has(categoryName)
+          )
+            return false;
+
+          return true;
+        })
+        .map((tx) => ({
+          name: tx.description || tx.date || tx.id,
+          y: Math.abs(Number(tx.amount || 0)),
+        }));
+
+      return {
+        id: `expenses-${cat}`,
+        name: `Expenses – ${cat}`,
+        data: points.map((p) => [p.name, p.y]),
+      };
+    });
+
+    return {
+      chart: { type: "column" },
+      title: { text: "Expenses by Category" },
+      xAxis: { type: "category" },
+      legend: { enabled: false },
+      plotOptions: {
+        series: {
+          borderWidth: 0,
+          dataLabels: { enabled: true, format: "£{point.y:.2f}" },
+        },
+      },
+      tooltip: {
+        headerFormat:
+          '<span style="font-size:11px">{series.name}</span><br>',
+        pointFormat:
+          '<span style="color:{point.color}">{point.name}</span>: <b>£{point.y:.2f}</b><br/>',
+      },
+      series: [
+        {
+          name: "Expenses",
+          colorByPoint: true,
+          data: topSeriesData,
+        },
+      ],
+      drilldown: { series: drilldownSeries },
+      credits: { enabled: false },
+    };
+  }, [
+    hcReady,
+    Highcharts,
+    expensesByCategory,
+    filteredTransactions,
+    expenseView,
+  ]);
+
   // CSV export
   const handleExportCSV = () => {
     const rows = [
@@ -349,7 +490,7 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
-  // ⭐ FIXED saveField — now refreshes profile instantly
+  // saveField – refresh profile after edit
   async function saveField(field, value) {
     await fetch("/api/profile", {
       method: "POST",
@@ -499,61 +640,128 @@ export default function ProfilePage() {
           </div>
         </div>
 
-{/* ✅ Business Profile */}
-<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ✅ Business Profile */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Personal Details */}
+          <ResponsiveCard title="Personal Details">
+            <div className="grid grid-cols-1 gap-4">
+              <EditableField
+                label="Full Name"
+                value={client?.name}
+                field="name"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Address"
+                value={client?.address}
+                field="address"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Postcode"
+                value={client?.postcode}
+                field="postcode"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Phone Number"
+                value={client?.phone}
+                field="phone"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Email"
+                value={client?.email}
+                field="email"
+                onSave={saveField}
+              />
+              <EditableField
+                label="UTR Number"
+                value={client?.utr_number}
+                field="utr_number"
+                onSave={saveField}
+              />
+            </div>
+          </ResponsiveCard>
 
-  {/* Personal Details */}
-  <ResponsiveCard title="Personal Details">
-    <div className="grid grid-cols-1 gap-4">
-
-      <EditableField label="Full Name" value={client?.name} field="name" onSave={saveField} />
-
-      <EditableField label="Address" value={client?.address} field="address" onSave={saveField} />
-
-      <EditableField label="Postcode" value={client?.postcode} field="postcode" onSave={saveField} />
-
-      <EditableField label="Phone Number" value={client?.phone} field="phone" onSave={saveField} />
-
-      <EditableField label="Email" value={client?.email} field="email" onSave={saveField} />
-
-      <EditableField label="UTR Number" value={client?.utr_number} field="utr_number" onSave={saveField} />
-
-    </div>
-  </ResponsiveCard>
-
-  {/* Business Details */}
-  <ResponsiveCard title="Business Details">
-    <div className="grid grid-cols-1 gap-4">
-
-      <EditableField label="Business Name" value={client?.business_name} field="business_name" onSave={saveField} />
-
-      <EditableField label="Trading Name" value={client?.trading_name} field="trading_name" onSave={saveField} />
-
-      <EditableField label="Business Type" value={client?.business_type} field="business_type" onSave={saveField} />
-
-      <EditableField label="Company Number" value={client?.company_number} field="company_number" onSave={saveField} />
-
-      <EditableField label="VAT Number" value={client?.vat_number} field="vat_number" onSave={saveField} />
-
-      <EditableField label="Registered Business Address" value={client?.registered_address} field="registered_address" onSave={saveField} />
-
-      <EditableField label="Industry" value={client?.industry} field="industry" onSave={saveField} />
-
-      <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
-
-      <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
-      
-      <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
-
-      <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
-
-      <EditableField label="Notes" value={client?.notes} field="notes" onSave={saveField} />
-
-    </div>
-  </ResponsiveCard>
-
-</div>
-
+          {/* Business Details */}
+          <ResponsiveCard title="Business Details">
+            <div className="grid grid-cols-1 gap-4">
+              <EditableField
+                label="Business Name"
+                value={client?.business_name}
+                field="business_name"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Trading Name"
+                value={client?.trading_name}
+                field="trading_name"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Business Type"
+                value={client?.business_type}
+                field="business_type"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Company Number"
+                value={client?.company_number}
+                field="company_number"
+                onSave={saveField}
+              />
+              <EditableField
+                label="VAT Number"
+                value={client?.vat_number}
+                field="vat_number"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Registered Business Address"
+                value={client?.registered_address}
+                field="registered_address"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Industry"
+                value={client?.industry}
+                field="industry"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Website"
+                value={client?.website}
+                field="website"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Contact Person"
+                value={client?.contact_person}
+                field="contact_person"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Business Email"
+                value={client?.contact_email}
+                field="contact_email"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Business Phone"
+                value={client?.contact_phone}
+                field="contact_phone"
+                onSave={saveField}
+              />
+              <EditableField
+                label="Notes"
+                value={client?.notes}
+                field="notes"
+                onSave={saveField}
+              />
+            </div>
+          </ResponsiveCard>
+        </div>
 
         {/* Account info */}
         <ResponsiveCard title="Account details">
@@ -567,7 +775,7 @@ export default function ProfilePage() {
           </p>
         </ResponsiveCard>
 
-        {/* Export buttons (P2) */}
+        {/* Export buttons */}
         <div className="flex flex-wrap gap-4 mt-6">
           <button
             onClick={handleDownloadPdf}
@@ -701,10 +909,7 @@ export default function ProfilePage() {
         {/* Income / Expenses drilldown charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           <ResponsiveCard title="Income by category (drilldown)">
-            {!hcReady ||
-            !Highcharts ||
-            typeof incomeChartOptions === "undefined" ||
-            !incomeChartOptions ? (
+            {!hcReady || !Highcharts || !incomeChartOptions ? (
               <p className="text-slate-500">
                 Not enough income data to generate chart.
               </p>
@@ -715,7 +920,6 @@ export default function ProfilePage() {
               />
             )}
           </ResponsiveCard>
-
 
           <ResponsiveCard title="Expenses by category (drilldown)">
             {!hcReady || !Highcharts || !expensesChartOptions ? (
