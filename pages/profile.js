@@ -532,6 +532,8 @@ export default function ProfilePage() {
       [field]: value,
     }),
   });
+
+  mutate(); // 🔥 instantly refreshes the profile data
 }
 
 
