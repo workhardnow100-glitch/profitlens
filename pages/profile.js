@@ -683,10 +683,7 @@ export default function ProfilePage() {
                   Corporation tax rate
                 </p>
                 <p className="text-slate-800 font-semibold">
-                  {(hmrcBreakdown.limitedCompanyTaxRate * 100).toFixed(
-                    1
-                  )}
-                  %
+                  {(hmrcBreakdown.limitedCompanyTaxRate * 100).toFixed(1)}%
                 </p>
               </div>
               <div className="border border-slate-200 rounded p-3">
@@ -704,7 +701,10 @@ export default function ProfilePage() {
         {/* Income / Expenses drilldown charts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
           <ResponsiveCard title="Income by category (drilldown)">
-            {!hcReady || !Highcharts || !incomeChartOptions ? (
+            {!hcReady ||
+            !Highcharts ||
+            typeof incomeChartOptions === "undefined" ||
+            !incomeChartOptions ? (
               <p className="text-slate-500">
                 Not enough income data to generate chart.
               </p>
@@ -715,6 +715,7 @@ export default function ProfilePage() {
               />
             )}
           </ResponsiveCard>
+
 
           <ResponsiveCard title="Expenses by category (drilldown)">
             {!hcReady || !Highcharts || !expensesChartOptions ? (
