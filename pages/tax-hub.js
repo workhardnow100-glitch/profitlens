@@ -663,7 +663,7 @@ export default function TaxHub() {
   className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
   onClick={async () => {
     try {
-      // 1. Fetch VAT summary (this contains boxes, transactions, adjustments)
+      // 1. Fetch VAT summary (this contains the REAL box values)
       const summaryRes = await fetch("/api/vat/summary", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -705,6 +705,7 @@ export default function TaxHub() {
 >
   Download VAT PDF
 </button>
+
 
 
 
