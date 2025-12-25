@@ -38,6 +38,10 @@ const CT_CATEGORY_OPTIONS = Array.from(
   ])
 ).sort();
 
+// ✅ Simple SA tagging legend (no schema changes; uses includedinsa only)
+const SA_TAG_HELP_TEXT =
+  "Mark transactions that should feed into Self Assessment (SA100 / SA103 / SA105 / SA110).";
+
 export default function Transactions() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -103,20 +107,12 @@ export default function Transactions() {
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
-    const today = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     return data.transactions.filter((tx) => {
       const date = safeDate(tx.date);
       if (!date) return false;
-      const d = new Date(
-        date.getFullYear(),
-        date.getMonth(),
-        date.getDate()
-      );
+      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
       if (period === "week") {
         const weekAgo = new Date(today);
@@ -173,8 +169,7 @@ export default function Transactions() {
             from.getMonth(),
             from.getDate()
           );
-        if (to)
-          to = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+        if (to) to = new Date(to.getFullYear(), to.getMonth(), to.getDate());
         if (from && to) return d >= from && d <= to;
         if (from && !to) return d >= from;
         if (!from && to) return d <= to;
@@ -415,10 +410,9 @@ export default function Transactions() {
     else autoCT = false;
 
     await updateTransaction(id, {
-  category: newCategory,
-  auto_ct: autoCT,
-});
-
+      category: newCategory,
+      auto_ct: autoCT,
+    });
 
     mutate("/api/transactions");
   }
@@ -455,6 +449,14 @@ export default function Transactions() {
     mutate("/api/transactions");
   }
 
+  // ⭐ NEW: SA helper (simple toggle, uses existing includedinsa column)
+  async function updateSAForTx(tx, newValue) {
+    await updateTransaction(tx.id, {
+      includedinsa: newValue === "included",
+    });
+    mutate("/api/transactions");
+  }
+
   // ✅ Asset Disposal handler: open modal, clear fields when "No"
   function handleAssetDisposalChange(tx, value) {
     if (value === "" || value === "NONE") {
@@ -484,7 +486,8 @@ export default function Transactions() {
         <h2 className="text-2xl font-bold text-slate-800">Transactions</h2>
         <p className="text-slate-600 mt-2">
           Review and tag your financial transactions. This view supports
-          filters, bulk tagging, and exporting to CSV or PDF.
+          filters, bulk tagging, and exporting to CSV or PDF. Tax tags
+          (VAT, CIS, SA, CT) feed directly into your working papers.
         </p>
 
         {/* Period selector */}
@@ -500,7 +503,7 @@ export default function Transactions() {
               }`}
             >
               {btn.label}
-            </button>
+          </button>
           ))}
         </div>
 
@@ -585,13 +588,32 @@ export default function Transactions() {
 
         {/* Transactions table */}
         <ResponsiveCard title="Transactions Table">
+          <div className="mb-3 text-xs text-slate-500 flex flex-wrap gap-3">
+            <span>
+              <span className="font-semibold">VAT</span> = feeds VAT returns
+              (MTD).
+            </span>
+            <span>
+              <span className="font-semibold">CIS</span> = feeds CIS300 and
+              CIS Statements.
+            </span>
+            <span title={SA_TAG_HELP_TEXT} className="cursor-help">
+              <span className="font-semibold">SA</span> = feeds SA100 / SA103 /
+              SA105 / SA110 working papers.
+            </span>
+            <span>
+              <span className="font-semibold">CT</span> = feeds CT600 working
+              papers.
+            </span>
+          </div>
+
           <ResponsiveTable
             headers={[
               "Date",
               "Description",
               "Amount",
               "Category",
-              "VAT / CIS",
+              "VAT / CIS / SA",
               "VAT Amount",
               "Asset Disposal",
               "CT",
@@ -658,6 +680,8 @@ export default function Transactions() {
                     ? "suffered"
                     : "none";
 
+                const saSelection = tx.includedinsa ? "included" : "excluded";
+
                 const effectiveVatAmount =
                   tx.vat_amount != null
                     ? Number(tx.vat_amount)
@@ -698,9 +722,10 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* ✅ VAT + CIS */}
+                    {/* ✅ VAT + CIS + SA */}
                     <td>
                       <div className="flex flex-col gap-1">
+                        {/* VAT */}
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-500">VAT:</span>
                           <select
@@ -718,6 +743,7 @@ export default function Transactions() {
                           </select>
                         </div>
 
+                        {/* CIS */}
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-500">CIS:</span>
                           <select
@@ -730,6 +756,26 @@ export default function Transactions() {
                             <option value="none">No CIS</option>
                             <option value="deducted">CIS Deducted</option>
                             <option value="suffered">CIS Suffered</option>
+                          </select>
+                        </div>
+
+                        {/* ⭐ SA */}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-xs text-slate-500 cursor-help"
+                            title={SA_TAG_HELP_TEXT}
+                          >
+                            SA:
+                          </span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            value={saSelection}
+                            onChange={(e) =>
+                              updateSAForTx(tx, e.target.value)
+                            }
+                          >
+                            <option value="excluded">Not SA</option>
+                            <option value="included">Include in SA</option>
                           </select>
                         </div>
                       </div>

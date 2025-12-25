@@ -10,24 +10,40 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-// ✅ Structural wrappers
+// Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
-export const Sidebar = ({ children, className }) => <aside className={className}>{children}</aside>;
-export const SidebarHeader = ({ children, className }) => <div className={className}>{children}</div>;
-export const SidebarContent = ({ children, className }) => <div className={className}>{children}</div>;
-export const SidebarGroup = ({ children, className }) => <div className={className}>{children}</div>;
-export const SidebarGroupLabel = ({ children, className }) => <div className={className}>{children}</div>;
-export const SidebarGroupContent = ({ children, className }) => <div className={className}>{children}</div>;
-export const SidebarFooter = ({ children, className }) => <div className={className}>{children}</div>;
+export const Sidebar = ({ children, className }) => (
+  <aside className={className}>{children}</aside>
+);
+export const SidebarHeader = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroup = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroupLabel = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarGroupContent = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
+export const SidebarFooter = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
 export const SidebarTrigger = ({ children, className, ...props }) => (
   <button {...props} className={className}>
     {children || "☰"}
   </button>
 );
 export const SidebarMenuItem = ({ children }) => <li>{children}</li>;
-export const SidebarMenuButton = ({ children, className }) => <div className={className}>{children}</div>;
+export const SidebarMenuButton = ({ children, className }) => (
+  <div className={className}>{children}</div>
+);
 
-// ✅ Client Switcher Component (Accountants Only)
+// Client Switcher (Accountants Only)
 function ClientSwitcher() {
   const router = useRouter();
   const [clients, setClients] = useState([]);
@@ -81,10 +97,12 @@ function ClientSwitcher() {
   );
 }
 
-// ✅ SidebarMenu with collapsible tax group
+// Sidebar Menu
 export function SidebarMenu() {
   const router = useRouter();
+
   const [taxOpen, setTaxOpen] = useState(true);
+  const [formsOpen, setFormsOpen] = useState(true); // ⭐ NEW
 
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
@@ -110,9 +128,16 @@ export function SidebarMenu() {
     { title: "SA History", url: "/sa/history", icon: History },
   ];
 
+  // ⭐ NEW: Forms collapsible group
+  const formsItems = [
+    { title: "Forms Hub", url: "/forms", icon: FileText },
+    { title: "PDF Library", url: "/forms/pdfs", icon: History },
+    { title: "Working Papers", url: "/forms/working-papers", icon: FileText },
+  ];
+
   return (
     <ul className="space-y-1">
-      {/* ✅ Accountant Client Switcher */}
+      {/* Accountant Client Switcher */}
       <ClientSwitcher />
 
       {/* Default navigation */}
@@ -132,7 +157,7 @@ export function SidebarMenu() {
         </SidebarMenuItem>
       ))}
 
-      {/* ✅ Collapsible Taxes group */}
+      {/* Taxes group */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setTaxOpen(!taxOpen)}
@@ -157,6 +182,44 @@ export function SidebarMenu() {
                   href={url}
                   className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
                     router.pathname === url
+                      ? "bg-blue-50 text-blue-700 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span>{title}</span>
+                </Link>
+              </SidebarMenuItem>
+            ))}
+          </SidebarGroupContent>
+        </div>
+      </SidebarGroup>
+
+      {/* ⭐ NEW: Forms group */}
+      <SidebarGroup className="mt-4">
+        <button
+          onClick={() => setFormsOpen(!formsOpen)}
+          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+        >
+          <span>Forms</span>
+          <ChevronDown
+            size={16}
+            className={`transition-transform ${formsOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        <div
+          className={`overflow-hidden transition-all duration-300 ${
+            formsOpen ? "max-h-[1000px]" : "max-h-0"
+          }`}
+        >
+          <SidebarGroupContent>
+            {formsItems.map(({ title, url, icon: Icon }) => (
+              <SidebarMenuItem key={title}>
+                <Link
+                  href={url}
+                  className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                    router.pathname.startsWith(url)
                       ? "bg-blue-50 text-blue-700 font-semibold"
                       : "text-slate-700 hover:bg-slate-100"
                   }`}
