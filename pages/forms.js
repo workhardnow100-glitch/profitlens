@@ -8,49 +8,55 @@ export default function FormsPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
 
-  // 🔐 Subscription + login guard (same as Dashboard)
+  // 🔐 Subscription + login guard
   useEffect(() => {
     if (status === "loading") return;
 
-    if (session?.user) {
-      const isAdmin = session.user.role === "admin";
-      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-        session.user.subscriptionStatus
-      );
-
-      if (!(isAdmin || isSubscribedOrTrial)) {
-        router.replace("/upgrade");
-      }
-    } else {
+    if (!session?.user) {
       router.replace("/login");
+      return;
+    }
+
+    const isAdmin = session.user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
+
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
     }
   }, [session, status, router]);
 
-  // ⭐ Auto-detect client (accountants + business owners)
+  // ⭐ Auto-detect client for BOTH users and accountants
   const [clientId, setClientId] = useState(null);
   const [clientName, setClientName] = useState("");
 
   useEffect(() => {
     async function loadClient() {
+      // ⭐ CASE 1 — Normal user (NOT an accountant)
+      if (session?.user && session.user.role === "user") {
+        setClientId(session.user.clientId);
+        setClientName(session.user.name);
+        return;
+      }
+
+      // ⭐ CASE 2 — Accountant
       const res = await fetch("/api/accountant/get-accessible-clients");
       const data = await res.json();
 
       if (data.success) {
-        // Accountant acting as a client
         if (data.currentClient) {
           setClientId(data.currentClient.id);
           setClientName(data.currentClient.name);
           return;
         }
 
-        // Business owner (single client)
         if (data.clients?.length === 1) {
           setClientId(data.clients[0].id);
           setClientName(data.clients[0].name);
           return;
         }
 
-        // ⭐ NEW: Accountant with multiple clients → auto-select first
         if (data.clients?.length > 1) {
           setClientId(data.clients[0].id);
           setClientName(data.clients[0].name);
@@ -60,7 +66,7 @@ export default function FormsPage() {
     }
 
     loadClient();
-  }, []);
+  }, [session]);
 
   // Form state
   const [selectedCTForm, setSelectedCTForm] = useState("");
@@ -160,30 +166,19 @@ export default function FormsPage() {
             transaction data.
           </p>
 
-          {/* ⭐ Auto-detected client badge */}
           <p className="text-sm text-blue-700 font-medium">
             Generating forms for: <span className="font-semibold">{clientName}</span>
           </p>
         </header>
 
-        {/* Compliance / Requirements */}
+        {/* Compliance */}
         <section className="border border-amber-300 bg-amber-50 text-amber-900 rounded-md p-4 text-sm space-y-2">
           <h2 className="font-semibold">Important before you generate any form</h2>
           <ul className="list-disc list-inside space-y-1">
-            <li>
-              All relevant <strong>transactions must already be imported and categorised</strong> on
-              the Transactions page.
-            </li>
-            <li>
-              ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables
-              (CT, SA, CIS). If data is missing or miscategorised, the form will be wrong.
-            </li>
-            <li>
-              <strong>You must seek an accountant audit before submitting any form to HMRC.</strong>
-            </li>
-            <li>
-              You remain <strong>responsible for the accuracy</strong> of all submissions to HMRC.
-            </li>
+            <li>All relevant <strong>transactions must already be imported and categorised</strong>.</li>
+            <li>ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables.</li>
+            <li><strong>You must seek an accountant audit</strong> before submitting any form to HMRC.</li>
+            <li>You remain <strong>responsible for the accuracy</strong> of all submissions.</li>
           </ul>
         </section>
 
