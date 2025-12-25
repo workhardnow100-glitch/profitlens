@@ -8,60 +8,67 @@ export default function FormsPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
 
-  // 🔐 Subscription + login guard
+  // 🔐 Subscription + login guard (same as Dashboard)
   useEffect(() => {
     if (status === "loading") return;
 
-    if (!session?.user) {
+    if (session?.user) {
+      const isAdmin = session.user.role === "admin";
+      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+        session.user.subscriptionStatus
+      );
+
+      if (!(isAdmin || isSubscribedOrTrial)) {
+        router.replace("/upgrade");
+      }
+    } else {
       router.replace("/login");
-      return;
-    }
-
-    const isAdmin = session.user.role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
-    );
-
-    if (!(isAdmin || isSubscribedOrTrial)) {
-      router.replace("/upgrade");
     }
   }, [session, status, router]);
 
-  // ⭐ Auto-detect client for BOTH users and accountants
+  // ⭐ Auto-detect client (user-first, accountants supported)
   const [clientId, setClientId] = useState(null);
   const [clientName, setClientName] = useState("");
 
   useEffect(() => {
     async function loadClient() {
-      // ⭐ CASE 1 — Normal user (NOT an accountant)
-      if (session?.user && session.user.role === "user") {
+      // ⭐ Primary path: normal user using the app for their own business
+      if (session?.user && session.user.clientId) {
         setClientId(session.user.clientId);
-        setClientName(session.user.name);
+        // You can swap this to a business name field if you store it separately
+        setClientName(session.user.name || "Your business");
         return;
       }
 
-      // ⭐ CASE 2 — Accountant
-      const res = await fetch("/api/accountant/get-accessible-clients");
-      const data = await res.json();
+      // ⭐ Fallback: accountant / special roles → use accountant endpoint
+      try {
+        const res = await fetch("/api/accountant/get-accessible-clients");
+        const data = await res.json();
 
-      if (data.success) {
-        if (data.currentClient) {
-          setClientId(data.currentClient.id);
-          setClientName(data.currentClient.name);
-          return;
-        }
+        if (data.success) {
+          // Accountant acting as a client
+          if (data.currentClient) {
+            setClientId(data.currentClient.id);
+            setClientName(data.currentClient.name);
+            return;
+          }
 
-        if (data.clients?.length === 1) {
-          setClientId(data.clients[0].id);
-          setClientName(data.clients[0].name);
-          return;
-        }
+          // Single accessible client
+          if (data.clients?.length === 1) {
+            setClientId(data.clients[0].id);
+            setClientName(data.clients[0].name);
+            return;
+          }
 
-        if (data.clients?.length > 1) {
-          setClientId(data.clients[0].id);
-          setClientName(data.clients[0].name);
-          return;
+          // Multiple accessible clients → default to first
+          if (data.clients?.length > 1) {
+            setClientId(data.clients[0].id);
+            setClientName(data.clients[0].name);
+            return;
+          }
         }
+      } catch (err) {
+        console.error("Error loading accessible clients:", err);
       }
     }
 
@@ -112,7 +119,7 @@ export default function FormsPage() {
         : selectedCISForm;
 
     if (!clientId) {
-      setErrorMessage("No client selected. Please switch or select a client.");
+      setErrorMessage("No client selected. ProfitLens could not detect your business profile.");
       return;
     }
 
@@ -166,19 +173,33 @@ export default function FormsPage() {
             transaction data.
           </p>
 
+          {/* ⭐ Auto-detected client badge */}
           <p className="text-sm text-blue-700 font-medium">
-            Generating forms for: <span className="font-semibold">{clientName}</span>
+            Generating forms for:{" "}
+            <span className="font-semibold">
+              {clientName || "Your business profile"}
+            </span>
           </p>
         </header>
 
-        {/* Compliance */}
+        {/* Compliance / Requirements */}
         <section className="border border-amber-300 bg-amber-50 text-amber-900 rounded-md p-4 text-sm space-y-2">
           <h2 className="font-semibold">Important before you generate any form</h2>
           <ul className="list-disc list-inside space-y-1">
-            <li>All relevant <strong>transactions must already be imported and categorised</strong>.</li>
-            <li>ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables.</li>
-            <li><strong>You must seek an accountant audit</strong> before submitting any form to HMRC.</li>
-            <li>You remain <strong>responsible for the accuracy</strong> of all submissions.</li>
+            <li>
+              All relevant <strong>transactions must already be imported and categorised</strong> on
+              the Transactions page.
+            </li>
+            <li>
+              ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables
+              (CT, SA, CIS). If data is missing or miscategorised, the form will be wrong.
+            </li>
+            <li>
+              <strong>You must seek an accountant audit before submitting any form to HMRC.</strong>
+            </li>
+            <li>
+              You remain <strong>responsible for the accuracy</strong> of all submissions to HMRC.
+            </li>
           </ul>
         </section>
 
