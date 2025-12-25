@@ -131,8 +131,8 @@ export function SidebarMenu() {
   // ⭐ NEW: Forms collapsible group
   const formsItems = [
     { title: "Forms Hub", url: "/forms", icon: FileText },
-    { title: "PDF Library", url: "/forms/pdfs", icon: History },
-    { title: "Working Papers", url: "/forms/working-papers", icon: FileText },
+    { title: "PDF Library & Working Papers", url: "/forms/pdfs", icon: History },
+   
   ];
 
   return (
