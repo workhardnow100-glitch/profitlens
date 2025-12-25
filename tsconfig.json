@@ -23,7 +23,7 @@
     "**/*.tsx",
     "types/**/*.d.ts",
     "pages/home.jsx"
-  ],
+, "pages/api/forms/generate.js"  ],
   "exclude": [
     "node_modules"
   ]
