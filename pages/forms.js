@@ -47,6 +47,14 @@ export default function FormsPage() {
         if (data.clients?.length === 1) {
           setClientId(data.clients[0].id);
           setClientName(data.clients[0].name);
+          return;
+        }
+
+        // ⭐ NEW: Accountant with multiple clients → auto-select first
+        if (data.clients?.length > 1) {
+          setClientId(data.clients[0].id);
+          setClientName(data.clients[0].name);
+          return;
         }
       }
     }
