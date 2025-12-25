@@ -32,8 +32,6 @@ function formatLabel(pdf) {
 
 export default function PdfLibraryPage() {
   const router = useRouter();
-  const { clientId } = router.query;
-
   const { data: session, status } = useSession();
 
   // 🔑 Access control (subscription)
@@ -55,20 +53,8 @@ export default function PdfLibraryPage() {
     }
   }, [session, status, router]);
 
-  // If no client selected
-  if (!clientId) {
-    return (
-      <div className="p-10 text-center text-gray-600">
-        <h1 className="text-xl font-semibold mb-2">PDF Library</h1>
-        <p>Please select a client first.</p>
-      </div>
-    );
-  }
-
-  const { data, error } = useSWR(
-    `/api/pdfs?clientId=${clientId}`,
-    fetcher
-  );
+  // ✔ Universal API call — no clientId needed
+  const { data, error } = useSWR("/api/pdfs", fetcher);
 
   const isLoading = !data && !error;
   const pdfs = data?.pdfs || [];
@@ -92,16 +78,18 @@ export default function PdfLibraryPage() {
   return (
     <>
       <Head>
-        <title>PDF Library | ProfitLens</title>
+        <title>PDF Library & Working Papers | ProfitLens</title>
       </Head>
 
       <div className="flex h-full min-h-screen flex-col">
         <div className="flex flex-1">
           {/* LEFT PANEL */}
           <div className="w-full max-w-md border-r border-gray-200 p-6 space-y-6">
-            <h1 className="text-2xl font-semibold mb-2">PDF Library</h1>
+            <h1 className="text-2xl font-semibold mb-2">
+              PDF Library & Working Papers
+            </h1>
             <p className="text-sm text-gray-600 mb-4">
-              Browse all working papers generated for this client.
+              Browse all working papers generated for your account.
             </p>
 
             <Dropdown
@@ -152,7 +140,7 @@ export default function PdfLibraryPage() {
 
               {!isLoading && !selectedPdf && !error && (
                 <div className="h-full flex items-center justify-center text-gray-500">
-                  No PDFs available for this client yet.
+                  No PDFs available yet.
                 </div>
               )}
 
