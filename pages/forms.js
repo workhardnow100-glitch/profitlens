@@ -26,53 +26,17 @@ export default function FormsPage() {
     }
   }, [session, status, router]);
 
-  // ⭐ Auto-detect client (user-first, accountants supported)
+  // ⭐ EXACT SAME CLIENT LOGIC AS PROFILE, VAT, CIS, CT, DASHBOARD
   const [clientId, setClientId] = useState(null);
   const [clientName, setClientName] = useState("");
 
   useEffect(() => {
-    async function loadClient() {
-      // ⭐ Primary path: normal user using the app for their own business
-      if (session?.user && session.user.clientId) {
-        setClientId(session.user.clientId);
-        // You can swap this to a business name field if you store it separately
-        setClientName(session.user.name || "Your business");
-        return;
-      }
+    if (!session?.user) return;
 
-      // ⭐ Fallback: accountant / special roles → use accountant endpoint
-      try {
-        const res = await fetch("/api/accountant/get-accessible-clients");
-        const data = await res.json();
+    const id = session.user.actingAsClientId || session.user.clientId;
 
-        if (data.success) {
-          // Accountant acting as a client
-          if (data.currentClient) {
-            setClientId(data.currentClient.id);
-            setClientName(data.currentClient.name);
-            return;
-          }
-
-          // Single accessible client
-          if (data.clients?.length === 1) {
-            setClientId(data.clients[0].id);
-            setClientName(data.clients[0].name);
-            return;
-          }
-
-          // Multiple accessible clients → default to first
-          if (data.clients?.length > 1) {
-            setClientId(data.clients[0].id);
-            setClientName(data.clients[0].name);
-            return;
-          }
-        }
-      } catch (err) {
-        console.error("Error loading accessible clients:", err);
-      }
-    }
-
-    loadClient();
+    setClientId(id);
+    setClientName("Your business"); // optional, matches your pattern
   }, [session]);
 
   // Form state
