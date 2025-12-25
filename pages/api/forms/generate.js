@@ -1,5 +1,4 @@
-// pages/api/forms/generate.ts
-import type { NextApiRequest, NextApiResponse } from "next";
+// pages/api/forms/generate.js
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { v4 as uuidv4 } from "uuid";
 
@@ -12,21 +11,7 @@ import { generateSa110Pdf } from "../../../lib/pdf/templates/sa110";
 import { generateCis300Pdf } from "../../../lib/pdf/templates/cis300";
 import { generateCisStatementPdf } from "../../../lib/pdf/templates/cis_statement";
 
-type GenerateRequestBody = {
-  clientId: string;
-  formCode: string;
-  periodStart: string;
-  periodEnd: string;
-};
-
-type ApiResponse =
-  | { success: true; pdfUrl: string; submissionId: string }
-  | { success: false; message: string };
-
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<ApiResponse>
-) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res
       .status(405)
@@ -34,8 +19,7 @@ export default async function handler(
   }
 
   try {
-    const { clientId, formCode, periodStart, periodEnd } =
-      req.body as GenerateRequestBody;
+    const { clientId, formCode, periodStart, periodEnd } = req.body || {};
 
     if (!clientId || !formCode || !periodStart || !periodEnd) {
       return res.status(400).json({
@@ -85,7 +69,7 @@ export default async function handler(
     }
 
     // 3. Build form data
-    let formData: any = {};
+    let formData = {};
     const year = periodEndDate.getFullYear();
     const taxYear = deriveTaxYear(periodEndDate);
 
@@ -151,7 +135,7 @@ export default async function handler(
       pdfUrl: record.url,
       submissionId: record.id ?? submissionId,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("Unexpected error in /api/forms/generate:", err);
     return res.status(500).json({
       success: false,
@@ -165,12 +149,12 @@ export default async function handler(
 /* -------------------------------------------------------------------------- */
 
 async function buildCTFormData(
-  formCode: string,
-  client: any,
-  transactions: any[],
-  clientId: string,
-  periodStart: string,
-  periodEnd: string
+  formCode,
+  client,
+  transactions,
+  clientId,
+  periodStart,
+  periodEnd
 ) {
   const { data: corpSubmission } = await supabaseAdmin
     .from("corp_submissions")
@@ -187,7 +171,7 @@ async function buildCTFormData(
     .gte("payment_date", periodStart)
     .lte("payment_date", periodEnd);
 
-  const ctTx = transactions.filter((t) => t.includedinct);
+  const ctTx = (transactions || []).filter((t) => t.includedinct);
 
   const incomeTx = ctTx.filter((t) => Number(t.amount) > 0);
   const expenseTx = ctTx.filter((t) => Number(t.amount) < 0);
@@ -201,7 +185,8 @@ async function buildCTFormData(
   const computedProfit = turnover - allowableExpenses + disallowableExpenses;
   const profitBeforeTax = corpSubmission?.profit_before_tax ?? computedProfit;
 
-  const currentPeriodLoss = profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
+  const currentPeriodLoss =
+    profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
 
   const taxRate = corpSubmission?.corp_tax_rate ?? 0.19;
   const corpTaxDue = corpSubmission?.corp_tax_due ?? profitBeforeTax * taxRate;
@@ -264,12 +249,12 @@ async function buildCTFormData(
 /* -------------------------------------------------------------------------- */
 
 async function buildSAFormData(
-  formCode: string,
-  client: any,
-  transactions: any[],
-  clientId: string,
-  periodStart: string,
-  periodEnd: string
+  formCode,
+  client,
+  transactions,
+  clientId,
+  periodStart,
+  periodEnd
 ) {
   const { data: saSubmission } = await supabaseAdmin
     .from("sa_submissions")
@@ -286,7 +271,7 @@ async function buildSAFormData(
     .gte("payment_date", periodStart)
     .lte("payment_date", periodEnd);
 
-  const saTx = transactions.filter((t) => t.includedinsa);
+  const saTx = (transactions || []).filter((t) => t.includedinsa);
 
   const incomeTx = saTx.filter((t) => Number(t.amount) > 0);
   const expenseTx = saTx.filter((t) => Number(t.amount) < 0);
@@ -336,7 +321,8 @@ async function buildSAFormData(
         totalCapitalAllowances: saSubmission?.capital_allowances ?? 0,
       },
       simplifiedExpenses: {
-        usingSimplifiedExpenses: saSubmission?.using_simplified_expenses ?? false,
+        usingSimplifiedExpenses:
+          saSubmission?.using_simplified_expenses ?? false,
       },
       adjustments: {
         adjustmentsTotal: saSubmission?.adjustments_total ?? 0,
@@ -405,12 +391,12 @@ async function buildSAFormData(
 /* -------------------------------------------------------------------------- */
 
 async function buildCISFormData(
-  formCode: string,
-  client: any,
-  transactions: any[],
-  clientId: string,
-  periodStart: string,
-  periodEnd: string
+  formCode,
+  client,
+  transactions,
+  clientId,
+  periodStart,
+  periodEnd
 ) {
   const { data: cisSubmission } = await supabaseAdmin
     .from("cis_submissions")
@@ -432,7 +418,7 @@ async function buildCISFormData(
     .select("*")
     .eq("client_id", clientId);
 
-  const cisTx = transactions.filter((t) => t.includedincis);
+  const cisTx = (transactions || []).filter((t) => t.includedincis);
 
   const cisSufferedFromTx = sumBy(cisTx || [], "cis_amount");
   const paymentsMade = sumBy(cisPayments || [], "amount");
@@ -483,25 +469,6 @@ async function buildCISFormData(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                               UTILITIES                                     */
-/* -------------------------------------------------------------------------- */
-
-function sumBy(items: any[], field: string): number {
-  return (items || []).reduce((sum, item) => {
-    const val = Number(item[field] ?? 0);
-    return Number.isNaN(val) ? sum : sum + val;
-  }, 0);
-}
-
-function deriveTaxYear(date: Date): string {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
-  return month >= 4
-    ? `${year}/${String((year + 1) % 100).padStart(2, "0")}`
-    : `${year - 1}/${String(year % 100).padStart(2, "0")}`;
-}
-
-/* -------------------------------------------------------------------------- */
 /*                        PDF TEMPLATE DISPATCHER                              */
 /* -------------------------------------------------------------------------- */
 
@@ -516,18 +483,7 @@ async function generatePdfForForm({
   filename,
   createdBy,
   formData,
-}: {
-  formCode: string;
-  client: any;
-  clientId: string;
-  periodStart: string;
-  periodEnd: string;
-  year?: number;
-  taxYear?: string;
-  filename: string;
-  createdBy: string;
-  formData: any;
-}): Promise<any> {
+}) {
   const clientDetails = {
     name: client.name,
     trading_name: client.trading_name,
@@ -589,7 +545,7 @@ async function generatePdfForForm({
       clientDetails,
       saSummary: formData.summary,
       income: formData.income,
-      employment: {}, // can be wired later if you capture employment detail separately
+      employment: {},
       pensions: {},
       selfEmployment: formData.sa103?.summary || {},
       property: formData.sa105?.property || {},
@@ -706,7 +662,7 @@ async function generatePdfForForm({
       createdBy,
       clientDetails: companyDetails,
       cisSummary: formData.summary,
-      subcontractors: [], // to be filled when subcontractor tagging is added
+      subcontractors: [],
       payments: formData.payments,
       deductions: formData.deductions,
       cisSuffered: formData.cisSuffered,
@@ -737,4 +693,23 @@ async function generatePdfForForm({
   }
 
   throw new Error(`No PDF template configured for formCode: ${formCode}`);
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               UTILITIES                                    */
+/* -------------------------------------------------------------------------- */
+
+function sumBy(items, field) {
+  return (items || []).reduce((sum, item) => {
+    const val = Number(item[field] ?? 0);
+    return Number.isNaN(val) ? sum : sum + val;
+  }, 0);
+}
+
+function deriveTaxYear(date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  return month >= 4
+    ? `${year}/${String((year + 1) % 100).padStart(2, "0")}`
+    : `${year - 1}/${String(year % 100).padStart(2, "0")}`;
 }
