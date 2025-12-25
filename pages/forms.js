@@ -8,6 +8,7 @@ export default function FormsPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
 
+  // 🔐 Subscription + login guard (same as Dashboard)
   useEffect(() => {
     if (status === "loading") return;
 
@@ -25,43 +26,35 @@ export default function FormsPage() {
     }
   }, [session, status, router]);
 
+  // ⭐ Auto-detect client (accountants + business owners)
   const [clientId, setClientId] = useState(null);
   const [clientName, setClientName] = useState("");
-  const [clientLoading, setClientLoading] = useState(true);
 
   useEffect(() => {
     async function loadClient() {
-      try {
-        const res = await fetch("/api/accountant/get-accessible-clients");
-        const data = await res.json();
+      const res = await fetch("/api/accountant/get-accessible-clients");
+      const data = await res.json();
 
-        if (data.success) {
-          if (data.currentClient) {
-            setClientId(data.currentClient.id);
-            setClientName(data.currentClient.name);
-          } else if (data.clients?.length === 1) {
-            setClientId(data.clients[0].id);
-            setClientName(data.clients[0].name);
-          }
+      if (data.success) {
+        // Accountant acting as a client
+        if (data.currentClient) {
+          setClientId(data.currentClient.id);
+          setClientName(data.currentClient.name);
+          return;
         }
-      } catch (err) {
-        console.error("Error loading client:", err);
-      }
 
-      setClientLoading(false);
+        // Business owner (single client)
+        if (data.clients?.length === 1) {
+          setClientId(data.clients[0].id);
+          setClientName(data.clients[0].name);
+        }
+      }
     }
 
     loadClient();
   }, []);
 
-  if (clientLoading) {
-    return (
-      <ResponsiveLayout>
-        <div className="p-6 text-sm text-gray-600">Loading client…</div>
-      </ResponsiveLayout>
-    );
-  }
-
+  // Form state
   const [selectedCTForm, setSelectedCTForm] = useState("");
   const [selectedSAForm, setSelectedSAForm] = useState("");
   const [selectedCISForm, setSelectedCISForm] = useState("");
@@ -159,19 +152,30 @@ export default function FormsPage() {
             transaction data.
           </p>
 
+          {/* ⭐ Auto-detected client badge */}
           <p className="text-sm text-blue-700 font-medium">
             Generating forms for: <span className="font-semibold">{clientName}</span>
           </p>
         </header>
 
-        {/* Compliance */}
+        {/* Compliance / Requirements */}
         <section className="border border-amber-300 bg-amber-50 text-amber-900 rounded-md p-4 text-sm space-y-2">
           <h2 className="font-semibold">Important before you generate any form</h2>
           <ul className="list-disc list-inside space-y-1">
-            <li>All relevant <strong>transactions must already be imported and categorised</strong>.</li>
-            <li>ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables.</li>
-            <li><strong>You must seek an accountant audit</strong> before submitting any form to HMRC.</li>
-            <li>You remain <strong>responsible for the accuracy</strong> of all submissions.</li>
+            <li>
+              All relevant <strong>transactions must already be imported and categorised</strong> on
+              the Transactions page.
+            </li>
+            <li>
+              ProfitLens auto-fills forms from your <strong>transactions</strong> and related tables
+              (CT, SA, CIS). If data is missing or miscategorised, the form will be wrong.
+            </li>
+            <li>
+              <strong>You must seek an accountant audit before submitting any form to HMRC.</strong>
+            </li>
+            <li>
+              You remain <strong>responsible for the accuracy</strong> of all submissions to HMRC.
+            </li>
           </ul>
         </section>
 
