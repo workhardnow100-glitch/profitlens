@@ -39,14 +39,14 @@ export default async function handler(req, res) {
     let userId;
 
     if (!existingUser) {
-      // ⭐ 3. Create new accountant user with PRO subscription
+      // 3. Create new accountant user with PRO subscription
       const { data: newUser, error: createError } = await supabaseAdmin
         .from("app_users")
         .insert({
           email: accountantEmail,
           name: name || null,
           role: "ACCOUNTANT",
-          subscription_status: "pro",   // ⭐ give accountant full access
+          subscription_status: "pro",
           client_id: null,
           default_client_id: null,
           acting_client_id: null,
@@ -63,7 +63,7 @@ export default async function handler(req, res) {
 
       userId = newUser.id;
     } else {
-      // ⭐ 4. Existing user — upgrade to accountant safely
+      // 4. Existing user — upgrade to accountant safely
       userId = existingUser.id;
 
       // Founder protection
@@ -79,12 +79,12 @@ export default async function handler(req, res) {
         });
       }
 
-      // ⭐ Upgrade role + give PRO access + clear client fields
+      // Upgrade role + give PRO access + clear client fields
       await supabaseAdmin
         .from("app_users")
         .update({
           role: "ACCOUNTANT",
-          subscription_status: "pro",   // ⭐ accountant gets full access
+          subscription_status: "pro",
           client_id: null,
           default_client_id: null,
           acting_client_id: null,
@@ -115,9 +115,15 @@ export default async function handler(req, res) {
       .update({ used: true })
       .eq("id", invite.id);
 
+    // 7. ⭐ BULLETPROOF: Return NextAuth login URL
+    const loginUrl = `/api/auth/signin?email=${encodeURIComponent(
+      accountantEmail
+    )}`;
+
     return res.status(200).json({
       success: true,
-      message: "Accountant access granted",
+      message: "Accountant access granted. Please log in.",
+      loginUrl,
     });
   } catch (err) {
     console.error("Accept invite error:", err);
