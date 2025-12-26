@@ -10,12 +10,12 @@ export default async function handler(req, res) {
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
 
-  const role = session.user.role;
-  const userId = session.user.userId; // correct session field
+  const role = session.user.role?.toLowerCase();
+  const userId = session.user.id; // correct session field
   const actingClient = session.user.actingAsClientId;
 
   try {
-    // ❌ Accountants should NOT use this endpoint
+    // ❌ Accountants must NOT use this endpoint
     if (role === "accountant") {
       return res.status(403).json({
         success: false,
@@ -26,9 +26,8 @@ export default async function handler(req, res) {
     // ⭐ Founder/Admin: return ALL clients in the system
     if (role === "founder" || role === "admin") {
       const { data: allClients, error: allErr } = await supabaseAdmin
-        .from("app_users")
-        .select("client_id, name, email, subscription_status")
-        .not("client_id", "is", null);
+        .from("clients")
+        .select("id, name, email, business_name, trading_name");
 
       if (allErr) {
         console.error("Error fetching all clients:", allErr);
@@ -63,11 +62,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // ⭐ Fetch client metadata from app_users
+    // ⭐ Fetch client metadata from the REAL clients table
     const { data: clients, error: clientError } = await supabaseAdmin
-      .from("app_users")
-      .select("client_id, name, email, subscription_status")
-      .in("client_id", clientIds);
+      .from("clients")
+      .select("id, name, email, business_name, trading_name")
+      .in("id", clientIds);
 
     if (clientError) {
       console.error("Error fetching clients:", clientError);
