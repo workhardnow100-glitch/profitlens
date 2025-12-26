@@ -1,28 +1,41 @@
 import React, { useEffect, useState } from "react";
 
-type OverviewResponse = {
+type ClientOverviewResponse = {
   success?: boolean;
   error?: string;
-  overview?: {
+  client?: {
+    id: string;
+    clientId: string;
+    email: string;
+    name: string | null;
     businessName: string | null;
+    subscriptionStatus: string;
+    createdAt: string;
+  };
+  financials?: {
     totalRevenue: number;
     totalExpenses: number;
-    net: number;
-    lastStatementDate: string | null;
-    subscriptionStatus: string;
+    netProfit: number;
+  };
+  submissions?: {
+    vat: any;
+    sa: any;
+    cis: any;
+    ct: any;
   };
 };
 
 export function AccountantClientOverview() {
-  const [overview, setOverview] = useState<OverviewResponse["overview"] | null>(null);
-  const [loading, setLoading] = useState(true);
   const [actingAs, setActingAs] = useState<string | null>(null);
+  const [data, setData] = useState<ClientOverviewResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load accountant context
+  // Load accountant context + overview
   useEffect(() => {
     const load = async () => {
       try {
+        // 1. Get acting client
         const meRes = await fetch("/api/accountant/me");
         if (!meRes.ok) return;
 
@@ -35,13 +48,19 @@ export function AccountantClientOverview() {
           return;
         }
 
-        const res = await fetch("/api/accountant/client-overview");
-        const data: OverviewResponse = await res.json();
+        // 2. Fetch overview
+        const res = await fetch("/api/accountant/client-overview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clientId }),
+        });
+
+        const json: ClientOverviewResponse = await res.json();
 
         if (!res.ok) {
-          setError(data?.error || "Failed to load overview");
+          setError(json.error || "Failed to load overview");
         } else {
-          setOverview(data.overview || null);
+          setData(json);
         }
       } catch {
         setError("Network error");
@@ -79,49 +98,83 @@ export function AccountantClientOverview() {
     );
   }
 
-  if (!overview) {
+  if (!data || !data.client || !data.financials) {
     return null;
   }
 
+  const { client, financials, submissions } = data;
+
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm space-y-4">
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm space-y-6">
       <h2 className="text-lg font-semibold text-slate-900">
-        {overview.businessName || "Client Overview"}
+        {client.businessName || client.name || "Client Overview"}
       </h2>
 
+      {/* Financials */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="rounded-md border border-slate-200 p-3">
           <p className="text-slate-500 text-sm">Total Revenue</p>
-          <p className="text-xl font-bold">£{overview.totalRevenue.toFixed(2)}</p>
+          <p className="text-xl font-bold">
+            £{financials.totalRevenue.toFixed(2)}
+          </p>
         </div>
 
         <div className="rounded-md border border-slate-200 p-3">
           <p className="text-slate-500 text-sm">Total Expenses</p>
-          <p className="text-xl font-bold">£{overview.totalExpenses.toFixed(2)}</p>
+          <p className="text-xl font-bold">
+            £{financials.totalExpenses.toFixed(2)}
+          </p>
         </div>
 
         <div className="rounded-md border border-slate-200 p-3">
           <p className="text-slate-500 text-sm">Net Profit</p>
           <p
             className={`text-xl font-bold ${
-              overview.net >= 0 ? "text-emerald-600" : "text-red-600"
+              financials.netProfit >= 0 ? "text-emerald-600" : "text-red-600"
             }`}
           >
-            £{overview.net.toFixed(2)}
+            £{financials.netProfit.toFixed(2)}
           </p>
         </div>
       </div>
 
-      <div className="rounded-md border border-slate-200 p-3">
-        <p className="text-slate-500 text-sm">Last Statement</p>
-        <p className="text-md font-medium">
-          {overview.lastStatementDate || "No statements yet"}
-        </p>
-      </div>
-
+      {/* Subscription */}
       <div className="rounded-md border border-slate-200 p-3">
         <p className="text-slate-500 text-sm">Subscription</p>
-        <p className="text-md font-medium">{overview.subscriptionStatus}</p>
+        <p className="text-md font-medium">{client.subscriptionStatus}</p>
+      </div>
+
+      {/* Last Submissions */}
+      <div className="rounded-md border border-slate-200 p-3 space-y-2">
+        <p className="text-slate-500 text-sm">Last Submissions</p>
+
+        <p className="text-sm">
+          VAT:{" "}
+          {submissions?.vat
+            ? `${submissions.vat.period_start} → ${submissions.vat.period_end}`
+            : "No VAT submissions"}
+        </p>
+
+        <p className="text-sm">
+          Self Assessment:{" "}
+          {submissions?.sa
+            ? `${submissions.sa.period_start} → ${submissions.sa.period_end}`
+            : "No SA submissions"}
+        </p>
+
+        <p className="text-sm">
+          CIS:{" "}
+          {submissions?.cis
+            ? `${submissions.cis.period_start} → ${submissions.cis.period_end}`
+            : "No CIS submissions"}
+        </p>
+
+        <p className="text-sm">
+          Corporation Tax:{" "}
+          {submissions?.ct
+            ? `${submissions.ct.period_start} → ${submissions.ct.period_end}`
+            : "No CT submissions"}
+        </p>
       </div>
     </section>
   );

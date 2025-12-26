@@ -19,11 +19,9 @@ export default async function handler(req, res) {
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ✅ Admin bypass (optional)
-  if (role === "admin") {
-    // Admin can view any client without actingAs
-  } else {
-    // ✅ Only accountants allowed
+  // ⭐ Founder/Admin bypass: can view any client without actingAs
+  if (!["admin", "founder"].includes(role)) {
+    // ✅ Only accountants allowed (for non-admin/founder)
     if (role !== "accountant") {
       return res
         .status(403)
@@ -44,11 +42,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Validate accountant-client relationship
+    // ✅ Validate accountant-client relationship against accountant_clients
     const { data: access, error: accessErr } = await supabaseAdmin
-      .from("accountant_access")
+      .from("accountant_clients")
       .select("client_id")
-      .eq("accountant_email", accountantEmail)
+      .eq("accountant_email", accountantEmail.toLowerCase())
       .eq("client_id", clientId)
       .maybeSingle();
 
@@ -139,13 +137,6 @@ export default async function handler(req, res) {
         timestamp: new Date().toISOString(),
       },
     ]);
-
-    // ✅ Final safety check
-    if (role === "accountant" && actingAs !== clientId) {
-      return res.status(403).json({
-        error: "Context mismatch: actingAsClientId does not match clientId",
-      });
-    }
 
     return res.status(200).json({
       success: true,

@@ -20,19 +20,21 @@ export default function ClientSwitcher({ clients, currentClient }) {
     router.refresh();
   };
 
+  // If only one client, no need to show switcher
   if (!clients || clients.length <= 1) return null;
 
   return (
     <div className="p-3 border rounded bg-white shadow-sm mb-4">
       <label className="block text-sm font-medium mb-1">Acting as:</label>
+
       <select
-        value={selected}
+        value={selected || ""}
         onChange={handleChange}
         className="w-full border p-2 rounded"
       >
         {clients.map((c: any) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
+          <option key={c.client_id} value={c.client_id}>
+            {c.business_name || c.name || c.email}
           </option>
         ))}
       </select>

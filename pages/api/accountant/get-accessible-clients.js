@@ -1,3 +1,4 @@
+// pages/api/accountant/get-accessible-clients.js
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -9,11 +10,39 @@ export default async function handler(req, res) {
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
 
-  const userId = session.user.id;
+  const role = session.user.role;
+  const userId = session.user.userId; // ⭐ Correct session field
   const actingClient = session.user.actingAsClientId;
 
   try {
-    // ✅ 1. Get all client IDs this user can access
+    // ⭐ Accountants should NOT use this endpoint
+    if (role === "accountant") {
+      return res.status(403).json({
+        success: false,
+        error: "Accountants must use /api/accountant/clients",
+      });
+    }
+
+    // ⭐ Founder/Admin: return ALL clients in the system
+    if (role === "founder" || role === "admin") {
+      const { data: allClients, error: allErr } = await supabaseAdmin
+        .from("app_users")
+        .select("client_id, name, business_name")
+        .not("client_id", "is", null);
+
+      if (allErr) {
+        console.error("Error fetching all clients:", allErr);
+        return res.status(500).json({ success: false });
+      }
+
+      return res.status(200).json({
+        success: true,
+        clients: allClients,
+        currentClient: actingClient,
+      });
+    }
+
+    // ⭐ Normal user: fetch only their assigned clients
     const { data: accessRows, error: accessError } = await supabaseAdmin
       .from("user_clients")
       .select("client_id")
@@ -34,11 +63,11 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ 2. Fetch client names
+    // ⭐ Fetch client metadata from app_users (NOT clients table)
     const { data: clients, error: clientError } = await supabaseAdmin
-      .from("clients")
-      .select("id, name")
-      .in("id", clientIds);
+      .from("app_users")
+      .select("client_id, name, business_name")
+      .in("client_id", clientIds);
 
     if (clientError) {
       console.error("Error fetching clients:", clientError);

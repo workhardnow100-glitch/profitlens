@@ -1,9 +1,4 @@
-// components/AccountantAccessPanel.tsx
 import React, { useEffect, useState } from "react";
-
-type AccountantAccess = {
-  email: string;
-};
 
 type MeResponse = {
   success: boolean;
@@ -18,24 +13,27 @@ export function AccountantAccessPanel() {
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isAccountant, setIsAccountant] = useState(false);
+  const [hidePanel, setHidePanel] = useState(false);
 
-  // If user is an accountant, hide this component
+  // Hide panel for accountants, founders, admins
   useEffect(() => {
     const load = async () => {
       try {
         const res = await fetch("/api/accountant/me");
         if (!res.ok) return;
         const data: MeResponse = await res.json();
-        setIsAccountant(data.user.role === "accountant");
+        const role = data.user.role;
+        if (["accountant", "founder", "admin"].includes(role)) {
+          setHidePanel(true);
+        }
       } catch {
-        // ignore
+        // fail silently
       }
     };
     load();
   }, []);
 
-  if (isAccountant) return null;
+  if (hidePanel) return null;
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,10 +52,10 @@ export function AccountantAccessPanel() {
       if (!res.ok) {
         setError(data.error || "Failed to send invitation");
       } else {
-        setStatus("Invitation sent to " + accountantEmail);
+        setStatus(`✅ Invitation sent to ${accountantEmail}`);
         setAccountantEmail("");
       }
-    } catch (err) {
+    } catch {
       setError("Network error");
     } finally {
       setLoading(false);
@@ -84,7 +82,7 @@ export function AccountantAccessPanel() {
       if (!res.ok) {
         setError(data.error || "Failed to revoke access");
       } else {
-        setStatus("Access revoked for " + accountantEmail);
+        setStatus(`❌ Access revoked for ${accountantEmail}`);
         setAccountantEmail("");
       }
     } catch {
@@ -100,8 +98,7 @@ export function AccountantAccessPanel() {
         Invite your accountant
       </h2>
       <p className="text-sm text-slate-600">
-        Enter your accountant&apos;s email. They will receive a secure invite to
-        view and file on your behalf.
+        Enter your accountant&apos;s email. They’ll receive a secure link to view and file on your behalf.
       </p>
 
       <form onSubmit={handleInvite} className="space-y-3">
@@ -141,6 +138,10 @@ export function AccountantAccessPanel() {
 
       {status && <p className="text-sm text-emerald-700">{status}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
+
+      <p className="text-xs text-slate-400 pt-2 border-t mt-4">
+        ProfitLens provides estimates only. Always verify figures before filing with HMRC. Nothing displayed here constitutes tax, accounting, or legal advice.
+      </p>
     </section>
   );
 }

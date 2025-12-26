@@ -12,11 +12,11 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = session.user.role;
-  const userEmail = session.user.email;
-  const clientId = session.user.clientId;
+  const userEmail = session.user.email.toLowerCase();
+  const clientId = session.user.default_client_id; // ⭐ Correct session field
 
-  // ✅ Only clients (or admin) can revoke accountant access
-  if (role !== "user" && role !== "admin") {
+  // ⭐ Allow: user, admin, founder
+  if (!["user", "admin", "founder"].includes(role)) {
     return res.status(403).json({
       error: "Only clients can revoke accountant access",
     });
@@ -33,15 +33,15 @@ export default async function handler(req, res) {
 
   const normalizedEmail = accountantEmail.toLowerCase().trim();
 
-  // ✅ Prevent revoking yourself defensively (harmless, but guard anyway)
-  if (normalizedEmail === userEmail.toLowerCase()) {
+  // ⭐ Prevent revoking yourself
+  if (normalizedEmail === userEmail) {
     return res.status(400).json({
       error: "You cannot revoke yourself as your own accountant",
     });
   }
 
   try {
-    // ✅ 1. Check if accountant currently has access
+    // ⭐ 1. Check if accountant currently has access
     const { data: accessRow, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("*")
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ 2. Remove access
+    // ⭐ 2. Remove access
     const { error: deleteErr } = await supabaseAdmin
       .from("accountant_clients")
       .delete()
@@ -71,7 +71,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to remove access" });
     }
 
-    // ✅ 3. Clear acting_client_id if accountant is currently acting as this client
+    // ⭐ 3. Clear acting_client_id if accountant is currently acting as this client
     const { error: clearErr } = await supabaseAdmin
       .from("app_users")
       .update({ acting_client_id: null })
@@ -80,10 +80,10 @@ export default async function handler(req, res) {
 
     if (clearErr) {
       console.error("Failed to clear acting_client_id:", clearErr);
-      // Non‑fatal: don't block success on this, but log it
+      // Non‑fatal
     }
 
-    // ✅ 4. Audit log
+    // ⭐ 4. Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,

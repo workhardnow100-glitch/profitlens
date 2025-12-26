@@ -4,9 +4,7 @@ type MeUser = {
   id: string;
   email: string;
   role: string;
-  clientId: string;
-  subscriptionStatus: string;
-  accessibleClients: string[];
+  subscriptionStatus: string | null;
   actingAsClientId: string | null;
 };
 
@@ -49,7 +47,8 @@ export function AccountantClientPanel() {
         const meData: MeResponse = await meRes.json();
         setMe(meData.user);
 
-        if (meData.user.role !== "accountant") {
+        // ⭐ Founder, admin, accountant all allowed
+        if (!["accountant", "admin", "founder"].includes(meData.user.role)) {
           setLoading(false);
           return;
         }
@@ -70,13 +69,16 @@ export function AccountantClientPanel() {
   const handleSwitch = async (clientId: string) => {
     setError(null);
     setSwitchingId(clientId);
+
     try {
       const res = await fetch("/api/accountant/switch-client", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clientId }),
       });
+
       const data = await res.json();
+
       if (!res.ok) {
         setError(data.error || "Failed to switch client");
       } else {
@@ -99,7 +101,7 @@ export function AccountantClientPanel() {
     );
   }
 
-  if (!me || me.role !== "accountant") {
+  if (!me || !["accountant", "admin", "founder"].includes(me.role)) {
     return null;
   }
 

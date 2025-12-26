@@ -12,18 +12,17 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = session.user.role;
-  const accountantEmail = session.user.email;
-  const actingAs = session.user.actingAsClientId;
+  const accountantEmail = session.user.email.toLowerCase();
 
-  // ✅ Admin bypass (optional)
-  if (role !== "accountant" && role !== "admin") {
+  // ⭐ Allow accountant, admin, founder
+  if (!["accountant", "admin", "founder"].includes(role)) {
     return res.status(403).json({
       error: "Only accountants can view their client list",
     });
   }
 
   try {
-    // ✅ Fetch all client IDs this accountant has access to
+    // ⭐ Fetch all client IDs this accountant has access to
     const { data: accessRows, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
@@ -36,12 +35,12 @@ export default async function handler(req, res) {
 
     const clientIds = accessRows?.map((r) => r.client_id) || [];
 
-    // ✅ No clients yet
+    // ⭐ No clients yet
     if (clientIds.length === 0) {
       return res.status(200).json({ success: true, clients: [] });
     }
 
-    // ✅ Fetch client metadata
+    // ⭐ Fetch client metadata
     const { data: clients, error: clientErr } = await supabaseAdmin
       .from("app_users")
       .select(
@@ -54,7 +53,7 @@ export default async function handler(req, res) {
       throw clientErr;
     }
 
-    // ✅ Audit log
+    // ⭐ Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: null,

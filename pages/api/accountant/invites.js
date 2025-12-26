@@ -16,14 +16,14 @@ export default async function handler(req, res) {
   const userEmail = session.user.email;
   const clientId = session.user.clientId;
 
-  // ✅ Only clients (or admin) can invite accountants
-  if (role !== "user" && role !== "admin") {
+  // ⭐ Allow: user, admin, founder
+  if (!["user", "admin", "founder"].includes(role)) {
     return res.status(403).json({
       error: "Only clients can invite accountants",
     });
   }
 
-  // ✅ Client must have a valid clientId
+  // ⭐ Client must have a valid clientId
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
 
   const normalizedEmail = accountantEmail.toLowerCase().trim();
 
-  // ✅ Prevent inviting yourself
+  // ⭐ Prevent inviting yourself
   if (normalizedEmail === userEmail.toLowerCase()) {
     return res.status(400).json({
       error: "You cannot invite yourself as your own accountant",
@@ -43,7 +43,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ Prevent duplicate active invites
+    // ⭐ Prevent inviting an accountant who already has permanent access
+    const { data: existingAccess } = await supabaseAdmin
+      .from("accountant_clients")
+      .select("id")
+      .eq("accountant_email", normalizedEmail)
+      .eq("client_id", clientId)
+      .maybeSingle();
+
+    if (existingAccess) {
+      return res.status(400).json({
+        error: "This accountant already has access to your account",
+      });
+    }
+
+    // ⭐ Prevent duplicate active invites
     const { data: existingInvite, error: inviteCheckErr } =
       await supabaseAdmin
         .from("accountant_access")
@@ -71,11 +85,11 @@ export default async function handler(req, res) {
       }
     }
 
-    // ✅ Generate secure token
+    // ⭐ Generate secure token
     const token = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 3); // 3 days
 
-    // ✅ Insert invitation
+    // ⭐ Insert invitation
     const { error: insertErr } = await supabaseAdmin
       .from("accountant_access")
       .insert([
@@ -93,7 +107,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to create invite" });
     }
 
-    // ✅ Log the invitation
+    // ⭐ Log the invitation
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -104,14 +118,14 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ✅ TODO: Send email (placeholder)
-    console.log(
-      `📧 Accountant invite link: https://yourdomain.com/accountant/accept?token=${token}`
-    );
+    // ⭐ Real invite link (update domain if needed)
+    const inviteLink = `https://profitlens.vercel.app/accountant/accept?token=${token}`;
+    console.log("📧 Accountant invite link:", inviteLink);
 
     return res.status(200).json({
       success: true,
       message: "Invitation sent",
+      inviteLink,
     });
   } catch (err) {
     console.error("Invite error:", err);

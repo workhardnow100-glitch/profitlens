@@ -100,9 +100,20 @@ function ClientSwitcher() {
 // Sidebar Menu
 export function SidebarMenu() {
   const router = useRouter();
+  const { user } = useUser(); // ⭐ NEW: get logged-in user role
 
   const [taxOpen, setTaxOpen] = useState(true);
-  const [formsOpen, setFormsOpen] = useState(true); // ⭐ NEW
+  const [formsOpen, setFormsOpen] = useState(true);
+
+  // ⭐ NEW: Accountant + Founder + Admin see accountant dashboard
+  const accountantNav = [
+    {
+      title: "Accountant Dashboard",
+      url: "/accountant/dashboard",
+      icon: Users,
+      roles: ["accountant", "founder", "admin"],
+    },
+  ];
 
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
@@ -128,17 +139,38 @@ export function SidebarMenu() {
     { title: "SA History", url: "/sa/history", icon: History },
   ];
 
-  // ⭐ NEW: Forms collapsible group
   const formsItems = [
     { title: "Forms Hub", url: "/forms", icon: FileText },
     { title: "PDF Library & Working Papers", url: "/forms/pdfs", icon: History },
-   
   ];
 
   return (
     <ul className="space-y-1">
-      {/* Accountant Client Switcher */}
-      <ClientSwitcher />
+
+      {/* ⭐ Accountant Client Switcher (only for accountant + founder + admin) */}
+      {(user?.role === "accountant" ||
+        user?.role === "founder" ||
+        user?.role === "admin") && <ClientSwitcher />}
+
+      {/* ⭐ Accountant Dashboard link */}
+      {accountantNav.map(
+        ({ title, url, icon: Icon, roles }) =>
+          roles.includes(user?.role) && (
+            <SidebarMenuItem key={title}>
+              <Link
+                href={url}
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === url
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <Icon size={16} />
+                <span>{title}</span>
+              </Link>
+            </SidebarMenuItem>
+          )
+      )}
 
       {/* Default navigation */}
       {navigationItems.map(({ title, url, icon: Icon }) => (
@@ -195,7 +227,7 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* ⭐ NEW: Forms group */}
+      {/* Forms group */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setFormsOpen(!formsOpen)}

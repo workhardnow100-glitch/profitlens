@@ -12,25 +12,23 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = session.user.role;
-  const accountantEmail = session.user.email;
-  const actingAs = session.user.actingAsClientId;
+  const accountantEmail = session.user.email.toLowerCase();
+  const userId = session.user.userId; // ⭐ Correct session field
 
   const { clientId } = req.body;
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ✅ Admin bypass (optional)
-  if (role === "admin") {
-    // Admin can switch to any client
-  } else {
-    // ✅ Only accountants can switch clients
+  // ⭐ Founder/Admin bypass — can switch to ANY client
+  if (!["founder", "admin"].includes(role)) {
+    // ⭐ Only accountants can switch clients
     if (role !== "accountant") {
-      return res
-        .status(403)
-        .json({ error: "Only accountants can switch clients" });
+      return res.status(403).json({
+        error: "Only accountants can switch clients",
+      });
     }
 
-    // ✅ Validate accountant has permanent access to this client
+    // ⭐ Validate accountant has permanent access to this client
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
@@ -43,14 +41,14 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to validate access" });
     }
 
-    if (!access || !access.client_id) {
+    if (!access) {
       return res.status(403).json({
         error: "You do not have permission to access this client",
       });
     }
   }
 
-  // ✅ Log the switch
+  // ⭐ Log the switch
   await supabaseAdmin.from("audit").insert([
     {
       client_id: clientId,
@@ -61,22 +59,15 @@ export default async function handler(req, res) {
     },
   ]);
 
-  // ✅ Persist acting client in database
+  // ⭐ Persist acting client in database
   const { error: updateErr } = await supabaseAdmin
     .from("app_users")
     .update({ acting_client_id: clientId })
-    .eq("id", session.user.id);
+    .eq("id", userId);
 
   if (updateErr) {
     console.error("Failed to update acting client:", updateErr);
     return res.status(500).json({ error: "Failed to update acting client" });
-  }
-
-  // ✅ Final safety check
-  if (role === "accountant" && clientId !== clientId) {
-    return res.status(403).json({
-      error: "Context mismatch: cannot switch to this client",
-    });
   }
 
   return res.status(200).json({

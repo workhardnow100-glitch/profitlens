@@ -11,16 +11,19 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
-  // ✅ Only accountants can clear client context
-  if (session.user.role !== "accountant") {
-    return res.status(403).json({ error: "Only accountants can clear client context" });
+  const role = session.user.role;
+  const accountantEmail = session.user.email;
+  const accountantId = session.user.userId; // ⭐ Correct session field
+
+  // ⭐ Allow accountant, founder, admin
+  if (!["accountant", "founder", "admin"].includes(role)) {
+    return res.status(403).json({
+      error: "Only accountants can clear client context",
+    });
   }
 
-  const accountantId = session.user.id;
-  const accountantEmail = session.user.email;
-
   try {
-    // ✅ Log the exit
+    // ⭐ Log the exit
     await supabaseAdmin.from("audit").insert([
       {
         client_id: null,
@@ -31,7 +34,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ✅ Clear acting client in DB
+    // ⭐ Clear acting client in DB
     const { error: updateErr } = await supabaseAdmin
       .from("app_users")
       .update({ acting_client_id: null })

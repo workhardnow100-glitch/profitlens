@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing token" });
 
   try {
-    // ✅ 1. Fetch invite token
+    // 1. Fetch invite token
     const { data: invite, error: inviteError } = await supabaseAdmin
       .from("accountant_access")
       .select("*")
@@ -29,7 +29,7 @@ export default async function handler(req, res) {
 
     const accountantEmail = invite.accountant_email.toLowerCase();
 
-    // ✅ 2. Check if accountant user already exists
+    // 2. Check if user already exists
     const { data: existingUser } = await supabaseAdmin
       .from("app_users")
       .select("*")
@@ -40,8 +40,28 @@ export default async function handler(req, res) {
 
     if (existingUser) {
       userId = existingUser.id;
+
+      // ⭐ Founder protection — never modify founder
+      if (existingUser.role === "founder") {
+        await supabaseAdmin
+          .from("accountant_access")
+          .update({ used: true })
+          .eq("id", invite.id);
+
+        return res.status(200).json({
+          success: true,
+          message: "Founder already has full access",
+        });
+      }
+
+      // ⭐ If user exists but is not accountant, do NOT overwrite role
+      if (existingUser.role !== "accountant") {
+        return res.status(400).json({
+          error: "This email belongs to an existing user who is not an accountant",
+        });
+      }
     } else {
-      // ✅ 3. Create new accountant user
+      // 3. Create new accountant user
       const { data: newUser, error: createError } = await supabaseAdmin
         .from("app_users")
         .insert({
@@ -49,7 +69,7 @@ export default async function handler(req, res) {
           name: name || null,
           role: "accountant",
           subscription_status: "trialing",
-          default_client_id: invite.client_id, // safe default
+          default_client_id: invite.client_id,
         })
         .select()
         .single();
@@ -62,7 +82,7 @@ export default async function handler(req, res) {
       userId = newUser.id;
     }
 
-    // ✅ 4. Grant permanent access in accountant_clients
+    // 4. Grant access in accountant_clients
     const { error: accessError } = await supabaseAdmin
       .from("accountant_clients")
       .insert({
@@ -70,13 +90,13 @@ export default async function handler(req, res) {
         client_id: invite.client_id,
       });
 
+    // Ignore duplicate access (23505)
     if (accessError && accessError.code !== "23505") {
-      // 23505 = duplicate (already has access)
       console.error("Access insert error:", accessError);
       return res.status(500).json({ error: "Failed to grant access" });
     }
 
-    // ✅ 5. Mark invite as used
+    // 5. Mark invite as used
     await supabaseAdmin
       .from("accountant_access")
       .update({ used: true })

@@ -11,40 +11,28 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
 
   const {
-    id,
+    userId,
     email,
     role,
-    clientId,
-    subscriptionStatus,
-    accessibleClients,
-    actingAsClientId,
+    acting_client_id,
+    subscription_status,
   } = session.user;
 
-  // ✅ Only accountants and admins should ever call this endpoint
-  if (role !== "accountant" && role !== "admin") {
+  // ⭐ Allow accountant, admin, founder
+  if (!["accountant", "admin", "founder"].includes(role)) {
     return res.status(403).json({
       error: "Only accountants can access accountant context",
     });
   }
 
-  // ✅ Ensure accessibleClients is always an array
-  const safeAccessibleClients = Array.isArray(accessibleClients)
-    ? accessibleClients
-    : [];
-
-  // ✅ Ensure actingAsClientId is either null or a string
-  const safeActingAs = actingAsClientId || null;
-
   return res.status(200).json({
     success: true,
     user: {
-      id,
+      id: userId,
       email,
       role,
-      clientId,
-      subscriptionStatus,
-      accessibleClients: safeAccessibleClients,
-      actingAsClientId: safeActingAs,
+      subscriptionStatus: subscription_status || null,
+      actingAsClientId: acting_client_id || null,
     },
   });
 }
