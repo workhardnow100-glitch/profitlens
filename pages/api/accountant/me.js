@@ -19,7 +19,8 @@ export default async function handler(req, res) {
   } = session.user;
 
   // ⭐ Allow accountant, admin, founder
-  if (!["accountant", "admin", "founder"].includes(role)) {
+ if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role?.toUpperCase())) {
+
     return res.status(403).json({
       error: "Only accountants can access accountant context",
     });
