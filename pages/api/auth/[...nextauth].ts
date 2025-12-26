@@ -1,4 +1,5 @@
-// pages/api/auth/[...nextauth].ts
+
+
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
@@ -25,9 +26,7 @@ const BaseAdapter = SupabaseAdapter({
 
 const PatchedAdapter: any = { ...BaseAdapter };
 
-/* -------------------------------------------------------
-   CUSTOM USER LOOKUP (app_users)
-------------------------------------------------------- */
+// ✅ Use app_users for user lookups
 PatchedAdapter.getUserByEmail = async (email: string) => {
   const { data, error } = await supabaseAdmin
     .from("app_users")
@@ -45,14 +44,11 @@ PatchedAdapter.getUserByEmail = async (email: string) => {
   };
 };
 
-/* -------------------------------------------------------
-   MAGIC LINK TOKEN CREATION
-   ACCOUNTANTS / ADMINS / FOUNDERS ALWAYS ALLOWED
-------------------------------------------------------- */
+// ✅ Insert verification tokens into public.verification_tokens
 PatchedAdapter.createVerificationToken = async (token) => {
   const { data: user } = await supabaseAdmin
     .from("app_users")
-    .select("id, client_id, subscription_status, role")
+    .select("id, client_id, subscription_status")
     .eq("email", token.identifier)
     .single();
 
@@ -68,36 +64,9 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  // ⭐ ACCOUNTANTS / ADMINS / FOUNDERS ALWAYS ALLOWED
-  if (["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(user.role)) {
-    const { data: inserted, error } = await supabaseAdmin
-      .from("verification_tokens")
-      .insert([
-        {
-          identifier: token.identifier,
-          token: token.token,
-          expires:
-            typeof token.expires === "string"
-              ? token.expires
-              : token.expires.toISOString(),
-        },
-      ])
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Failed to insert verification token:", error);
-      return null;
-    }
-
-    return inserted;
-  }
-
-  // ⭐ CLIENT LOGIN RULES (unchanged)
   const isActive = ["basic", "pro", "trialing"].includes(
     user.subscription_status
   );
-
   if (!user.client_id || !isActive) {
     await supabaseAdmin.from("audit").insert([
       {
@@ -112,7 +81,6 @@ PatchedAdapter.createVerificationToken = async (token) => {
     );
   }
 
-  // Insert token for valid paying clients
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
     .insert([
@@ -136,9 +104,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
   return inserted;
 };
 
-/* -------------------------------------------------------
-   CONSUME VERIFICATION TOKEN
-------------------------------------------------------- */
+// ✅ Consume verification token and mark user as verified
 PatchedAdapter.useVerificationToken = async (token) => {
   const { data: consumed, error } = await supabaseAdmin
     .from("verification_tokens")
@@ -167,9 +133,7 @@ PatchedAdapter.useVerificationToken = async (token) => {
   return consumed;
 };
 
-/* -------------------------------------------------------
-   UPDATE USER
-------------------------------------------------------- */
+// ✅ Ensure NextAuth updates app_users (not the default users table)
 PatchedAdapter.updateUser = async (user) => {
   const updates: any = {
     updated_at: new Date().toISOString(),
@@ -203,9 +167,6 @@ PatchedAdapter.updateUser = async (user) => {
   };
 };
 
-/* -------------------------------------------------------
-   NEXTAUTH CONFIG
-------------------------------------------------------- */
 export const authOptions: NextAuthOptions = {
   providers: [
     EmailProvider({
@@ -273,8 +234,8 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     /* -------------------------------------------------------
-       JWT CALLBACK
-------------------------------------------------------- */
+       ✅ JWT CALLBACK — loads acting_client_id from DB
+    ------------------------------------------------------- */
     async jwt({ token, user }) {
       if (user) {
         token.sub = String(user.id);
@@ -294,14 +255,9 @@ export const authOptions: NextAuthOptions = {
         if (dbUser) {
           token.sub = dbUser.id;
           token.role = dbUser.role ?? "USER";
-
-          // ⭐ ACCOUNTANTS GET PRO ACCESS
+          token.clientId = dbUser.client_id ?? "unknown-client";
           token.subscriptionStatus =
-            dbUser.role === "ACCOUNTANT"
-              ? "pro"
-              : dbUser.subscription_status ?? "incomplete";
-
-          token.clientId = dbUser.client_id ?? null;
+            dbUser.subscription_status ?? "incomplete";
           token.actingAsClientId = dbUser.acting_client_id ?? null;
         }
       }
@@ -310,17 +266,18 @@ export const authOptions: NextAuthOptions = {
     },
 
     /* -------------------------------------------------------
-       SESSION CALLBACK — accountant-aware enrichment
-------------------------------------------------------- */
+       ✅ SESSION CALLBACK — accountant-aware enrichment
+    ------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
         id: token.sub ?? "unknown",
         email: token.email ?? "unknown@example.com",
         role: token.role ?? "USER",
-        clientId: token.clientId ?? null,
+        clientId: token.clientId ?? "unknown-client",
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
+      // ✅ Accountant role is uppercase in your union/DB
       if (session.user.role === "ACCOUNTANT") {
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_clients")
@@ -334,17 +291,13 @@ export const authOptions: NextAuthOptions = {
         const persisted = token.actingAsClientId;
         const valid = accessibleClients.includes(persisted as string);
 
-        // ⭐ ALWAYS DEFAULT TO FIRST CLIENT IF NONE SELECTED
-        session.user.actingAsClientId = valid
-          ? persisted
-          : accessibleClients.length > 0
-          ? accessibleClients[0]
-          : null;
+        session.user.actingAsClientId = valid ? (persisted as string) : null;
       } else {
-        const cid = session.user.clientId ?? null;
-        session.user.accessibleClients = cid ? [cid] : [];
-        session.user.actingAsClientId = cid;
-      }
+  const cid = session.user.clientId ?? "unknown-client";
+  session.user.accessibleClients = [cid];
+  session.user.actingAsClientId = cid;
+}
+
 
       return session;
     },
