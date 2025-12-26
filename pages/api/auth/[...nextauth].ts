@@ -1,5 +1,3 @@
-
-
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
@@ -266,6 +264,20 @@ export const authOptions: NextAuthOptions = {
        ✅ JWT CALLBACK — loads acting_client_id from DB
     ------------------------------------------------------- */
     async jwt({ token, user }) {
+
+      // ⭐ FIX: Restore email on magic-link second pass
+      if (!token.email && token.sub) {
+        const { data: dbUser } = await supabaseAdmin
+          .from("app_users")
+          .select("email")
+          .eq("id", token.sub)
+          .single();
+
+        if (dbUser) {
+          token.email = dbUser.email;
+        }
+      }
+
       if (user) {
         token.sub = String(user.id);
         token.email = user.email;
@@ -322,11 +334,10 @@ export const authOptions: NextAuthOptions = {
 
         session.user.actingAsClientId = valid ? (persisted as string) : null;
       } else {
-  const cid = session.user.clientId ?? "unknown-client";
-  session.user.accessibleClients = [cid];
-  session.user.actingAsClientId = cid;
-}
-
+        const cid = session.user.clientId ?? "unknown-client";
+        session.user.accessibleClients = [cid];
+        session.user.actingAsClientId = cid;
+      }
 
       return session;
     },
