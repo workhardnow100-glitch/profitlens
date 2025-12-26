@@ -42,7 +42,7 @@ export function AccountantAccessPanel() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/accountant/invite", {
+      const res = await fetch("/api/accountant/invites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountantEmail }),
