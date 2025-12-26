@@ -1,4 +1,13 @@
 // pages/clients.js
+// ❗ dynamic flag does nothing in pages router, but harmless to keep
+export const dynamic = "force-dynamic";
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
+
+
 import { useState, useMemo } from "react";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";

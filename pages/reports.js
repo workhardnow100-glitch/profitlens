@@ -1,4 +1,12 @@
 // pages/reports.js
+
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
+
+
 import React, { useState, useRef, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";

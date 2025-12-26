@@ -1,4 +1,14 @@
 // pages/forms.jsx
+// ❗ dynamic flag does nothing in pages router, but harmless to keep
+export const dynamic = "force-dynamic";
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
+
+
+
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";

@@ -1,4 +1,12 @@
+// pages/accountant/dashboard.js
+
+// ❗ dynamic flag does nothing in pages router, but harmless to keep
 export const dynamic = "force-dynamic";
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
 
 import ResponsiveLayout from "../../components/ResponsiveLayout";
 import { AccountantClientPanel } from "../../components/AccountantClientPanel";
@@ -6,7 +14,7 @@ import { AccountantClientOverview } from "../../components/AccountantClientOverv
 import { useRouteGuard } from "../../hooks/useRouteGuard";
 
 export default function AccountantDashboard() {
-  // ✅ Route guard: only accountants and founder can access
+  // Route guard: only accountants and founder can access
   useRouteGuard();
 
   return (

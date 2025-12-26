@@ -1,4 +1,13 @@
 // pages/transactions.js
+
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
+
+
+
 import React, { useEffect, useState, useMemo } from "react";
 import useSWR, { mutate } from "swr";
 import { useSession } from "next-auth/react";
