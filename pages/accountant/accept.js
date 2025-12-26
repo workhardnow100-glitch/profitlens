@@ -22,20 +22,23 @@ export default function AcceptAccountantInvite() {
 
         const data = await res.json();
 
-        if (!res.ok) {
+        if (!res.ok || !data.success) {
           setError(data.error || "Invite could not be accepted");
           setStatus(null);
           setLoading(false);
           return;
         }
 
-        // Success
-        setStatus(data.message || "Access granted");
+        // ⭐ NEW: Redirect accountant to NextAuth login URL
+        if (data.loginUrl) {
+          setStatus("Invitation accepted. Redirecting to secure login…");
+          window.location.href = data.loginUrl;
+          return;
+        }
 
-        // Redirect accountants/founder/admin to dashboard
-        setTimeout(() => {
-          router.replace("/accountant/dashboard");
-        }, 2000);
+        // Fallback (should never happen)
+        setError("Invitation accepted, but login link missing.");
+        setStatus(null);
       } catch (err) {
         setError("Network error");
         setStatus(null);
