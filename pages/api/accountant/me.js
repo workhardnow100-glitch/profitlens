@@ -11,16 +11,15 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
 
   const {
-    userId,
+    id,
     email,
     role,
-    acting_client_id,
-    subscription_status,
+    actingAsClientId,
+    subscriptionStatus,
   } = session.user;
 
   // ⭐ Allow accountant, admin, founder
- if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role?.toUpperCase())) {
-
+  if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role?.toUpperCase())) {
     return res.status(403).json({
       error: "Only accountants can access accountant context",
     });
@@ -29,11 +28,11 @@ export default async function handler(req, res) {
   return res.status(200).json({
     success: true,
     user: {
-      id: userId,
+      id,
       email,
       role,
-      subscriptionStatus: subscription_status || null,
-      actingAsClientId: acting_client_id || null,
+      subscriptionStatus: subscriptionStatus || null,
+      actingAsClientId: actingAsClientId || null,
     },
   });
 }
