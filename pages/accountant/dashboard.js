@@ -1,4 +1,5 @@
-// pages/accountant/dashboard.js
+export const dynamic = "force-dynamic";
+
 import ResponsiveLayout from "../../components/ResponsiveLayout";
 import { AccountantClientPanel } from "../../components/AccountantClientPanel";
 import { AccountantClientOverview } from "../../components/AccountantClientOverview";
