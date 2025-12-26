@@ -64,9 +64,21 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  const isActive = ["basic", "pro", "trialing"].includes(
-    user.subscription_status
-  );
+const isActive = ["basic", "pro", "trialing"].includes(
+  user.subscription_status
+);
+
+// ⭐ Allow accountants even if they have no client_id
+const { data: roleRow } = await supabaseAdmin
+  .from("app_users")
+  .select("role")
+  .eq("email", token.identifier)
+  .single();
+
+const isAccountant = roleRow?.role === "ACCOUNTANT";
+
+if (!isAccountant) {
+  // Normal users MUST have subscription + client_id
   if (!user.client_id || !isActive) {
     await supabaseAdmin.from("audit").insert([
       {
@@ -80,6 +92,23 @@ PatchedAdapter.createVerificationToken = async (token) => {
       `🚫 Magic link blocked: ${token.identifier} lacks subscription or client ID`
     );
   }
+}
+
+// ⭐ Accountants skip client_id check but still require active subscription
+if (isAccountant && !isActive) {
+  await supabaseAdmin.from("audit").insert([
+    {
+      client_id: "accountant",
+      actor_email: token.identifier,
+      action: "MAGIC_LINK_BLOCKED",
+      details: "Accountant missing active subscription",
+    },
+  ]);
+  throw new Error(
+    `🚫 Magic link blocked: ${token.identifier} lacks active subscription`
+  );
+}
+
 
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
