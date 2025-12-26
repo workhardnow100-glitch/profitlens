@@ -1,5 +1,3 @@
-// pages/accountant/dashboard.js
-
 // ❗ dynamic flag does nothing in pages router, but harmless to keep
 export const dynamic = "force-dynamic";
 
@@ -11,10 +9,10 @@ export async function getServerSideProps() {
 import ResponsiveLayout from "../../components/ResponsiveLayout";
 import { AccountantClientPanel } from "../../components/AccountantClientPanel";
 import { AccountantClientOverview } from "../../components/AccountantClientOverview";
+import { AccountantProfilePanel } from "../../components/AccountantProfilePanel";
 import { useRouteGuard } from "../../hooks/useRouteGuard";
 
 export default function AccountantDashboard() {
-  // Route guard: only accountants and founder can access
   useRouteGuard();
 
   return (
@@ -25,6 +23,7 @@ export default function AccountantDashboard() {
       </p>
 
       <div className="mt-6 space-y-6">
+        <AccountantProfilePanel />
         <AccountantClientPanel />
         <AccountantClientOverview />
       </div>
