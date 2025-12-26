@@ -10,6 +10,8 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+import { useUser } from "../../hooks/useUser"; // ⭐ FIXED — this was missing
+
 // Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
 export const Sidebar = ({ children, className }) => (
@@ -100,12 +102,12 @@ function ClientSwitcher() {
 // Sidebar Menu
 export function SidebarMenu() {
   const router = useRouter();
-  const { user } = useUser(); // ⭐ NEW: get logged-in user role
+  const { user } = useUser(); // ⭐ Now correctly imported
 
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
 
-  // ⭐ NEW: Accountant + Founder + Admin see accountant dashboard
+  // ⭐ Accountant + Founder + Admin see accountant dashboard
   const accountantNav = [
     {
       title: "Accountant Dashboard",
@@ -147,7 +149,7 @@ export function SidebarMenu() {
   return (
     <ul className="space-y-1">
 
-      {/* ⭐ Accountant Client Switcher (only for accountant + founder + admin) */}
+      {/* ⭐ Accountant Client Switcher */}
       {(user?.role === "accountant" ||
         user?.role === "founder" ||
         user?.role === "admin") && <ClientSwitcher />}
