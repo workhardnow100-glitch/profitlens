@@ -38,11 +38,36 @@ export default async function handler(req, res) {
 
     let userId;
 
-    if (existingUser) {
+    if (!existingUser) {
+      // ⭐ 3. Create new accountant user (correct fields)
+      const { data: newUser, error: createError } = await supabaseAdmin
+        .from("app_users")
+        .insert({
+          email: accountantEmail,
+          name: name || null,
+          role: "ACCOUNTANT",
+          subscription_status: null,
+          client_id: null,
+          default_client_id: null,
+          acting_client_id: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (createError) {
+        console.error("User creation error:", createError);
+        return res.status(500).json({ error: "Failed to create accountant user" });
+      }
+
+      userId = newUser.id;
+    } else {
+      // ⭐ 4. Existing user — upgrade to accountant safely
       userId = existingUser.id;
 
-      // ⭐ Founder protection — never modify founder
-      if (existingUser.role === "founder") {
+      // Founder protection
+      if (existingUser.role === "FOUNDER") {
         await supabaseAdmin
           .from("accountant_access")
           .update({ used: true })
@@ -54,49 +79,37 @@ export default async function handler(req, res) {
         });
       }
 
-      // ⭐ If user exists but is not accountant, do NOT overwrite role
-      if (existingUser.role !== "accountant") {
-        return res.status(400).json({
-          error: "This email belongs to an existing user who is not an accountant",
-        });
-      }
-    } else {
-      // 3. Create new accountant user
-      const { data: newUser, error: createError } = await supabaseAdmin
+      // ⭐ Upgrade role + clear client/subscription fields
+      await supabaseAdmin
         .from("app_users")
-        .insert({
-          email: accountantEmail,
-          name: name || null,
-          role: "accountant",
-          subscription_status: "trialing",
-          default_client_id: invite.client_id,
+        .update({
+          role: "ACCOUNTANT",
+          subscription_status: null,
+          client_id: null,
+          default_client_id: null,
+          acting_client_id: null,
+          updated_at: new Date().toISOString(),
         })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error("User creation error:", createError);
-        return res.status(500).json({ error: "Failed to create accountant user" });
-      }
-
-      userId = newUser.id;
+        .eq("id", existingUser.id);
     }
 
-    // 4. Grant access in accountant_clients
+    // 5. Grant access in accountant_clients
     const { error: accessError } = await supabaseAdmin
       .from("accountant_clients")
-      .insert({
-        accountant_email: accountantEmail,
-        client_id: invite.client_id,
-      });
+      .upsert(
+        {
+          accountant_email: accountantEmail,
+          client_id: invite.client_id,
+        },
+        { onConflict: "accountant_email,client_id" }
+      );
 
-    // Ignore duplicate access (23505)
-    if (accessError && accessError.code !== "23505") {
+    if (accessError) {
       console.error("Access insert error:", accessError);
       return res.status(500).json({ error: "Failed to grant access" });
     }
 
-    // 5. Mark invite as used
+    // 6. Mark invite as used
     await supabaseAdmin
       .from("accountant_access")
       .update({ used: true })
