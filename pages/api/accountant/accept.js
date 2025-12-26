@@ -39,14 +39,14 @@ export default async function handler(req, res) {
     let userId;
 
     if (!existingUser) {
-      // ⭐ 3. Create new accountant user (correct fields)
+      // ⭐ 3. Create new accountant user with PRO subscription
       const { data: newUser, error: createError } = await supabaseAdmin
         .from("app_users")
         .insert({
           email: accountantEmail,
           name: name || null,
           role: "ACCOUNTANT",
-          subscription_status: null,
+          subscription_status: "pro",   // ⭐ give accountant full access
           client_id: null,
           default_client_id: null,
           acting_client_id: null,
@@ -79,12 +79,12 @@ export default async function handler(req, res) {
         });
       }
 
-      // ⭐ Upgrade role + clear client/subscription fields
+      // ⭐ Upgrade role + give PRO access + clear client fields
       await supabaseAdmin
         .from("app_users")
         .update({
           role: "ACCOUNTANT",
-          subscription_status: null,
+          subscription_status: "pro",   // ⭐ accountant gets full access
           client_id: null,
           default_client_id: null,
           acting_client_id: null,

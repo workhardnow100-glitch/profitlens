@@ -26,7 +26,7 @@ const BaseAdapter = SupabaseAdapter({
 const PatchedAdapter: any = { ...BaseAdapter };
 
 /* -------------------------------------------------------
-   ✅ CUSTOM USER LOOKUP (app_users)
+   CUSTOM USER LOOKUP (app_users)
 ------------------------------------------------------- */
 PatchedAdapter.getUserByEmail = async (email: string) => {
   const { data, error } = await supabaseAdmin
@@ -46,7 +46,8 @@ PatchedAdapter.getUserByEmail = async (email: string) => {
 };
 
 /* -------------------------------------------------------
-   ✅ FIXED: ACCOUNTANTS / ADMINS / FOUNDERS CAN LOGIN
+   MAGIC LINK TOKEN CREATION
+   ACCOUNTANTS / ADMINS / FOUNDERS ALWAYS ALLOWED
 ------------------------------------------------------- */
 PatchedAdapter.createVerificationToken = async (token) => {
   const { data: user } = await supabaseAdmin
@@ -67,7 +68,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-  // ⭐ NEW: Allow ACCOUNTANT, ADMIN, FOUNDER to log in freely
+  // ⭐ ACCOUNTANTS / ADMINS / FOUNDERS ALWAYS ALLOWED
   if (["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(user.role)) {
     const { data: inserted, error } = await supabaseAdmin
       .from("verification_tokens")
@@ -92,7 +93,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
     return inserted;
   }
 
-  // ⭐ Existing client login rules
+  // ⭐ CLIENT LOGIN RULES (unchanged)
   const isActive = ["basic", "pro", "trialing"].includes(
     user.subscription_status
   );
@@ -111,7 +112,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
     );
   }
 
-  // ⭐ Insert token for valid paying clients
+  // Insert token for valid paying clients
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
     .insert([
@@ -136,7 +137,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
 };
 
 /* -------------------------------------------------------
-   Consume verification token
+   CONSUME VERIFICATION TOKEN
 ------------------------------------------------------- */
 PatchedAdapter.useVerificationToken = async (token) => {
   const { data: consumed, error } = await supabaseAdmin
@@ -167,7 +168,7 @@ PatchedAdapter.useVerificationToken = async (token) => {
 };
 
 /* -------------------------------------------------------
-   Update user in app_users
+   UPDATE USER
 ------------------------------------------------------- */
 PatchedAdapter.updateUser = async (user) => {
   const updates: any = {
@@ -273,7 +274,7 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     /* -------------------------------------------------------
        JWT CALLBACK
-    ------------------------------------------------------- */
+------------------------------------------------------- */
     async jwt({ token, user }) {
       if (user) {
         token.sub = String(user.id);
@@ -293,9 +294,14 @@ export const authOptions: NextAuthOptions = {
         if (dbUser) {
           token.sub = dbUser.id;
           token.role = dbUser.role ?? "USER";
-          token.clientId = dbUser.client_id ?? "unknown-client";
+
+          // ⭐ ACCOUNTANTS GET PRO ACCESS
           token.subscriptionStatus =
-            dbUser.subscription_status ?? "incomplete";
+            dbUser.role === "ACCOUNTANT"
+              ? "pro"
+              : dbUser.subscription_status ?? "incomplete";
+
+          token.clientId = dbUser.client_id ?? null;
           token.actingAsClientId = dbUser.acting_client_id ?? null;
         }
       }
@@ -305,13 +311,13 @@ export const authOptions: NextAuthOptions = {
 
     /* -------------------------------------------------------
        SESSION CALLBACK — accountant-aware enrichment
-    ------------------------------------------------------- */
+------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
         id: token.sub ?? "unknown",
         email: token.email ?? "unknown@example.com",
         role: token.role ?? "USER",
-        clientId: token.clientId ?? "unknown-client",
+        clientId: token.clientId ?? null,
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
@@ -328,10 +334,15 @@ export const authOptions: NextAuthOptions = {
         const persisted = token.actingAsClientId;
         const valid = accessibleClients.includes(persisted as string);
 
-        session.user.actingAsClientId = valid ? (persisted as string) : null;
+        // ⭐ ALWAYS DEFAULT TO FIRST CLIENT IF NONE SELECTED
+        session.user.actingAsClientId = valid
+          ? persisted
+          : accessibleClients.length > 0
+          ? accessibleClients[0]
+          : null;
       } else {
-        const cid = session.user.clientId ?? "unknown-client";
-        session.user.accessibleClients = [cid];
+        const cid = session.user.clientId ?? null;
+        session.user.accessibleClients = cid ? [cid] : [];
         session.user.actingAsClientId = cid;
       }
 
