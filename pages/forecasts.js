@@ -1,5 +1,12 @@
 // pages/forecasts.js
+
+// ❗ dynamic flag does nothing in pages router, but harmless to keep
 export const dynamic = "force-dynamic";
+
+// ❗ THIS is the real fix — forces SSR and disables static generation
+export async function getServerSideProps() {
+  return { props: {} };
+}
 
 import React, { useEffect, useState, useMemo } from "react";
 import ResponsiveLayout from "../components/ResponsiveLayout";
@@ -46,7 +53,7 @@ export default function Forecasts() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // ✅ Access control
+  // Access control
   useEffect(() => {
     if (status === "loading") return;
 
@@ -68,7 +75,7 @@ export default function Forecasts() {
     }
   }, [session, status, router]);
 
-  // ✅ Fetch forecast data
+  // Fetch forecast data
   useEffect(() => {
     if (status !== "authenticated") return;
     if (!session?.user) return;
@@ -110,7 +117,7 @@ export default function Forecasts() {
     fetchForecastData();
   }, [session, status]);
 
-  // ✅ Parse projections safely
+  // Parse projections safely
   const revenueProjection = forecast[0]?.value
     ? parseFloat(String(forecast[0].value).replace(/[£,]/g, "")) || 0
     : 0;
@@ -121,7 +128,7 @@ export default function Forecasts() {
 
   const netProfit = revenueProjection - expenseProjection;
 
-  // ✅ Simulated trends
+  // Simulated trends
   const revenueTrend = useMemo(() => {
     const base = revenueProjection;
     return [base * 0.9, base, base * 1.1, base * 1.2];
@@ -141,7 +148,6 @@ export default function Forecasts() {
     );
   }, [revenueTrend, expenseProjection]);
 
-  // ✅ Robust guards for historical series (for Chart.js)
   const hasHistoricalSeries =
     Array.isArray(series.months) && series.months.length > 0;
 
@@ -174,6 +180,7 @@ export default function Forecasts() {
           </div>
         )}
 
+        {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ResponsiveCard title="Revenue Projection">
             <p className="text-2xl font-bold text-green-600">
@@ -207,6 +214,7 @@ export default function Forecasts() {
           </ResponsiveCard>
         </div>
 
+        {/* Historical data */}
         <ResponsiveCard title="Historical Trends">
           {canRenderHistoricalChart ? (
             <Line
@@ -248,6 +256,7 @@ export default function Forecasts() {
           )}
         </ResponsiveCard>
 
+        {/* Simulated forecasts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ResponsiveCard title="Quarterly Revenue Forecast">
             <Line
@@ -292,6 +301,7 @@ export default function Forecasts() {
           </ResponsiveCard>
         </div>
 
+        {/* Net trend */}
         <ResponsiveCard title="Net Profit Projection">
           <Line
             data={{
