@@ -2,6 +2,7 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { mailer } from "../../../lib/mailer"; // ⭐ NEW: shared SMTP mailer
 import crypto from "crypto";
 
 export default async function handler(req, res) {
@@ -118,9 +119,27 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ⭐ Real invite link (update domain if needed)
-    const inviteLink = `https://profitlens.vercel.app/accountant/accept?token=${token}`;
-    console.log("📧 Accountant invite link:", inviteLink);
+    // ⭐ Build invite link (production domain)
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ||
+      "https://profitlensuk.vercel.app";
+
+    const inviteLink = `${baseUrl}/accountant/accept?token=${token}`;
+
+    // ⭐ Send email using same SMTP as magic login
+    await mailer.sendMail({
+      from: process.env.EMAIL_FROM,
+      to: normalizedEmail,
+      subject: "You've been invited as an accountant on ProfitLens",
+      html: `
+        <p>Hello,</p>
+        <p>You’ve been invited to access a client’s ProfitLens account as their accountant.</p>
+        <p>Click the link below to accept the invitation:</p>
+        <p><a href="${inviteLink}">${inviteLink}</a></p>
+        <p>This link expires in 3 days.</p>
+        <p>If you didn’t expect this email, you can safely ignore it.</p>
+      `,
+    });
 
     return res.status(200).json({
       success: true,
