@@ -11,58 +11,37 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
-  const role = session.user.role;
+  const role = session.user.role?.toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
 
-  // ⭐ Allow accountant, admin, founder
-  if (!["ACCOUNTANT", "admin", "founder"].includes(role)) {
+  if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role)) {
     return res.status(403).json({
       error: "Only accountants can view their client list",
     });
   }
 
   try {
-    // ⭐ Fetch all client IDs this accountant has access to
+    // 1. Fetch client IDs this accountant can access
     const { data: accessRows, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
       .eq("accountant_email", accountantEmail);
 
-    if (accessErr) {
-      console.error("Accountant access fetch error:", accessErr);
-      throw accessErr;
-    }
+    if (accessErr) throw accessErr;
 
     const clientIds = accessRows?.map((r) => r.client_id) || [];
 
-    // ⭐ No clients yet
     if (clientIds.length === 0) {
       return res.status(200).json({ success: true, clients: [] });
     }
 
-    // ⭐ Fetch client metadata
+    // 2. Fetch client metadata from the CORRECT table
     const { data: clients, error: clientErr } = await supabaseAdmin
-      .from("app_users")
-      .select(
-        "id, email, name, business_name, subscription_status, client_id"
-      )
-      .in("client_id", clientIds);
+      .from("clients")
+      .select("*")
+      .in("id", clientIds);
 
-    if (clientErr) {
-      console.error("Client metadata fetch error:", clientErr);
-      throw clientErr;
-    }
-
-    // ⭐ Audit log
-    await supabaseAdmin.from("audit").insert([
-      {
-        client_id: null,
-        actor_email: accountantEmail,
-        action: "ACCOUNTANT_LIST_CLIENTS",
-        details: `Fetched ${clients?.length ?? 0} clients`,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    if (clientErr) throw clientErr;
 
     return res.status(200).json({
       success: true,
