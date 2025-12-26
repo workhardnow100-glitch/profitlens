@@ -14,6 +14,9 @@ export default async function handler(req, res) {
   const role = session.user.role?.toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
 
+  // ⭐ DEBUG LOG — this is the key
+  console.log("SESSION EMAIL:", accountantEmail);
+
   if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role)) {
     return res.status(403).json({
       error: "Only accountants can view their client list",
