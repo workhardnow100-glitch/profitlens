@@ -11,11 +11,11 @@ export default async function handler(req, res) {
   }
 
   const role = session.user.role;
-  const userId = session.user.userId; // ⭐ Correct session field
+  const userId = session.user.userId; // correct session field
   const actingClient = session.user.actingAsClientId;
 
   try {
-    // ⭐ Accountants should NOT use this endpoint
+    // ❌ Accountants should NOT use this endpoint
     if (role === "accountant") {
       return res.status(403).json({
         success: false,
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     if (role === "founder" || role === "admin") {
       const { data: allClients, error: allErr } = await supabaseAdmin
         .from("app_users")
-        .select("client_id, name, business_name")
+        .select("client_id, name, email, subscription_status")
         .not("client_id", "is", null);
 
       if (allErr) {
@@ -63,10 +63,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // ⭐ Fetch client metadata from app_users (NOT clients table)
+    // ⭐ Fetch client metadata from app_users
     const { data: clients, error: clientError } = await supabaseAdmin
       .from("app_users")
-      .select("client_id, name, business_name")
+      .select("client_id, name, email, subscription_status")
       .in("client_id", clientIds);
 
     if (clientError) {
