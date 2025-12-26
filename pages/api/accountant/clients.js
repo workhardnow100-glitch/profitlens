@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   const accountantEmail = session.user.email.toLowerCase();
 
   // ⭐ Allow accountant, admin, founder
-  if (!["accountant", "admin", "founder"].includes(role)) {
+  if (!["ACCOUNTANT", "admin", "founder"].includes(role)) {
     return res.status(403).json({
       error: "Only accountants can view their client list",
     });
