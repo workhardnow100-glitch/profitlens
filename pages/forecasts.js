@@ -1,4 +1,6 @@
 // pages/forecasts.js
+export const dynamic = "force-dynamic";
+
 import React, { useEffect, useState, useMemo } from "react";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
@@ -161,12 +163,10 @@ export default function Forecasts() {
           Visualize revenue, expenses, and profitability trends.
         </p>
 
-        {/* Auth/loading guard */}
         {status === "loading" && (
           <p className="text-slate-500">Loading your session…</p>
         )}
 
-        {/* Error state */}
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
             <p className="font-semibold">Unable to load forecast data.</p>
@@ -174,7 +174,6 @@ export default function Forecasts() {
           </div>
         )}
 
-        {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <ResponsiveCard title="Revenue Projection">
             <p className="text-2xl font-bold text-green-600">
@@ -208,7 +207,6 @@ export default function Forecasts() {
           </ResponsiveCard>
         </div>
 
-        {/* Historical data */}
         <ResponsiveCard title="Historical Trends">
           {canRenderHistoricalChart ? (
             <Line
@@ -250,7 +248,6 @@ export default function Forecasts() {
           )}
         </ResponsiveCard>
 
-        {/* Simulated forecasts */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <ResponsiveCard title="Quarterly Revenue Forecast">
             <Line
@@ -295,7 +292,6 @@ export default function Forecasts() {
           </ResponsiveCard>
         </div>
 
-        {/* Net trend */}
         <ResponsiveCard title="Net Profit Projection">
           <Line
             data={{
@@ -320,7 +316,6 @@ export default function Forecasts() {
 
         <ForecastSimulator />
 
-        {/* ✅ In‑App Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
           ProfitLens provides estimates only. Always verify figures before
           filing with HMRC. Nothing displayed here constitutes tax, accounting,

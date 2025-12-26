@@ -1,4 +1,8 @@
 // pages/api/forecasts.js
+
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -39,16 +43,22 @@ const MAP = {
 
 export default async function handler(req, res) {
   try {
-    // ✅ Session guard
+    // ✅ Session guard (fully defensive)
     const session = await getServerSession(req, res, authOptions);
-    if (!session?.user) {
+
+    if (!session || !session.user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // ✅ Role + subscription guard
-    const isFounder = session.user.role === "admin";
+    const user = session.user;
+
+    // ✅ Role + subscription guard (defensive reads)
+    const role = user.role || null;
+    const subscriptionStatus = user.subscriptionStatus || null;
+
+    const isFounder = role === "admin";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
+      subscriptionStatus
     );
 
     if (!(isFounder || isSubscribedOrTrial)) {
@@ -57,18 +67,18 @@ export default async function handler(req, res) {
 
     // ✅ Accountant‑aware client ID (matches Reports/Profile)
     const clientId =
-      session.user.actingAsClientId || session.user.clientId;
+      user.actingAsClientId || user.clientId || null;
 
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    // ✅ Optional: audit log for accountants
-    if (session.user.role === "accountant") {
+    // ✅ Optional: audit log for accountants (defensive)
+    if (role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
+          actor_email: user.email || null,
           action: "ACCOUNTANT_VIEW_FORECASTS",
           details: "Viewed forecasts",
         },
@@ -177,7 +187,7 @@ export default async function handler(req, res) {
       categories,
     });
   } catch (err) {
-    console.error("❌ Forecast API error:", err.message || err);
+    console.error("❌ Forecast API error:", err?.message || err);
     return res.status(500).json({ error: "Failed to generate forecast" });
   }
 }
