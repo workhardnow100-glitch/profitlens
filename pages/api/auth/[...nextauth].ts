@@ -25,7 +25,9 @@ const BaseAdapter = SupabaseAdapter({
 
 const PatchedAdapter: any = { ...BaseAdapter };
 
-// ✅ Use app_users for user lookups
+/* -------------------------------------------------------
+   ✅ CUSTOM USER LOOKUP (app_users)
+------------------------------------------------------- */
 PatchedAdapter.getUserByEmail = async (email: string) => {
   const { data, error } = await supabaseAdmin
     .from("app_users")
@@ -43,11 +45,13 @@ PatchedAdapter.getUserByEmail = async (email: string) => {
   };
 };
 
-// ✅ Insert verification tokens into public.verification_tokens
+/* -------------------------------------------------------
+   ✅ FIXED: ACCOUNTANTS / ADMINS / FOUNDERS CAN LOGIN
+------------------------------------------------------- */
 PatchedAdapter.createVerificationToken = async (token) => {
   const { data: user } = await supabaseAdmin
     .from("app_users")
-    .select("id, client_id, subscription_status")
+    .select("id, client_id, subscription_status, role")
     .eq("email", token.identifier)
     .single();
 
@@ -63,9 +67,36 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
+  // ⭐ NEW: Allow ACCOUNTANT, ADMIN, FOUNDER to log in freely
+  if (["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(user.role)) {
+    const { data: inserted, error } = await supabaseAdmin
+      .from("verification_tokens")
+      .insert([
+        {
+          identifier: token.identifier,
+          token: token.token,
+          expires:
+            typeof token.expires === "string"
+              ? token.expires
+              : token.expires.toISOString(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Failed to insert verification token:", error);
+      return null;
+    }
+
+    return inserted;
+  }
+
+  // ⭐ Existing client login rules
   const isActive = ["basic", "pro", "trialing"].includes(
     user.subscription_status
   );
+
   if (!user.client_id || !isActive) {
     await supabaseAdmin.from("audit").insert([
       {
@@ -80,6 +111,7 @@ PatchedAdapter.createVerificationToken = async (token) => {
     );
   }
 
+  // ⭐ Insert token for valid paying clients
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
     .insert([
@@ -103,7 +135,9 @@ PatchedAdapter.createVerificationToken = async (token) => {
   return inserted;
 };
 
-// ✅ Consume verification token and mark user as verified
+/* -------------------------------------------------------
+   Consume verification token
+------------------------------------------------------- */
 PatchedAdapter.useVerificationToken = async (token) => {
   const { data: consumed, error } = await supabaseAdmin
     .from("verification_tokens")
@@ -132,7 +166,9 @@ PatchedAdapter.useVerificationToken = async (token) => {
   return consumed;
 };
 
-// ✅ Ensure NextAuth updates app_users (not the default users table)
+/* -------------------------------------------------------
+   Update user in app_users
+------------------------------------------------------- */
 PatchedAdapter.updateUser = async (user) => {
   const updates: any = {
     updated_at: new Date().toISOString(),
@@ -166,6 +202,9 @@ PatchedAdapter.updateUser = async (user) => {
   };
 };
 
+/* -------------------------------------------------------
+   NEXTAUTH CONFIG
+------------------------------------------------------- */
 export const authOptions: NextAuthOptions = {
   providers: [
     EmailProvider({
@@ -233,7 +272,7 @@ export const authOptions: NextAuthOptions = {
 
   callbacks: {
     /* -------------------------------------------------------
-       ✅ JWT CALLBACK — loads acting_client_id from DB
+       JWT CALLBACK
     ------------------------------------------------------- */
     async jwt({ token, user }) {
       if (user) {
@@ -265,7 +304,7 @@ export const authOptions: NextAuthOptions = {
     },
 
     /* -------------------------------------------------------
-       ✅ SESSION CALLBACK — accountant-aware enrichment
+       SESSION CALLBACK — accountant-aware enrichment
     ------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
@@ -276,7 +315,6 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
-      // ✅ Accountant role is uppercase in your union/DB
       if (session.user.role === "ACCOUNTANT") {
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_clients")
@@ -292,11 +330,10 @@ export const authOptions: NextAuthOptions = {
 
         session.user.actingAsClientId = valid ? (persisted as string) : null;
       } else {
-  const cid = session.user.clientId ?? "unknown-client";
-  session.user.accessibleClients = [cid];
-  session.user.actingAsClientId = cid;
-}
-
+        const cid = session.user.clientId ?? "unknown-client";
+        session.user.accessibleClients = [cid];
+        session.user.actingAsClientId = cid;
+      }
 
       return session;
     },
