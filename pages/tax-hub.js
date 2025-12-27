@@ -60,16 +60,17 @@ export default function TaxHub() {
     }
   }, [router.query]);
 
-  async function fetchPeriods() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/tax-hub/periods", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.clientId }),
-      });
+ async function fetchPeriods() {
+  setLoading(true);
+  try {
+    const res = await fetch("/api/tax-hub/periods", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}), // ⭐ FIXED — no clientId sent
+    });
 
-      const data = await res.json();
+    const data = await res.json();
+
 
       setPeriods({
         vat: data.vat || [],
