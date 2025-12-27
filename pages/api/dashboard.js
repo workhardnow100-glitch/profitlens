@@ -28,21 +28,28 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  const isFounder = session.user.role === "admin";
+  // ⭐ Normalize role
+  const role = (session.user.role || "").toUpperCase();
+
+  // ⭐ Subscription / role logic
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  if (!(isFounder || isSubscribedOrTrial))
+  // ⭐ Accountants and founders bypass subscription checks; normal users must be subscribed/trialing
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
+  }
 
-  // ✅ Accountant-aware client ID
-  const actingClientId =
+  // ⭐ Accountant-aware client ID
+  const clientId =
     session.user.actingAsClientId || session.user.clientId;
 
-  const clientId = actingClientId;
-  if (!clientId || clientId === "unknown-client")
+  if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
+  }
 
   /* -------------------------------------------------------
      ✅ PATCH — update category (validated)
@@ -153,13 +160,13 @@ export default async function handler(req, res) {
 
         if (!categoryBreakdown[category]) categoryBreakdown[category] = 0;
 
-        // ✅ FIXED — return business_category, not category
+        // ✅ Return business_category, not category
         recent.push({
           id: tx.id,
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          business_category: category,   // ✅ FIXED
+          business_category: category,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
@@ -208,4 +215,7 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to load dashboard data" });
     }
   }
+
+  // If method not handled
+  return res.status(405).json({ error: "Method not allowed" });
 }
