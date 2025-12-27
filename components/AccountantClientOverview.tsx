@@ -31,55 +31,77 @@ export function AccountantClientOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load accountant context + overview
-  useEffect(() => {
-    const load = async () => {
-      try {
-        // 1. Get acting client
-        const meRes = await fetch("/api/accountant/me");
-        if (!meRes.ok) return;
+  // ⭐ Load accountant context + overview (reactive)
+  async function load() {
+    try {
+      setLoading(true);
+      setError(null);
 
-        const meData = await meRes.json();
-        const clientId = meData?.user?.actingAsClientId || null;
-        setActingAs(clientId);
+      // 1. Get acting client (fresh)
+      const meRes = await fetch(`/api/accountant/me?ts=${Date.now()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-store" }
+      });
 
-        if (!clientId) {
-          setLoading(false);
-          return;
-        }
-
-        // 2. Fetch overview
-        const res = await fetch("/api/accountant/client-overview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId }),
-        });
-
-        const json: ClientOverviewResponse = await res.json();
-
-        if (!res.ok) {
-          setError(json.error || "Failed to load overview");
-        } else {
-          setData(json);
-        }
-      } catch {
-        setError("Network error");
-      } finally {
+      if (!meRes.ok) {
+        setError("Failed to load accountant context");
         setLoading(false);
+        return;
       }
-    };
 
+      const meData = await meRes.json();
+      const clientId = meData?.user?.actingAsClientId || null;
+      setActingAs(clientId);
+
+      if (!clientId) {
+        setLoading(false);
+        return;
+      }
+
+      // 2. Fetch overview (fresh)
+      const res = await fetch(`/api/accountant/client-overview?ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        body: JSON.stringify({ clientId }),
+      });
+
+      const json: ClientOverviewResponse = await res.json();
+
+      if (!res.ok) {
+        setError(json.error || "Failed to load overview");
+      } else {
+        setData(json);
+      }
+    } catch {
+      setError("Network error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ⭐ Load on mount
+  useEffect(() => {
     load();
   }, []);
 
+  // ⭐ Reload when accountant switches clients
+  useEffect(() => {
+    if (actingAs) load();
+  }, [actingAs]);
+
+  // ⭐ Loading skeleton
   if (loading) {
     return (
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <p className="text-sm text-slate-600">Loading client overview…</p>
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm animate-pulse space-y-4">
+        <div className="h-5 bg-slate-200 rounded w-1/3"></div>
+        <div className="h-4 bg-slate-200 rounded w-1/2"></div>
+        <div className="h-24 bg-slate-200 rounded"></div>
       </section>
     );
   }
 
+  // ⭐ No client selected
   if (!actingAs) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -90,6 +112,7 @@ export function AccountantClientOverview() {
     );
   }
 
+  // ⭐ Error state
   if (error) {
     return (
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
@@ -98,8 +121,13 @@ export function AccountantClientOverview() {
     );
   }
 
-  if (!data || !data.client || !data.financials) {
-    return null;
+  // ⭐ No data
+  if (!data || !data.client) {
+    return (
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <p className="text-sm text-slate-600">No overview data available.</p>
+      </section>
+    );
   }
 
   const { client, financials, submissions } = data;
@@ -110,41 +138,41 @@ export function AccountantClientOverview() {
         {client.businessName || client.name || "Client Overview"}
       </h2>
 
-      {/* Financials */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="rounded-md border border-slate-200 p-3">
-          <p className="text-slate-500 text-sm">Total Revenue</p>
-          <p className="text-xl font-bold">
-            £{financials.totalRevenue.toFixed(2)}
-          </p>
-        </div>
+      {/* ⭐ Financials */}
+      {financials ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-md border border-slate-200 p-3">
+            <p className="text-slate-500 text-sm">Total Revenue</p>
+            <p className="text-xl font-bold">£{financials.totalRevenue.toFixed(2)}</p>
+          </div>
 
-        <div className="rounded-md border border-slate-200 p-3">
-          <p className="text-slate-500 text-sm">Total Expenses</p>
-          <p className="text-xl font-bold">
-            £{financials.totalExpenses.toFixed(2)}
-          </p>
-        </div>
+          <div className="rounded-md border border-slate-200 p-3">
+            <p className="text-slate-500 text-sm">Total Expenses</p>
+            <p className="text-xl font-bold">£{financials.totalExpenses.toFixed(2)}</p>
+          </div>
 
-        <div className="rounded-md border border-slate-200 p-3">
-          <p className="text-slate-500 text-sm">Net Profit</p>
-          <p
-            className={`text-xl font-bold ${
-              financials.netProfit >= 0 ? "text-emerald-600" : "text-red-600"
-            }`}
-          >
-            £{financials.netProfit.toFixed(2)}
-          </p>
+          <div className="rounded-md border border-slate-200 p-3">
+            <p className="text-slate-500 text-sm">Net Profit</p>
+            <p
+              className={`text-xl font-bold ${
+                financials.netProfit >= 0 ? "text-emerald-600" : "text-red-600"
+              }`}
+            >
+              £{financials.netProfit.toFixed(2)}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <p className="text-sm text-slate-600">No financial data available.</p>
+      )}
 
-      {/* Subscription */}
+      {/* ⭐ Subscription */}
       <div className="rounded-md border border-slate-200 p-3">
         <p className="text-slate-500 text-sm">Subscription</p>
         <p className="text-md font-medium">{client.subscriptionStatus}</p>
       </div>
 
-      {/* Last Submissions */}
+      {/* ⭐ Last Submissions */}
       <div className="rounded-md border border-slate-200 p-3 space-y-2">
         <p className="text-slate-500 text-sm">Last Submissions</p>
 
