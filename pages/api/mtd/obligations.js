@@ -1,8 +1,8 @@
 // pages/api/mtd/vat/obligations.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
-import { supabaseAdmin } from "../../../../lib/supabase-admin";
-import { createClient } from "../../../../lib/mtd-client";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { createClient } from "../../../lib/mtd-client";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
