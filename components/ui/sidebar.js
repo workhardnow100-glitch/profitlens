@@ -172,7 +172,7 @@ export function SidebarMenu() {
         <button
           key={c.id}
           onClick={async () => {
-            await fetch("/api/accountant/switch-client", {
+            await fetch("/api/accountant/switch-clients", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ clientId: c.id }),
