@@ -24,9 +24,11 @@ export default function AccountantDashboard() {
   useEffect(() => {
     async function load() {
       try {
-        const meRes = await fetch("/api/accountant/me", {
-          cache: "no-store"
+        const meRes = await fetch(`/api/accountant/me?ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-store" }
         });
+
         if (!meRes.ok) {
           setLoading(false);
           return;
@@ -35,9 +37,11 @@ export default function AccountantDashboard() {
         const meData = await meRes.json();
         setMe(meData.user);
 
-        const clientsRes = await fetch("/api/accountant/clients", {
-          cache: "no-store"
+        const clientsRes = await fetch(`/api/accountant/clients?ts=${Date.now()}`, {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-store" }
         });
+
         if (clientsRes.ok) {
           const cData = await clientsRes.json();
           setClients(cData.clients || []);
