@@ -62,51 +62,50 @@ PatchedAdapter.createVerificationToken = async (token) => {
     throw new Error(`🚫 Magic link blocked: ${token.identifier} not found`);
   }
 
-const isActive = ["basic", "pro", "trialing"].includes(
-  user.subscription_status
-);
+  const isActive = ["basic", "pro", "trialing"].includes(
+    user.subscription_status
+  );
 
-// ⭐ Allow accountants even if they have no client_id
-const { data: roleRow } = await supabaseAdmin
-  .from("app_users")
-  .select("role")
-  .eq("email", token.identifier)
-  .single();
+  // ⭐ Allow accountants even if they have no client_id
+  const { data: roleRow } = await supabaseAdmin
+    .from("app_users")
+    .select("role")
+    .eq("email", token.identifier)
+    .single();
 
-const isAccountant = roleRow?.role === "ACCOUNTANT";
+  const isAccountant = roleRow?.role === "ACCOUNTANT";
 
-if (!isAccountant) {
-  // Normal users MUST have subscription + client_id
-  if (!user.client_id || !isActive) {
+  if (!isAccountant) {
+    // Normal users MUST have subscription + client_id
+    if (!user.client_id || !isActive) {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: user.client_id ?? "unknown-client",
+          actor_email: token.identifier,
+          action: "MAGIC_LINK_BLOCKED",
+          details: "Missing subscription or client ID",
+        },
+      ]);
+      throw new Error(
+        `🚫 Magic link blocked: ${token.identifier} lacks subscription or client ID`
+      );
+    }
+  }
+
+  // ⭐ Accountants skip client_id check but still require active subscription
+  if (isAccountant && !isActive) {
     await supabaseAdmin.from("audit").insert([
       {
-        client_id: user.client_id ?? "unknown-client",
+        client_id: "accountant",
         actor_email: token.identifier,
         action: "MAGIC_LINK_BLOCKED",
-        details: "Missing subscription or client ID",
+        details: "Accountant missing active subscription",
       },
     ]);
     throw new Error(
-      `🚫 Magic link blocked: ${token.identifier} lacks subscription or client ID`
+      `🚫 Magic link blocked: ${token.identifier} lacks active subscription`
     );
   }
-}
-
-// ⭐ Accountants skip client_id check but still require active subscription
-if (isAccountant && !isActive) {
-  await supabaseAdmin.from("audit").insert([
-    {
-      client_id: "accountant",
-      actor_email: token.identifier,
-      action: "MAGIC_LINK_BLOCKED",
-      details: "Accountant missing active subscription",
-    },
-  ]);
-  throw new Error(
-    `🚫 Magic link blocked: ${token.identifier} lacks active subscription`
-  );
-}
-
 
   const { data: inserted, error } = await supabaseAdmin
     .from("verification_tokens")
@@ -264,8 +263,6 @@ export const authOptions: NextAuthOptions = {
        ✅ JWT CALLBACK — loads acting_client_id from DB
     ------------------------------------------------------- */
     async jwt({ token, user }) {
-
-      // ⭐ FIX: Restore email on magic-link second pass
       if (!token.email && token.sub) {
         const { data: dbUser } = await supabaseAdmin
           .from("app_users")
@@ -307,7 +304,7 @@ export const authOptions: NextAuthOptions = {
     },
 
     /* -------------------------------------------------------
-       ✅ SESSION CALLBACK — accountant-aware enrichment
+       ⭐ FIXED SESSION CALLBACK — privileged roles unified
     ------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
@@ -318,8 +315,10 @@ export const authOptions: NextAuthOptions = {
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
-      // ✅ Accountant role is uppercase in your union/DB
-      if (session.user.role === "ACCOUNTANT") {
+      // ⭐ FIX: ACCOUNTANT, FOUNDER, ADMIN all treated as privileged
+      const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
+
+      if (privilegedRoles.includes(session.user.role)) {
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_clients")
           .select("client_id")
@@ -332,7 +331,7 @@ export const authOptions: NextAuthOptions = {
         const persisted = token.actingAsClientId;
         const valid = accessibleClients.includes(persisted as string);
 
-        session.user.actingAsClientId = valid ? (persisted as string) : null;
+        session.user.actingAsClientId = valid ? persisted : null;
       } else {
         const cid = session.user.clientId ?? "unknown-client";
         session.user.accessibleClients = [cid];
