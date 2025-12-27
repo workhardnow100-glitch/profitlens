@@ -107,20 +107,18 @@ export function SidebarMenu() {
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
 
-  // ⭐ ADD THESE — this fixes your ReferenceError
+  // ⭐ Accountant session + clients
   const [clients, setClients] = useState([]);
   const [me, setMe] = useState(null);
 
   useEffect(() => {
     async function load() {
-      // Load accountant session
       const meRes = await fetch("/api/accountant/me");
       if (meRes.ok) {
         const meData = await meRes.json();
         setMe(meData.user);
       }
 
-      // Load accessible clients
       const res = await fetch("/api/accountant/clients");
       if (res.ok) {
         const data = await res.json();
@@ -172,10 +170,19 @@ export function SidebarMenu() {
         user?.role === "founder" ||
         user?.role === "admin") && (
         <SidebarMenuItem>
-          <div className="px-4 py-2 text-slate-700 font-semibold flex items-center gap-2">
+
+          {/* ⭐ RESTORED ACCOUNTANT DASHBOARD BUTTON */}
+          <Link
+            href="/accountant/dashboard"
+            className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+              router.pathname === "/accountant/dashboard"
+                ? "bg-blue-50 text-blue-700 font-semibold"
+                : "text-slate-700 hover:bg-slate-100"
+            }`}
+          >
             <Users size={16} />
             <span>Accountant Dashboard</span>
-          </div>
+          </Link>
 
           {/* Dropdown */}
           <div className="ml-6 mt-1 space-y-1">
