@@ -11,42 +11,44 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
-  const role = session.user.role;
-  const accountantEmail = session.user.email;
+  // ⭐ Normalize role
+  const role = (session.user.role || "").toUpperCase();
+  const accountantEmail = session.user.email.toLowerCase();
   const actingAs = session.user.actingAsClientId;
 
   const { clientId } = req.body || {};
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ⭐ Founder/Admin bypass: can view any client without actingAs
-  if (!["admin", "founder"].includes(role)) {
-    // ✅ Only accountants allowed (for non-admin/founder)
-    if (role !== "accountant") {
+  // ⭐ Founder/Admin bypass
+  if (!["ADMIN", "FOUNDER"].includes(role)) {
+
+    // ⭐ Only accountants allowed
+    if (role !== "ACCOUNTANT") {
       return res
         .status(403)
         .json({ error: "Only accountants can view client overviews" });
     }
 
-    // ✅ Accountant must be acting as a client
+    // ⭐ Accountant must be acting as a client
     if (!actingAs) {
       return res.status(403).json({
         error: "You must select a client before viewing their overview",
       });
     }
 
-    // ✅ Accountant can only view the client they are acting as
+    // ⭐ Accountant can only view the client they are acting as
     if (actingAs !== clientId) {
       return res.status(403).json({
         error: "You are not currently acting as this client",
       });
     }
 
-    // ✅ Validate accountant-client relationship against accountant_clients
+    // ⭐ Validate accountant-client relationship
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
-      .eq("accountant_email", accountantEmail.toLowerCase())
+      .eq("accountant_email", accountantEmail)
       .eq("client_id", clientId)
       .maybeSingle();
 
@@ -63,7 +65,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ Fetch client profile
+    // Fetch client profile
     const { data: client, error: clientErr } = await supabaseAdmin
       .from("app_users")
       .select(
@@ -81,7 +83,7 @@ export default async function handler(req, res) {
       return res.status(404).json({ error: "Client not found" });
     }
 
-    // ✅ Compute headline financials
+    // Compute financials
     const { data: transactions, error: txErr } = await supabaseAdmin
       .from("transactions")
       .select("date, amount, is_reversal")
@@ -104,7 +106,7 @@ export default async function handler(req, res) {
 
     const netProfit = totalRevenue - totalExpenses;
 
-    // ✅ Fetch last submissions per regime
+    // Fetch last submissions
     const getLastSubmission = async (table) => {
       const { data, error } = await supabaseAdmin
         .from(table)
@@ -127,7 +129,7 @@ export default async function handler(req, res) {
       getLastSubmission("ct_submissions"),
     ]);
 
-    // ✅ Audit log
+    // Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,

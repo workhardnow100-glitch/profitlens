@@ -10,8 +10,9 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
-  const role = session.user.role;
-  const accountantEmail = session.user.email;
+  // ⭐ Normalize role
+  const role = (session.user.role || "").toUpperCase();
+  const accountantEmail = session.user.email.toLowerCase();
   const actingAs = session.user.actingAsClientId;
 
   const { clientId } = req.body || {};
@@ -19,10 +20,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing clientId" });
 
   // ⭐ Founder/Admin bypass
-  if (!["admin", "founder"].includes(role)) {
-    if (role !== "accountant")
+  if (!["ADMIN", "FOUNDER"].includes(role)) {
+
+    // ⭐ Only accountants allowed
+    if (role !== "ACCOUNTANT")
       return res.status(403).json({ error: "Only accountants allowed" });
 
+    // ⭐ Accountant must be acting as a client
     if (!actingAs)
       return res.status(403).json({ error: "No client selected" });
 
@@ -33,7 +37,7 @@ export default async function handler(req, res) {
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
-      .eq("accountant_email", accountantEmail.toLowerCase())
+      .eq("accountant_email", accountantEmail)
       .eq("client_id", clientId)
       .maybeSingle();
 
