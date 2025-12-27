@@ -213,26 +213,27 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
+  // ⭐ DEBUG SESSION
+  console.log("🧪 Tax Hub session.user:", JSON.stringify(session.user, null, 2));
+
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
   if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
 
-  const actingClientId = session.user.actingAsClientId || session.user.clientId;
+  let clientId = null;
 
- let clientId = null;
+  if (session.user.role === "accountant") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId;
+  }
 
-if (session.user.role === "accountant") {
-  // ⭐ Accountants ALWAYS use acting client
-  clientId = session.user.actingAsClientId;
-} else {
-  // ⭐ Normal users use their own clientId
-  clientId = session.user.clientId;
-}
-
-if (!clientId) {
-  return res.status(400).json({ error: "No client selected" });
-}
-
+  if (!clientId) {
+    console.log("🧪 Tax Hub resolved clientId is NULL. Role:", session.user.role);
+    console.log("🧪 actingAsClientId:", session.user.actingAsClientId);
+    console.log("🧪 accessibleClients:", session.user.accessibleClients);
+    return res.status(400).json({ error: "No client selected" });
+  }
 
   try {
     // ------------------------------
@@ -454,7 +455,7 @@ if (!clientId) {
         taxLiability += remaining * 0.45;
       }
 
-      saPeriods.push({
+           saPeriods.push({
         periodLabel: `${periodStart} → ${periodEnd}`,
         periodStart,
         periodEnd,
@@ -469,7 +470,6 @@ if (!clientId) {
         taxLiability,
       });
     }
-
     // ------------------------------
     // VAT SETTINGS + PERIODS
     // ------------------------------
@@ -477,9 +477,7 @@ if (!clientId) {
       .from("vat_settings")
       .select("stagger")
       .eq("client_id", clientId)
-
-
-        .maybeSingle();
+      .maybeSingle();
 
     const stagger = vatSetting?.stagger || 1;
     const rawVatPeriods = generateVatPeriods(stagger);
@@ -583,7 +581,6 @@ if (!clientId) {
         overdue,
       });
     }
-
     // VAT payments + balances
     const { data: vatPayments, error: vatPaymentsError } = await supabaseAdmin
       .from("vat_payments")
