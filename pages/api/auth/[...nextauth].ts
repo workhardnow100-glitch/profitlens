@@ -293,7 +293,8 @@ export const authOptions: NextAuthOptions = {
         if (dbUser) {
           token.sub = dbUser.id;
           token.role = dbUser.role ?? "USER";
-          token.clientId = dbUser.client_id ?? "unknown-client";
+          token.clientId = dbUser.client_id ?? null;
+
           token.subscriptionStatus =
             dbUser.subscription_status ?? "incomplete";
           token.actingAsClientId = dbUser.acting_client_id ?? null;
@@ -311,7 +312,8 @@ export const authOptions: NextAuthOptions = {
         id: token.sub ?? "unknown",
         email: token.email ?? "unknown@example.com",
         role: token.role ?? "USER",
-        clientId: token.clientId ?? "unknown-client",
+        clientId: token.clientId ?? null,
+
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
