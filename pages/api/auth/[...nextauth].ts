@@ -316,9 +316,11 @@ export const authOptions: NextAuthOptions = {
       };
 
       // ⭐ FIX: ACCOUNTANT, FOUNDER, ADMIN all treated as privileged
-      const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
+      const role = (session.user.role || "").toUpperCase();
+const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
 
-      if (privilegedRoles.includes(session.user.role)) {
+if (privilegedRoles.includes(role)) {
+
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_clients")
           .select("client_id")
