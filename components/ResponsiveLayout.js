@@ -65,7 +65,7 @@ export default function ResponsiveLayout({ children }) {
               </div>
               <div>
                 <h2 className="font-bold text-slate-900 text-lg">ProfitLens</h2>
-                <p className="text-xs text-slate-500">Bank Statement Analyzer</p>
+                <p className="text-xs text-slate-500">Bank Statement Analyzer,Acting Accountant Software & Tax Submissions </p>
               </div>
             </div>
           </SidebarHeader>
