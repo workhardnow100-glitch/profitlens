@@ -1,6 +1,6 @@
 // pages/api/mtd/vat/submit.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../auth/[...nextauth]";
+import { authOptions } from "../[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 
 const HMRC_BASE_URL = "https://test-api.service.hmrc.gov.uk";
