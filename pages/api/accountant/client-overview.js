@@ -66,22 +66,22 @@ export default async function handler(req, res) {
 
   try {
     // Fetch client profile
-    const { data: client, error: clientErr } = await supabaseAdmin
-      .from("app_users")
-      .select(
-        "id, email, name, business_name, client_id, subscription_status, created_at"
-      )
-      .eq("client_id", clientId)
-      .maybeSingle();
+    // ⭐ Fetch client profile from clients table (NOT app_users)
+const { data: client, error: clientErr } = await supabaseAdmin
+  .from("clients")
+  .select("*")
+  .eq("id", clientId)
+  .maybeSingle();
 
-    if (clientErr) {
-      console.error("Client fetch error:", clientErr);
-      return res.status(500).json({ error: "Failed to load client" });
-    }
+if (clientErr) {
+  console.error("Client fetch error:", clientErr);
+  return res.status(500).json({ error: "Failed to load client" });
+}
 
-    if (!client) {
-      return res.status(404).json({ error: "Client not found" });
-    }
+if (!client) {
+  return res.status(404).json({ error: "Client not found" });
+}
+
 
     // Compute financials
     const { data: transactions, error: txErr } = await supabaseAdmin
