@@ -7,10 +7,12 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  // ✅ Validate session
+  // ⭐ Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
+
+  const role = (session.user.role || "").toUpperCase();
 
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
@@ -21,35 +23,32 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
-
-  const { clientId } = req.body;
-
-  if (!clientId)
-    return res.status(400).json({ error: "Missing clientId" });
-
-  // ✅ Prevent accountants from spoofing clientId
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot view SA history for unauthorized clients",
-    });
+  // ⭐ Accountant-aware client ID (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
   }
 
+  if (!clientId)
+    return res.status(400).json({ error: "No client selected" });
+
   try {
-    // ✅ AUDIT LOG — Accountant viewing SA history
-    if (session.user.role === "accountant") {
+    // ⭐ AUDIT LOG — Accountant viewing SA history
+    if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
           action: "ACCOUNTANT_VIEW_SA_HISTORY",
           details: "Viewed SA submission history",
+          timestamp: new Date().toISOString(),
         },
       ]);
     }
 
+    // ⭐ Load SA submissions
     const { data: submissions, error } = await supabaseAdmin
       .from("sa_submissions")
       .select("*")

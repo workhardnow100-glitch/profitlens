@@ -13,6 +13,8 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
+  const role = (session.user.role || "").toUpperCase();
+
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -22,31 +24,32 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
-
-  const { clientId, periodStart, periodEnd } = req.body;
-
-  if (!clientId || !periodStart || !periodEnd)
-    return res.status(400).json({ error: "Missing required fields" });
-
-  // ✅ Prevent accountants from spoofing clientId
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot request SA summaries for unauthorized clients",
-    });
+  // ✅ Accountant-aware client ID (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
   }
+
+  if (!clientId)
+    return res.status(400).json({ error: "No client selected" });
+
+  const { periodStart, periodEnd } = req.body;
+
+  if (!periodStart || !periodEnd)
+    return res.status(400).json({ error: "Missing required fields" });
 
   try {
     // ✅ AUDIT LOG — Accountant viewing SA summary
-    if (session.user.role === "accountant") {
+    if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
           action: "ACCOUNTANT_VIEW_SA_SUMMARY",
           details: `Viewed SA summary for ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
         },
       ]);
     }
@@ -76,25 +79,25 @@ export default async function handler(req, res) {
 
     const saTx = [];
 
-    transactions.forEach((tx) => {
+    (transactions || []).forEach((tx) => {
       const cat = (tx.business_category || "").toLowerCase();
       const amt = Number(tx.amount || 0);
 
       let isSA = false;
 
       if (MAP.income.has(cat)) {
-        totalIncome += amt > 0 ? amt : 0;
+        if (amt > 0) totalIncome += amt;
         isSA = true;
       }
 
       if (MAP.allowable.has(cat)) {
-        totalExpenses += amt < 0 ? Math.abs(amt) : 0;
+        if (amt < 0) totalExpenses += Math.abs(amt);
         isSA = true;
       }
 
       if (MAP.disallowable.has(cat)) {
         // Disallowable expenses are added back later
-        totalExpenses += amt < 0 ? Math.abs(amt) : 0;
+        if (amt < 0) totalExpenses += Math.abs(amt);
         isSA = true;
       }
 
@@ -152,7 +155,6 @@ export default async function handler(req, res) {
       transactions: saTx,
       locked,
     });
-
   } catch (err) {
     console.error("SA summary error:", err);
     return res.status(500).json({ error: err.message });

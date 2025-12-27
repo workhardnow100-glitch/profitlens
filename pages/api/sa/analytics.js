@@ -1,4 +1,6 @@
 // pages/api/sa/analytics.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { CT_MAP } from "../../../lib/constants/ctMap";
 
@@ -6,13 +8,55 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  const { clientId, periodStart, periodEnd } = req.body;
+  // ⭐ SESSION REQUIRED
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
-  if (!clientId || !periodStart || !periodEnd)
+  const role = (session.user.role || "").toUpperCase();
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Resolve clientId safely
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
+  }
+
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
+
+  const { periodStart, periodEnd } = req.body;
+
+  if (!periodStart || !periodEnd)
     return res.status(400).json({ error: "Missing required fields" });
 
   try {
-    // ✅ Load transactions using the REAL schema
+    // ⭐ AUDIT LOG — Accountant viewing SA analytics
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_SA_ANALYTICS",
+          details: `Viewed SA analytics for ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+
+    // ⭐ Load transactions using the REAL schema
     const { data: tx, error } = await supabaseAdmin
       .from("transactions")
       .select("date, amount, business_category")
@@ -22,15 +66,15 @@ export default async function handler(req, res) {
 
     if (error) throw error;
 
-    // ✅ Build lowercase CT_MAP sets
+    // ⭐ Build lowercase CT_MAP sets
     const MAP = {
       income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
       allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
       disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
     };
 
-    // ✅ Filter SA‑relevant transactions using CT_MAP
-    const saTx = tx.filter((t) => {
+    // ⭐ Filter SA‑relevant transactions using CT_MAP
+    const saTx = (tx || []).filter((t) => {
       const cat = (t.business_category || "").toLowerCase();
       return (
         MAP.income.has(cat) ||
@@ -39,7 +83,7 @@ export default async function handler(req, res) {
       );
     });
 
-    // ✅ Build monthly buckets
+    // ⭐ Build monthly buckets
     const buckets = {};
 
     saTx.forEach((t) => {
@@ -55,7 +99,7 @@ export default async function handler(req, res) {
       else buckets[month].expenses += Math.abs(amt);
     });
 
-    // ✅ Convert to array
+    // ⭐ Convert to array
     const analytics = Object.keys(buckets).map((month) => ({
       month,
       income: buckets[month].income,
