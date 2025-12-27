@@ -218,12 +218,21 @@ export default async function handler(req, res) {
   if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
 
   const actingClientId = session.user.actingAsClientId || session.user.clientId;
-  const { clientId } = req.body;
-  if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({ error: "Accountants cannot request tax periods for unauthorized clients" });
-  }
+ let clientId = null;
+
+if (session.user.role === "accountant") {
+  // ⭐ Accountants ALWAYS use acting client
+  clientId = session.user.actingAsClientId;
+} else {
+  // ⭐ Normal users use their own clientId
+  clientId = session.user.clientId;
+}
+
+if (!clientId) {
+  return res.status(400).json({ error: "No client selected" });
+}
+
 
   try {
     // ------------------------------
