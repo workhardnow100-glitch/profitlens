@@ -1,35 +1,11 @@
 import React, { useEffect, useState } from "react";
 
-type MeUser = {
-  id: string;
-  email: string;
-  role: string;
-  subscriptionStatus: string | null;
-  actingAsClientId: string | null;
-};
-
-type MeResponse = { success: boolean; user: MeUser };
-
-type ClientRow = {
-  id: string;
-  email: string;
-  name: string | null;
-  business_name: string | null;
-  subscription_status: string;
-  client_id: string;
-};
-
-type ClientsResponse = {
-  success: boolean;
-  clients: ClientRow[];
-};
-
 export function AccountantClientPanel() {
-  const [me, setMe] = useState<MeUser | null>(null);
-  const [clients, setClients] = useState<ClientRow[]>([]);
+  const [me, setMe] = useState(null);
+  const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [switchingId, setSwitchingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [switchingId, setSwitchingId] = useState(null);
+  const [error, setError] = useState(null);
 
   // ⭐ Load accountant + clients with cache-busting
   useEffect(() => {
@@ -51,7 +27,7 @@ export function AccountantClientPanel() {
           return;
         }
 
-        const meData: MeResponse = await meRes.json();
+        const meData = await meRes.json();
         setMe(meData.user);
 
         if (!["accountant", "admin", "founder"].includes(meData.user.role)) {
@@ -60,7 +36,7 @@ export function AccountantClientPanel() {
         }
 
         if (clientsRes.ok) {
-          const cData: ClientsResponse = await clientsRes.json();
+          const cData = await clientsRes.json();
           setClients(cData.clients || []);
         }
       } catch {
@@ -94,7 +70,7 @@ export function AccountantClientPanel() {
   }, [loading, me, clients]);
 
   // ⭐ Switch client manually
-  const handleSwitch = async (clientId: string) => {
+  const handleSwitch = async (clientId) => {
     setError(null);
     setSwitchingId(clientId);
 
