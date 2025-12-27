@@ -74,6 +74,16 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  const role = (session.user.role || "").toUpperCase();
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
   const { submissionId } = req.body || {};
   if (!submissionId) {
     return res.status(400).json({ error: "Missing submissionId" });
@@ -99,12 +109,15 @@ export default async function handler(req, res) {
 
     const clientId = submission.client_id;
 
-    // Accountant-aware access
-    const actingClientId =
-      session.user.actingAsClientId || session.user.clientId;
-    const isFounder = session.user.role === "admin";
+    // ⭐ Accountant-aware access
+    let sessionClientId = null;
+    if (role === "ACCOUNTANT") {
+      sessionClientId = session.user.actingAsClientId;
+    } else {
+      sessionClientId = session.user.clientId || session.user.defaultClientId;
+    }
 
-    if (!isFounder && actingClientId !== clientId) {
+    if (!isFounder && sessionClientId !== clientId) {
       return res
         .status(403)
         .json({ error: "You are not allowed to submit VAT for this client" });
@@ -137,7 +150,6 @@ export default async function handler(req, res) {
     const inputVat = Number(submission.input_vat || 0);
     const netVat = Number(submission.net_vat || 0);
 
-    // 🔥 REAL HMRC periodKey from validate.js
     const periodKey = submission.period_key;
     if (!periodKey) {
       return res.status(400).json({
@@ -147,7 +159,7 @@ export default async function handler(req, res) {
     }
 
     const payload = {
-      periodKey, // 🔥 REAL HMRC PERIOD KEY
+      periodKey,
       vatDueSales: outputVat.toFixed(2),
       vatDueAcquisitions: "0.00",
       totalVatDue: outputVat.toFixed(2),
@@ -234,6 +246,7 @@ export default async function handler(req, res) {
         actor_email: session.user.email,
         action: "MTD_VAT_SUBMIT",
         details: `Submitted VAT return to HMRC for ${submission.period_start} → ${submission.period_end}. HMRC ref: ${hmrcReference || "N/A"}`,
+        timestamp: new Date().toISOString(),
       },
     ]);
 

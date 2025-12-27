@@ -1,4 +1,6 @@
 // pages/api/mtd/vat/receipt.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 import PDFDocument from "pdfkit";
 
@@ -7,14 +9,56 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { clientId, periodStart, periodEnd } = req.body;
+  // ⭐ SESSION REQUIRED
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
-  if (!clientId || !periodStart || !periodEnd) {
+  const role = (session.user.role || "").toUpperCase();
+
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Resolve clientId safely
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
+  }
+
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
+
+  const { periodStart, periodEnd } = req.body;
+
+  if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // Fetch the MTD submission record
+    // ⭐ AUDIT LOG — Accountant downloading VAT receipt
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_DOWNLOAD_VAT_RECEIPT",
+          details: `Downloaded VAT receipt for ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+
+    // ⭐ Fetch the MTD submission record
     const { data: submission, error } = await supabaseAdmin
       .from("vat_mtd_submissions")
       .select("*")
@@ -26,13 +70,14 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (error) throw error;
+
     if (!submission) {
       return res.status(404).json({
         error: "No HMRC submission found for this VAT period",
       });
     }
 
-    // Create PDF
+    // ⭐ Create PDF
     const doc = new PDFDocument({ margin: 50 });
 
     res.setHeader("Content-Type", "application/pdf");

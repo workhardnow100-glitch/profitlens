@@ -9,9 +9,11 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Validate session
+  // ⭐ Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
+
+  const role = (session.user.role || "").toUpperCase();
 
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
@@ -21,38 +23,52 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
-
-  const { clientId, periodStart, periodEnd } = req.body || {};
-
-  if (!clientId || !periodStart || !periodEnd) {
-    return res.status(400).json({
-      error: "Missing required fields: clientId, periodStart, periodEnd",
-    });
+  // ⭐ Accountant‑aware client ID (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
   }
 
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot validate VAT for unauthorized clients",
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
+
+  const { periodStart, periodEnd } = req.body || {};
+
+  if (!periodStart || !periodEnd) {
+    return res.status(400).json({
+      error: "Missing required fields: periodStart, periodEnd",
     });
   }
 
   try {
-// ---------------------------------------------------------
-// 1. Fetch VAT transactions
-// ---------------------------------------------------------
-const { data: vatTxs, error: txError } = await supabaseAdmin
-  .from("transactions")
-  .select("id, business_category, vat_amount, tax_locked, date")
-  .eq("client_id", clientId)
-  .not("vat_amount", "is", null)
-  .gte("date", periodStart)
-  .lte("date", periodEnd);
+    // ⭐ AUDIT LOG — Accountant validating VAT MTD period
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VALIDATE_VAT_MTD_PERIOD",
+          details: `Validated VAT MTD period ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
 
-if (txError) throw txError;
+    // ---------------------------------------------------------
+    // 1. Fetch VAT transactions
+    // ---------------------------------------------------------
+    const { data: vatTxs, error: txError } = await supabaseAdmin
+      .from("transactions")
+      .select("id, business_category, vat_amount, tax_locked, date")
+      .eq("client_id", clientId)
+      .not("vat_amount", "is", null)
+      .gte("date", periodStart)
+      .lte("date", periodEnd);
 
-
+    if (txError) throw txError;
 
     if (!vatTxs || vatTxs.length === 0) {
       return res
@@ -68,8 +84,14 @@ if (txError) throw txError;
 
     vatTxs.forEach((tx) => {
       const vat = Number(tx.vat_amount || 0);
-      if (tx.category === "sales") outputVat += vat;
-      else inputVat += vat;
+      const category = (tx.business_category || "").toLowerCase();
+
+      // Simple rule: sales = output VAT, everything else = input VAT
+      if (category === "sales") {
+        outputVat += vat;
+      } else {
+        inputVat += vat;
+      }
     });
 
     const netVat = outputVat - inputVat;
@@ -116,7 +138,7 @@ if (txError) throw txError;
         output_vat: outputVat,
         input_vat: inputVat,
         net_vat: netVat,
-        period_key: periodKey, // <-- NEW
+        period_key: periodKey,
         status: "validated",
       })
       .select("id, period_key")
