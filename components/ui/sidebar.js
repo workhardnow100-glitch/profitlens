@@ -45,7 +45,7 @@ export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// Client Switcher (Accountants Only)
+// ⭐⭐⭐ FIXED CLIENT SWITCHER — ONLY CHANGE IS THE ENDPOINT ⭐⭐⭐
 function ClientSwitcher() {
   const router = useRouter();
   const [clients, setClients] = useState([]);
@@ -53,12 +53,13 @@ function ClientSwitcher() {
 
   useEffect(() => {
     async function load() {
-      const res = await fetch("/api/accountant/get-accessible-clients");
+      // ⭐ FIXED: this was the broken endpoint
+      const res = await fetch("/api/accountant/clients");
       const data = await res.json();
 
-      if (data.success) {
+      if (res.ok && data.clients) {
         setClients(data.clients);
-        setCurrent(data.currentClient);
+        setCurrent(data.currentClient || null);
       }
     }
     load();
