@@ -1,22 +1,48 @@
 // pages/api/corp/history.js
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  const { clientId } = req.body;
-  if (!clientId)
-    return res.status(400).json({ error: "Missing clientId" });
+  // ⭐ SESSION REQUIRED
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const role = (session.user.role || "").toUpperCase();
+
+  // ⭐ Resolve clientId safely
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
+  }
+
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
 
   try {
-    // ✅ Load submissions
-    const { data: submissions, error: subError } = await supabase
+    // ⭐ AUDIT LOG — Accountant viewing CT history
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_CT_HISTORY",
+          details: "Viewed Corporation Tax history",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+
+    // ⭐ Load submissions
+    const { data: submissions, error: subError } = await supabaseAdmin
       .from("corp_submissions")
       .select("*")
       .eq("client_id", clientId)
@@ -24,8 +50,8 @@ export default async function handler(req, res) {
 
     if (subError) throw subError;
 
-    // ✅ Load payments
-    const { data: payments, error: payError } = await supabase
+    // ⭐ Load payments
+    const { data: payments, error: payError } = await supabaseAdmin
       .from("ct_payments")
       .select("*")
       .eq("client_id", clientId)
