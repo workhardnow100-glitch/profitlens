@@ -1,6 +1,6 @@
 // pages/api/mtd/vat/obligations.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../auth/[...nextauth]";
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { createClient } from "../../../lib/mtd-client";
 
