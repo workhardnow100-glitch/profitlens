@@ -1,16 +1,10 @@
 // pages/api/ct/summary.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
-import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { CT_MAP } from "../../../lib/constants/ctMap";
 
 console.log("🔥 CT SUMMARY ROUTE EXECUTED — COMPETITOR-GRADE BUILD 🔥");
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // ✅ Marginal relief calculator
 function calculateCorporationTax(profit) {
@@ -54,6 +48,8 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
+  const role = (session.user.role || "").toUpperCase();
+
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -63,38 +59,40 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
-
-  const { clientId, periodStart, periodEnd } = req.body;
-
-  if (!clientId || !periodStart || !periodEnd) {
-    return res.status(400).json({ error: "Missing required parameters" });
+  // ✅ Accountant-aware client ID (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
   }
 
-  // ✅ Prevent accountants from spoofing clientId
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot request CT summaries for unauthorized clients",
-    });
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
+
+  const { periodStart, periodEnd } = req.body;
+
+  if (!periodStart || !periodEnd) {
+    return res.status(400).json({ error: "Missing required parameters" });
   }
 
   try {
     // ✅ AUDIT LOG — Accountant viewing CT summary
-    if (session.user.role === "accountant") {
+    if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
           action: "ACCOUNTANT_VIEW_CT_SUMMARY",
           details: `Viewed CT summary for ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
         },
       ]);
     }
 
     // ✅ 1. Fetch transactions, including CT flag + asset disposal fields
-    const { data: txs, error: fetchError } = await supabase
+    const { data: txs, error: fetchError } = await supabaseAdmin
       .from("transactions")
       .select(
         `
@@ -126,6 +124,7 @@ export default async function handler(req, res) {
     const ctTxs = txs.filter((tx) => tx.includedinct === true);
 
     if (ctTxs.length === 0) {
+      const locked = txs.some((tx) => tx.tax_locked === true);
       return res.status(200).json({
         success: true,
         periodStart,
@@ -137,7 +136,7 @@ export default async function handler(req, res) {
         adjustedProfit: 0,
         corpTaxDue: 0,
         effectiveRate: 0,
-        locked: txs.some((tx) => tx.tax_locked === true),
+        locked,
         breakdown: [],
         transactions: txs, // full set, for context if needed
       });
