@@ -10,7 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 
-import { useUser } from "../../hooks/useUser"; // ⭐ FIXED — this was missing
+import { useUser } from "../../hooks/useUser";
 
 // Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
@@ -45,7 +45,7 @@ export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// ⭐⭐⭐ FIXED CLIENT SWITCHER — ONLY CHANGE IS THE ENDPOINT ⭐⭐⭐
+// ⭐ Client Switcher (top of sidebar)
 function ClientSwitcher() {
   const router = useRouter();
   const [clients, setClients] = useState([]);
@@ -53,7 +53,6 @@ function ClientSwitcher() {
 
   useEffect(() => {
     async function load() {
-      // ⭐ FIXED: this was the broken endpoint
       const res = await fetch("/api/accountant/clients");
       const data = await res.json();
 
@@ -100,23 +99,36 @@ function ClientSwitcher() {
   );
 }
 
-// Sidebar Menu
+// ⭐ Sidebar Menu
 export function SidebarMenu() {
   const router = useRouter();
-  const { user } = useUser(); // ⭐ Now correctly imported
+  const { user } = useUser();
 
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
 
-  // ⭐ Accountant + Founder + Admin see accountant dashboard
-  const accountantNav = [
-    {
-      title: "Accountant Dashboard",
-      url: "/accountant/dashboard",
-      icon: Users,
-      roles: ["accountant", "founder", "admin"],
-    },
-  ];
+  // ⭐ ADD THESE — this fixes your ReferenceError
+  const [clients, setClients] = useState([]);
+  const [me, setMe] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      // Load accountant session
+      const meRes = await fetch("/api/accountant/me");
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        setMe(meData.user);
+      }
+
+      // Load accessible clients
+      const res = await fetch("/api/accountant/clients");
+      if (res.ok) {
+        const data = await res.json();
+        setClients(data.clients || []);
+      }
+    }
+    load();
+  }, []);
 
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
@@ -155,42 +167,41 @@ export function SidebarMenu() {
         user?.role === "founder" ||
         user?.role === "admin") && <ClientSwitcher />}
 
-      {/* ⭐ Accountant Dashboard link */}
- {/* ⭐ Accountant Dashboard + Client Dropdown */}
-{(user?.role === "accountant" ||
-  user?.role === "founder" ||
-  user?.role === "admin") && (
-  <SidebarMenuItem>
-    <div className="px-4 py-2 text-slate-700 font-semibold flex items-center gap-2">
-      <Users size={16} />
-      <span>Accountant Dashboard</span>
-    </div>
+      {/* ⭐ Accountant Dashboard + Client Dropdown */}
+      {(user?.role === "accountant" ||
+        user?.role === "founder" ||
+        user?.role === "admin") && (
+        <SidebarMenuItem>
+          <div className="px-4 py-2 text-slate-700 font-semibold flex items-center gap-2">
+            <Users size={16} />
+            <span>Accountant Dashboard</span>
+          </div>
 
-    {/* Dropdown */}
-    <div className="ml-6 mt-1 space-y-1">
-      {clients?.map((c) => (
-        <button
-          key={c.id}
-          onClick={async () => {
-            await fetch("/api/accountant/switch-clients", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ clientId: c.id }),
-            });
-            router.push("/accountant/dashboard");
-          }}
-          className={`block w-full text-left px-3 py-1 rounded text-sm ${
-            me?.actingAsClientId === c.id
-              ? "bg-blue-50 text-blue-700"
-              : "text-slate-600 hover:bg-slate-100"
-          }`}
-        >
-          {c.name}
-        </button>
-      ))}
-    </div>
-  </SidebarMenuItem>
-)}
+          {/* Dropdown */}
+          <div className="ml-6 mt-1 space-y-1">
+            {clients?.map((c) => (
+              <button
+                key={c.id}
+                onClick={async () => {
+                  await fetch("/api/accountant/switch-client", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientId: c.id }),
+                  });
+                  router.push("/accountant/dashboard");
+                }}
+                className={`block w-full text-left px-3 py-1 rounded text-sm ${
+                  me?.actingAsClientId === c.id
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {c.name}
+              </button>
+            ))}
+          </div>
+        </SidebarMenuItem>
+      )}
 
       {/* Default navigation */}
       {navigationItems.map(({ title, url, icon: Icon }) => (
@@ -209,7 +220,7 @@ export function SidebarMenu() {
         </SidebarMenuItem>
       ))}
 
-      {/* Taxes group */}
+      {/* Taxes */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setTaxOpen(!taxOpen)}
@@ -247,7 +258,7 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* Forms group */}
+      {/* Forms */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setFormsOpen(!formsOpen)}
