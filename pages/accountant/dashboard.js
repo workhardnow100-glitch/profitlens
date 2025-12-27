@@ -11,6 +11,7 @@ import ResponsiveLayout from "../../components/ResponsiveLayout";
 import { AccountantClientPanel } from "../../components/AccountantClientPanel";
 import { AccountantClientOverview } from "../../components/AccountantClientOverview";
 import { AccountantProfilePanel } from "../../components/AccountantProfilePanel";
+import { AccountantClientProfilePanel } from "../../components/AccountantClientProfilePanel";
 import ClientSwitcher from "../../components/ClientSwitcher";
 import { useRouteGuard } from "../../hooks/useRouteGuard";
 
@@ -110,9 +111,17 @@ export default function AccountantDashboard() {
         {/* ⭐ These panels depend on actingAsClientId */}
         {me?.actingAsClientId && (
           <>
-            <AccountantProfilePanel />
-            <AccountantClientPanel />
+            {/* ⭐ NEW — Accountant-side Client Profile */}
+            <AccountantClientProfilePanel />
+
+            {/* ⭐ Overview (financials + submissions) */}
             <AccountantClientOverview />
+
+            {/* ⭐ Client list + switcher panel */}
+            <AccountantClientPanel />
+
+            {/* ⭐ Accountant’s own profile */}
+            <AccountantProfilePanel />
           </>
         )}
       </div>
