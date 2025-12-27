@@ -330,10 +330,16 @@ if (privilegedRoles.includes(role)) {
 
         session.user.accessibleClients = accessibleClients;
 
-        const persisted = token.actingAsClientId;
-        const valid = accessibleClients.includes(persisted as string);
+       const persisted = token.actingAsClientId;
+const valid = accessibleClients.includes(persisted as string);
 
-        session.user.actingAsClientId = valid ? persisted : null;
+// ⭐ If no persisted acting client, default to first accessible client
+if (!persisted && accessibleClients.length > 0) {
+  session.user.actingAsClientId = accessibleClients[0];
+} else {
+  session.user.actingAsClientId = valid ? persisted : null;
+}
+
       } else {
         const cid = session.user.clientId ?? "unknown-client";
         session.user.accessibleClients = [cid];
