@@ -13,22 +13,23 @@ export default async function handler(req, res) {
 
   const role = session.user.role;
   const accountantEmail = session.user.email.toLowerCase();
-  const userId = session.user.userId; // ⭐ Correct session field
+  const userId = session.user.userId;
 
   const { clientId } = req.body;
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ⭐ Founder/Admin bypass — can switch to ANY client
-  if (!["founder", "admin"].includes(role)) {
-    // ⭐ Only accountants can switch clients
-    if (role !== "accountant") {
-      return res.status(403).json({
-        error: "Only accountants can switch clients",
-      });
-    }
+  // ⭐ Allowed roles
+  const allowedRoles = ["accountant", "founder", "admin"];
 
-    // ⭐ Validate accountant has permanent access to this client
+  if (!allowedRoles.includes(role)) {
+    return res.status(403).json({
+      error: "You do not have permission to switch clients",
+    });
+  }
+
+  // ⭐ If accountant, validate access
+  if (role === "accountant") {
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
       .select("client_id")
