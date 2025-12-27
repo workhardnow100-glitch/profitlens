@@ -13,14 +13,16 @@ import { AccountantClientOverview } from "../../components/AccountantClientOverv
 import { AccountantProfilePanel } from "../../components/AccountantProfilePanel";
 import { AccountantClientProfilePanel } from "../../components/AccountantClientProfilePanel";
 import ClientSwitcher from "../../components/ClientSwitcher";
-import { useRouteGuard } from "../../hooks/useRouteGuard";
+// TEMP: remove route guard until it’s accountant/founder/admin aware
+// import { useRouteGuard } from "../../hooks/useRouteGuard";
 
 export default function AccountantDashboard() {
-  useRouteGuard();
+  // useRouteGuard(); // ❌ disable for now so founder/admin can access
 
   const [me, setMe] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
     async function load() {
@@ -57,7 +59,39 @@ export default function AccountantDashboard() {
     load();
   }, []);
 
-  if (loading) {
+  // ⭐ Auto-select first client in production if none is set
+  useEffect(() => {
+    async function ensureClientSelected() {
+      if (loading) return;
+      if (!me) {
+        setInitializing(false);
+        return;
+      }
+      if (clients.length === 0) {
+        setInitializing(false);
+        return;
+      }
+      if (me.actingAsClientId) {
+        setInitializing(false);
+        return;
+      }
+
+      const firstClientId = clients[0].id;
+
+      await fetch("/api/accountant/switch-client", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: firstClientId })
+      });
+
+      setMe({ ...me, actingAsClientId: firstClientId });
+      setInitializing(false);
+    }
+
+    ensureClientSelected();
+  }, [loading, me, clients]);
+
+  if (loading || initializing) {
     return (
       <ResponsiveLayout>
         <div className="animate-pulse space-y-4">
@@ -77,13 +111,14 @@ export default function AccountantDashboard() {
       </p>
 
       <div className="mt-6 space-y-6">
-        {/* ⭐ MUST COME FIRST — sets actingAsClientId via your own components */}
+
+        {/* ⭐ MUST COME FIRST — sets actingAsClientId (from dropdown) */}
         <ClientSwitcher
           clients={clients}
           currentClient={me?.actingAsClientId || ""}
         />
 
-        {/* ⭐ No client selected */}
+        {/* ⭐ No client selected (should almost never show now) */}
         {!me?.actingAsClientId && (
           <div className="p-4 bg-yellow-50 border border-yellow-200 rounded text-yellow-800">
             No client selected. Choose a client above to begin.
