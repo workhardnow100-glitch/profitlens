@@ -16,7 +16,7 @@ export function useRouteGuard() {
       return;
     }
 
-    const role = user.role;
+    const role = (user.role || "").toLowerCase();
     const path = router.pathname;
 
     // Founder + Admin → full access everywhere
@@ -24,38 +24,31 @@ export function useRouteGuard() {
       return;
     }
 
-    // Accountant-only routes (expandable later)
+    // ⭐ Accountant must have an acting client to access user pages
+    if (role === "accountant") {
+      if (!user.actingAsClientId) {
+        // No acting client selected → send to accountant dashboard
+        router.replace("/accountant/dashboard");
+        return;
+      }
+
+      // Accountant WITH acting client → full access to ALL pages
+      return;
+    }
+
+    // ⭐ Normal user rules
     const accountantRoutes = [
       "/accountant/dashboard",
       "/accountant/clients",
       "/accountant/client-overview",
     ];
 
-    // User-only routes
-    const userRoutes = [
-      "/dashboard",
-      "/transactions",
-      "/vat",
-      "/cis",
-      "/sa",
-      "/corp",
-      "/reports",
-      "/forms",
-    ];
-
-    // If accountant tries to access user-only pages → redirect to accountant dashboard
-    if (role === "accountant" && userRoutes.includes(path)) {
-      router.replace("/accountant/dashboard");
-      return;
-    }
-
-    // If normal user tries to access accountant pages → redirect to user dashboard
     if (role === "user" && accountantRoutes.includes(path)) {
       router.replace("/dashboard");
       return;
     }
 
-    // If role is unknown → fallback to login
+    // Unknown role → login
     if (!["user", "accountant"].includes(role)) {
       router.replace("/login");
       return;
