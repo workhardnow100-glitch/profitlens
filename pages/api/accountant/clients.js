@@ -14,10 +14,7 @@ export default async function handler(req, res) {
   const role = session.user.role?.toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
 
-  // ⭐ DEBUG LOG — this is the key
   console.log("SESSION EMAIL:", accountantEmail);
-  console.log("ACCESS ROWS:", accessRows);
-
 
   if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role)) {
     return res.status(403).json({
@@ -31,6 +28,8 @@ export default async function handler(req, res) {
       .from("accountant_clients")
       .select("client_id")
       .eq("accountant_email", accountantEmail);
+
+    console.log("ACCESS ROWS:", accessRows);
 
     if (accessErr) throw accessErr;
 
