@@ -1,14 +1,8 @@
 // pages/api/ct/submit.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
-import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { CT_MAP } from "../../../lib/constants/ctMap";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 // ✅ Marginal relief calculator (kept exactly as before)
 function calculateCorporationTax(profit) {
@@ -30,7 +24,7 @@ function calculateCorporationTax(profit) {
 
   return {
     tax: profit * effectiveRate,
-    rate: effectiveRate * 100
+    rate: effectiveRate * 100,
   };
 }
 
@@ -44,6 +38,8 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
+  const role = (session.user.role || "").toUpperCase();
+
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -53,38 +49,40 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId;
-
-  const { clientId, periodStart, periodEnd } = req.body;
-
-  if (!clientId || !periodStart || !periodEnd) {
-    return res.status(400).json({ error: "Missing required parameters" });
+  // ✅ Accountant-aware client ID (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
   }
 
-  // ✅ Prevent accountants from spoofing clientId
-  if (session.user.role === "accountant" && clientId !== actingClientId) {
-    return res.status(403).json({
-      error: "Accountants cannot submit CT for unauthorized clients",
-    });
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
+
+  const { periodStart, periodEnd } = req.body;
+
+  if (!periodStart || !periodEnd) {
+    return res.status(400).json({ error: "Missing required parameters" });
   }
 
   try {
     // ✅ AUDIT LOG — Accountant submitting CT
-    if (session.user.role === "accountant") {
+    if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
           action: "ACCOUNTANT_SUBMIT_CT",
           details: `Submitted CT for ${periodStart} → ${periodEnd}`,
+          timestamp: new Date().toISOString(),
         },
       ]);
     }
 
     // ✅ 1. Fetch transactions for the CT period
-    const { data: txs, error: fetchError } = await supabase
+    const { data: txs, error: fetchError } = await supabaseAdmin
       .from("transactions")
       .select("id, date, amount, business_category, description")
       .eq("client_id", clientId)
@@ -96,7 +94,7 @@ export default async function handler(req, res) {
 
     if (!txs || txs.length === 0) {
       return res.status(400).json({
-        error: "No transactions found for this Corporation Tax period."
+        error: "No transactions found for this Corporation Tax period.",
       });
     }
 
@@ -133,12 +131,13 @@ export default async function handler(req, res) {
         description: tx.description,
         amount,
         business_category: cat,
-        ctType
+        ctType,
       });
 
       if (ctType === "income" && amount > 0) income += amount;
       if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
-      if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
+      if (ctType === "disallowable" && amount < 0)
+        disallowable += Math.abs(amount);
     });
 
     // ✅ 4. Compute profit + adjusted profit
@@ -150,7 +149,7 @@ export default async function handler(req, res) {
       calculateCorporationTax(adjustedProfit);
 
     // ✅ 6. Lock transactions for this period
-    await supabase
+    await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
@@ -158,7 +157,7 @@ export default async function handler(req, res) {
       .lte("date", periodEnd);
 
     // ✅ 7. Insert CT submission record
-    const { data: submission, error: insertError } = await supabase
+    const { data: submission, error: insertError } = await supabaseAdmin
       .from("corp_submissions")
       .insert([
         {
@@ -172,8 +171,8 @@ export default async function handler(req, res) {
           adjusted_profit: adjustedProfit,
           corp_tax_due: corpTaxDue,
           effective_rate: effectiveRate,
-          breakdown
-        }
+          breakdown,
+        },
       ])
       .select()
       .single();
@@ -194,10 +193,10 @@ export default async function handler(req, res) {
       hmrcResponse: {
         status: "SUCCESS",
         processingDate: new Date().toISOString(),
-        message: "Corporation Tax return accepted (simulated HMRC response)"
-      }
+        message: "Corporation Tax return accepted (simulated HMRC response)",
+      },
+      submission,
     });
-
   } catch (err) {
     console.error("Corporation Tax submission error:", err);
     return res.status(500).json({ success: false, error: err.message });
