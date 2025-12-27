@@ -1,4 +1,6 @@
 // pages/api/vat/periods.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -6,12 +8,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Helper: format date to YYYY-MM-DD
+// Helpers unchanged...
 function fmt(d) {
   return d.toISOString().split("T")[0];
 }
 
-// ✅ Helper: label like "16 Sep 2024 → 16 Dec 2024"
 function label(start, end) {
   return `${new Date(start).toLocaleDateString("en-GB", {
     day: "2-digit",
@@ -24,15 +25,14 @@ function label(start, end) {
   })}`;
 }
 
-// ✅ Generate VAT periods based on stagger
 function generateVatPeriods(stagger, yearsBack = 2) {
   const now = new Date();
   const periods = [];
 
   const staggerMonths = {
-    1: [0, 3, 6, 9],   // Jan, Apr, Jul, Oct
-    2: [1, 4, 7, 10],  // Feb, May, Aug, Nov
-    3: [2, 5, 8, 11],  // Mar, Jun, Sep, Dec
+    1: [0, 3, 6, 9],
+    2: [1, 4, 7, 10],
+    3: [2, 5, 8, 11],
   }[stagger];
 
   for (let y = now.getFullYear() - yearsBack; y <= now.getFullYear(); y++) {
@@ -50,7 +50,7 @@ function generateVatPeriods(stagger, yearsBack = 2) {
     }
   }
 
-  return periods.reverse(); // newest first
+  return periods.reverse();
 }
 
 export default async function handler(req, res) {
@@ -58,11 +58,27 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { clientId } = req.body;
-  if (!clientId) return res.status(400).json({ error: "Missing clientId" });
+  // ⭐ SESSION REQUIRED
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // ⭐ Resolve clientId safely
+  let clientId = null;
+
+  if (session.user.role === "accountant") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId;
+  }
+
+  if (!clientId) {
+    return res.status(400).json({ error: "No client selected" });
+  }
 
   try {
-    // ✅ Load VAT stagger
+    // ⭐ Load VAT stagger
     const { data: client } = await supabase
       .from("clients")
       .select("vat_stagger, hmrc_authorized")
@@ -71,17 +87,17 @@ export default async function handler(req, res) {
 
     const stagger = client?.vat_stagger || 1;
 
-    // ✅ Generate VAT periods
+    // ⭐ Generate VAT periods
     const vatPeriods = generateVatPeriods(stagger);
 
-    // ✅ Load VAT payments
+    // ⭐ Load VAT payments
     const { data: vatPayments } = await supabase
       .from("vat_payments")
       .select("*")
       .eq("client_id", clientId)
       .order("payment_date", { ascending: false });
 
-    // ✅ For each period, call your VAT summary engine
+    // ⭐ For each period, call VAT summary engine
     const enriched = [];
     let totalVatOwed = 0;
     let totalVatPaid = 0;
@@ -114,7 +130,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Sum VAT payments
+    // ⭐ Sum VAT payments
     vatPayments.forEach((p) => {
       totalVatPaid += p.direction === "payment" ? p.amount : -p.amount;
     });

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import vatSummaryHandler from "../vat/summary";
+import crypto from "crypto"; // ⭐ Added: used for audit IDs
 
 // Helper: format date → YYYY-MM-DD
 function fmt(d) {
@@ -53,6 +54,8 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
+  const role = (session.user.role || "").toUpperCase();
+
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -60,15 +63,19 @@ export default async function handler(req, res) {
   if (!(isFounder || isSubscribedOrTrial))
     return res.status(403).json({ error: "Upgrade required" });
 
-  // Accountant-aware clientId resolution
-  const actingClientId =
-    session.user.actingAsClientId || session.user.clientId || session.user.defaultClientId;
-  const clientId = actingClientId;
+  // ⭐ Accountant-aware clientId resolution (strict)
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
+  }
+
   if (!clientId) return res.status(400).json({ error: "Missing clientId" });
 
   try {
     // Audit: accountant viewing VAT history
-    if (session.user.role === "accountant") {
+    if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           id: crypto.randomUUID(),
