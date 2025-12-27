@@ -16,6 +16,8 @@ export default async function handler(req, res) {
 
   // ⭐ DEBUG LOG — this is the key
   console.log("SESSION EMAIL:", accountantEmail);
+  console.log("ACCESS ROWS:", accessRows);
+
 
   if (!["ACCOUNTANT", "ADMIN", "FOUNDER"].includes(role)) {
     return res.status(403).json({
