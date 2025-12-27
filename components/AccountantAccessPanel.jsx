@@ -1,17 +1,9 @@
 import React, { useEffect, useState } from "react";
 
-type MeResponse = {
-  success: boolean;
-  user: {
-    role: string;
-    clientId: string;
-  };
-};
-
 export function AccountantAccessPanel() {
   const [accountantEmail, setAccountantEmail] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [hidePanel, setHidePanel] = useState(false);
   const [checkingRole, setCheckingRole] = useState(true);
@@ -30,7 +22,7 @@ export function AccountantAccessPanel() {
           return;
         }
 
-        const data: MeResponse = await res.json();
+        const data = await res.json();
         const role = data.user.role;
 
         if (["accountant", "founder", "admin"].includes(role)) {
@@ -57,7 +49,7 @@ export function AccountantAccessPanel() {
 
   if (hidePanel) return null;
 
-  const handleInvite = async (e: React.FormEvent) => {
+  const handleInvite = async (e) => {
     e.preventDefault();
     setStatus(null);
     setError(null);

@@ -1,35 +1,10 @@
 import React, { useEffect, useState } from "react";
 
-type ClientOverviewResponse = {
-  success?: boolean;
-  error?: string;
-  client?: {
-    id: string;
-    clientId: string;
-    email: string;
-    name: string | null;
-    businessName: string | null;
-    subscriptionStatus: string;
-    createdAt: string;
-  };
-  financials?: {
-    totalRevenue: number;
-    totalExpenses: number;
-    netProfit: number;
-  };
-  submissions?: {
-    vat: any;
-    sa: any;
-    cis: any;
-    ct: any;
-  };
-};
-
 export function AccountantClientOverview() {
-  const [actingAs, setActingAs] = useState<string | null>(null);
-  const [data, setData] = useState<ClientOverviewResponse | null>(null);
+  const [actingAs, setActingAs] = useState(null);
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(null);
 
   // ⭐ Load accountant context + overview (reactive)
   async function load() {
@@ -62,11 +37,14 @@ export function AccountantClientOverview() {
       const res = await fetch(`/api/accountant/client-overview?ts=${Date.now()}`, {
         method: "POST",
         cache: "no-store",
-        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "no-store"
+        },
         body: JSON.stringify({ clientId }),
       });
 
-      const json: ClientOverviewResponse = await res.json();
+      const json = await res.json();
 
       if (!res.ok) {
         setError(json.error || "Failed to load overview");

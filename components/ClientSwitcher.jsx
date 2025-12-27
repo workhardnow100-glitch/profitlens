@@ -7,7 +7,7 @@ export default function ClientSwitcher({ clients, currentClient }) {
   const router = useRouter();
   const [selected, setSelected] = useState(currentClient);
 
-  const handleChange = async (e: any) => {
+  const handleChange = async (e) => {
     const newClientId = e.target.value;
     setSelected(newClientId);
 
@@ -32,7 +32,7 @@ export default function ClientSwitcher({ clients, currentClient }) {
         onChange={handleChange}
         className="w-full border p-2 rounded"
       >
-        {clients.map((c: any) => (
+        {clients.map((c) => (
           <option key={c.client_id} value={c.client_id}>
             {c.business_name || c.name || c.email}
           </option>
@@ -41,3 +41,4 @@ export default function ClientSwitcher({ clients, currentClient }) {
     </div>
   );
 }
+
