@@ -21,7 +21,6 @@ export default function AccountantDashboard() {
   const [me, setMe] = useState(null);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [initializing, setInitializing] = useState(true);
 
   useEffect(() => {
     async function load() {
@@ -58,23 +57,7 @@ export default function AccountantDashboard() {
     load();
   }, []);
 
-  // ⭐ Auto-select first client
-  useEffect(() => {
-    if (!loading && me && clients.length > 0 && !me.actingAsClientId) {
-      fetch("/api/accountant/select-client", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: clients[0].id })
-      }).then(() => {
-        setMe({ ...me, actingAsClientId: clients[0].id });
-        setInitializing(false);
-      });
-    } else {
-      setInitializing(false);
-    }
-  }, [loading, me, clients]);
-
-  if (loading || initializing) {
+  if (loading) {
     return (
       <ResponsiveLayout>
         <div className="animate-pulse space-y-4">
@@ -94,8 +77,7 @@ export default function AccountantDashboard() {
       </p>
 
       <div className="mt-6 space-y-6">
-
-        {/* ⭐ MUST COME FIRST — sets actingAsClientId */}
+        {/* ⭐ MUST COME FIRST — sets actingAsClientId via your own components */}
         <ClientSwitcher
           clients={clients}
           currentClient={me?.actingAsClientId || ""}
@@ -111,7 +93,7 @@ export default function AccountantDashboard() {
         {/* ⭐ These panels depend on actingAsClientId */}
         {me?.actingAsClientId && (
           <>
-            {/* ⭐ NEW — Accountant-side Client Profile */}
+            {/* ⭐ Accountant-side Client Profile */}
             <AccountantClientProfilePanel />
 
             {/* ⭐ Overview (financials + submissions) */}
