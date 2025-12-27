@@ -13,6 +13,7 @@ export function useUser() {
         email: session.user.email,
         role: session.user.role,
         clientId: session.user.clientId,
+        actingAsClientId: session.user.actingAsClientId,   // ⭐ LOG IT
         subscriptionStatus: session.user.subscriptionStatus,
       });
     } else {
@@ -25,6 +26,7 @@ export function useUser() {
     email: session?.user?.email ?? "unknown@example.com",
     role: session?.user?.role?.toLowerCase() ?? "user",
     clientId: session?.user?.clientId ?? null,
+    actingAsClientId: session?.user?.actingAsClientId ?? null,  // ⭐ FIXED
     subscriptionStatus: session?.user?.subscriptionStatus ?? "incomplete",
   };
 
@@ -33,7 +35,8 @@ export function useUser() {
     isLoading: status === "loading",
     isAuthenticated: !!session?.user,
     isPremium: ["basic", "pro"].includes(user.subscriptionStatus),
-    isFounder: user.role === "admin", // ✅ matches session enrichment
-    isAdmin: user.role === "admin",   // ✅ same check
+    isFounder: user.role === "admin",
+    isAdmin: user.role === "admin",
   };
 }
+
