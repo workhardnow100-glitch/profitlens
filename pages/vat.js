@@ -26,6 +26,12 @@ export default function VATPage() {
 
   const [vatOverview, setVatOverview] = useState(null);
 
+  // NEW: HMRC obligations + returns
+  const [hmrcObligations, setHmrcObligations] = useState([]);
+  const [hmrcReturns, setHmrcReturns] = useState([]);
+  const [loadingObligations, setLoadingObligations] = useState(false);
+  const [loadingReturns, setLoadingReturns] = useState(false);
+
   // ---------------------------------------------------------
   // AUTH
   // ---------------------------------------------------------
@@ -50,7 +56,7 @@ export default function VATPage() {
   }, [router.isReady, router.query]);
 
   // ---------------------------------------------------------
-  // LOAD VAT STAGGER + VAT OVERVIEW
+  // LOAD VAT STAGGER + VAT OVERVIEW + HMRC DATA
   // ---------------------------------------------------------
   useEffect(() => {
     async function loadStaggerAndOverview() {
@@ -72,7 +78,53 @@ export default function VATPage() {
     }
 
     loadStaggerAndOverview();
+    loadObligations();
+    loadReturns();
   }, [session]);
+
+  // ---------------------------------------------------------
+  // LOAD HMRC OBLIGATIONS
+  // ---------------------------------------------------------
+  async function loadObligations() {
+    setLoadingObligations(true);
+    try {
+      const res = await fetch("/api/mtd/vat/obligations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.obligations?.obligations) {
+        setHmrcObligations(data.obligations.obligations);
+      }
+    } catch (err) {
+      console.error("Error loading obligations:", err);
+    } finally {
+      setLoadingObligations(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD HMRC RETURNS
+  // ---------------------------------------------------------
+  async function loadReturns() {
+    setLoadingReturns(true);
+    try {
+      const res = await fetch("/api/mtd/vat/returns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.returns?.returns) {
+        setHmrcReturns(data.returns.returns);
+      }
+    } catch (err) {
+      console.error("Error loading returns:", err);
+    } finally {
+      setLoadingReturns(false);
+    }
+  }
 
   // ---------------------------------------------------------
   // SAVE VAT NUMBER
@@ -164,7 +216,6 @@ export default function VATPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
           periodStart: from,
           periodEnd: to,
         }),
@@ -273,12 +324,15 @@ export default function VATPage() {
   // ---------------------------------------------------------
   // DOWNLOAD HMRC RECEIPT
   // ---------------------------------------------------------
-  async function downloadReceipt() {
+  async function downloadReceipt(customStart, customEnd) {
+    const start = customStart || from;
+    const end = customEnd || to;
+
     if (!result?.submitted) {
       alert("HMRC receipt is only available after submission.");
       return;
     }
-    if (!from || !to) {
+    if (!start || !end) {
       alert("Missing VAT period dates.");
       return;
     }
@@ -288,9 +342,8 @@ export default function VATPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
-          periodStart: from,
-          periodEnd: to,
+          periodStart: start,
+          periodEnd: end,
         }),
       });
 
@@ -303,7 +356,7 @@ export default function VATPage() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `VAT-Receipt-${from}-to-${to}.pdf`;
+      a.download = `VAT-Receipt-${start}-to-${end}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -313,7 +366,6 @@ export default function VATPage() {
       alert("Error downloading HMRC receipt: " + err.message);
     }
   }
-
   // ---------------------------------------------------------
   // PERIOD + PAYMENTS
   // ---------------------------------------------------------
@@ -415,10 +467,45 @@ export default function VATPage() {
             </button>
 
             <p className="text-sm text-gray-600 mt-1">
-              You must authorise HMRC before validating or submitting VAT returns.
+              You must authorise HMRC before validating or submitting VAT
+              returns.
             </p>
           </div>
         )}
+
+        {/* HMRC Obligations */}
+        <ResponsiveCard title="HMRC Obligations (Live from HMRC)">
+          {loadingObligations ? (
+            <p className="text-sm text-gray-600">Loading obligations…</p>
+          ) : hmrcObligations.length === 0 ? (
+            <p className="text-sm text-gray-600">No obligations found.</p>
+          ) : (
+            <div className="space-y-2 text-sm">
+              {hmrcObligations.map((o, idx) => (
+                <div
+                  key={idx}
+                  className="p-3 border rounded cursor-pointer hover:bg-blue-50"
+                  onClick={() => {
+                    setFrom(o.start);
+                    setTo(o.end);
+                    fetchVAT(o.start, o.end);
+                  }}
+                >
+                  <p>
+                    <strong>Period:</strong> {o.start} → {o.end}
+                  </p>
+                  <p>
+                    <strong>Status:</strong>{" "}
+                    {o.status === "O" ? "Open" : "Fulfilled"}
+                  </p>
+                  <p>
+                    <strong>Due:</strong> {o.due}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </ResponsiveCard>
 
         {/* Controls */}
         <ResponsiveCard title="Select VAT Period">
@@ -495,7 +582,9 @@ export default function VATPage() {
         {result && (
           <>
             {/* HMRC Submission Details */}
-            {(result.hmrcReference || result.processingDate || result.submitted) && (
+            {(result.hmrcReference ||
+              result.processingDate ||
+              result.submitted) && (
               <ResponsiveCard title="HMRC Submission Details">
                 <div className="space-y-2 text-sm">
                   <p>
@@ -511,7 +600,7 @@ export default function VATPage() {
                     {result.submitted ? "Submitted (MTD)" : "Not Submitted"}
                   </p>
                   <button
-                    onClick={downloadReceipt}
+                    onClick={() => downloadReceipt()}
                     className="bg-blue-600 text-white px-4 py-2 rounded mt-2"
                     disabled={!result.submitted}
                   >
@@ -528,43 +617,61 @@ export default function VATPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                 <div>
                   <p>
-                    <span className="font-semibold">Box 1 – VAT due on sales:</span>{" "}
+                    <span className="font-semibold">
+                      Box 1 – VAT due on sales:
+                    </span>{" "}
                     £{Number(result.boxes?.box1 || 0).toFixed(2)}
                   </p>
                   <p>
-                    <span className="font-semibold">Box 2 – VAT due on acquisitions:</span>{" "}
+                    <span className="font-semibold">
+                      Box 2 – VAT due on acquisitions:
+                    </span>{" "}
                     £{Number(result.boxes?.box2 || 0).toFixed(2)}
                   </p>
                   <p>
-                    <span className="font-semibold">Box 3 – Total VAT due (1 + 2):</span>{" "}
+                    <span className="font-semibold">
+                      Box 3 – Total VAT due (1 + 2):
+                    </span>{" "}
                     £{Number(result.boxes?.box3 || 0).toFixed(2)}
                   </p>
                   <p>
-                    <span className="font-semibold">Box 4 – VAT reclaimed on purchases:</span>{" "}
+                    <span className="font-semibold">
+                      Box 4 – VAT reclaimed on purchases:
+                    </span>{" "}
                     £{Number(result.boxes?.box4 || 0).toFixed(2)}
                   </p>
                   <p>
-                    <span className="font-semibold">Box 5 – Net VAT to pay (3 − 4):</span>{" "}
+                    <span className="font-semibold">
+                      Box 5 – Net VAT to pay (3 − 4):
+                    </span>{" "}
                     £{Number(result.boxes?.box5 || 0).toFixed(2)}
                   </p>
                 </div>
                 <div>
                   <p>
-  <span className="font-semibold">Box 6 – Total sales (net):</span>{" "}
-  £{Number(result.boxes?.box6 || 0).toFixed(2)}
-</p>
-<p>
-  <span className="font-semibold">Box 7 – Total purchases (net):</span>{" "}
-  £{Number(result.boxes?.box7 || 0).toFixed(2)}
-</p>
-<p>
-  <span className="font-semibold">Box 8 – EU supplies (net):</span>{" "}
-  £{Number(result.boxes?.box8 || 0).toFixed(2)}
-</p>
-<p>
-  <span className="font-semibold">Box 9 – EU acquisitions (net):</span>{" "}
-  £{Number(result.boxes?.box9 || 0).toFixed(2)}
-</p>
+                    <span className="font-semibold">
+                      Box 6 – Total sales (net):
+                    </span>{" "}
+                    £{Number(result.boxes?.box6 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">
+                      Box 7 – Total purchases (net):
+                    </span>{" "}
+                    £{Number(result.boxes?.box7 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">
+                      Box 8 – EU supplies (net):
+                    </span>{" "}
+                    £{Number(result.boxes?.box8 || 0).toFixed(2)}
+                  </p>
+                  <p>
+                    <span className="font-semibold">
+                      Box 9 – EU acquisitions (net):
+                    </span>{" "}
+                    £{Number(result.boxes?.box9 || 0).toFixed(2)}
+                  </p>
                 </div>
               </div>
             </ResponsiveCard>
@@ -578,9 +685,7 @@ export default function VATPage() {
                   <p>
                     Net VAT (current): £
                     {Number(
-                      currentVatPeriod.netVat ??
-                        result.boxes?.box5 ??
-                        0
+                      currentVatPeriod.netVat ?? result.boxes?.box5 ?? 0
                     ).toFixed(2)}
                   </p>
 
@@ -776,6 +881,40 @@ export default function VATPage() {
                   This period is not yet visible in Tax Hub VAT periods, so
                   reconciliation is not available.
                 </p>
+              )}
+            </ResponsiveCard>
+
+            {/* HMRC VAT Returns (from HMRC) */}
+            <ResponsiveCard title="HMRC VAT Returns (from HMRC)">
+              {loadingReturns ? (
+                <p className="text-sm text-gray-600">Loading HMRC returns…</p>
+              ) : hmrcReturns.length === 0 ? (
+                <p className="text-sm text-gray-600">No HMRC returns found.</p>
+              ) : (
+                <ResponsiveTable
+                  columns={[
+                    { header: "Period Key", accessor: "periodKey" },
+                    { header: "Start", accessor: "start" },
+                    { header: "End", accessor: "end" },
+                    { header: "Received", accessor: "received" },
+                    { header: "Net VAT", accessor: "netVatDue" },
+                    {
+                      header: "Receipt",
+                      accessor: "receipt",
+                      render: (row) => (
+                        <button
+                          className="bg-blue-600 text-white px-3 py-1 rounded"
+                          onClick={() =>
+                            downloadReceipt(row.start, row.end)
+                          }
+                        >
+                          Download Receipt
+                        </button>
+                      ),
+                    },
+                  ]}
+                  data={hmrcReturns}
+                />
               )}
             </ResponsiveCard>
 
