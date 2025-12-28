@@ -32,6 +32,24 @@ export default function VATPage() {
   const [loadingObligations, setLoadingObligations] = useState(false);
   const [loadingReturns, setLoadingReturns] = useState(false);
 
+  // NEW: VAT MTD extra data (HMRC)
+  const [vatStatus, setVatStatus] = useState(null);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+
+  const [vatLiabilities, setVatLiabilities] = useState(null);
+  const [loadingLiabilities, setLoadingLiabilities] = useState(false);
+
+  const [vatPayments, setVatPayments] = useState(null);
+  const [loadingVatPayments, setLoadingVatPayments] = useState(false);
+
+  const [vatPeriods, setVatPeriods] = useState(null);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
+
+  const [receiptSubmissionId, setReceiptSubmissionId] = useState("");
+  const [vatReceipt, setVatReceipt] = useState(null);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
+  const [receiptError, setReceiptError] = useState(null);
+
   // ---------------------------------------------------------
   // AUTH
   // ---------------------------------------------------------
@@ -123,6 +141,130 @@ export default function VATPage() {
       console.error("Error loading returns:", err);
     } finally {
       setLoadingReturns(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD VAT MTD CONNECTION STATUS
+  // ---------------------------------------------------------
+  async function loadVatStatus() {
+    setLoadingStatus(true);
+    try {
+      const res = await fetch("/api/mtd/vat/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load VAT status");
+      setVatStatus(data.status || null);
+    } catch (err) {
+      console.error("Error loading VAT status:", err);
+      setVatStatus(null);
+    } finally {
+      setLoadingStatus(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD HMRC VAT LIABILITIES
+  // ---------------------------------------------------------
+  async function loadVatLiabilities() {
+    setLoadingLiabilities(true);
+    try {
+      const res = await fetch("/api/mtd/vat/get-liabilities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load liabilities");
+      setVatLiabilities(data.liabilities || null);
+    } catch (err) {
+      console.error("Error loading VAT liabilities:", err);
+      setVatLiabilities(null);
+    } finally {
+      setLoadingLiabilities(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD HMRC VAT PAYMENTS
+  // ---------------------------------------------------------
+  async function loadVatPayments() {
+    setLoadingVatPayments(true);
+    try {
+      const res = await fetch("/api/mtd/vat/get-payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load VAT payments");
+      setVatPayments(data.payments || null);
+    } catch (err) {
+      console.error("Error loading VAT payments:", err);
+      setVatPayments(null);
+    } finally {
+      setLoadingVatPayments(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD HMRC VAT PERIODS
+  // ---------------------------------------------------------
+  async function loadVatPeriods() {
+    setLoadingPeriods(true);
+    try {
+      const res = await fetch("/api/mtd/vat/get-periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load VAT periods");
+      setVatPeriods(data.periods || null);
+    } catch (err) {
+      console.error("Error loading VAT periods:", err);
+      setVatPeriods(null);
+    } finally {
+      setLoadingPeriods(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // LOAD HMRC VAT RECEIPT (JSON VIEW)
+  // ---------------------------------------------------------
+  async function loadVatReceipt() {
+    setReceiptError(null);
+    setVatReceipt(null);
+
+    if (!receiptSubmissionId) {
+      setReceiptError("Enter a submissionId first.");
+      return;
+    }
+
+    setLoadingReceipt(true);
+    try {
+      const res = await fetch("/api/mtd/vat/receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId: receiptSubmissionId }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load HMRC VAT receipt"
+        );
+      }
+
+      setVatReceipt(data || null);
+    } catch (err) {
+      console.error("Error loading VAT receipt:", err);
+      setReceiptError(err.message);
+    } finally {
+      setLoadingReceipt(false);
     }
   }
 
@@ -322,7 +464,7 @@ export default function VATPage() {
   }
 
   // ---------------------------------------------------------
-  // DOWNLOAD HMRC RECEIPT
+  // DOWNLOAD HMRC RECEIPT (PDF)
   // ---------------------------------------------------------
   async function downloadReceipt(customStart, customEnd) {
     const start = customStart || from;
@@ -366,6 +508,7 @@ export default function VATPage() {
       alert("Error downloading HMRC receipt: " + err.message);
     }
   }
+
   // ---------------------------------------------------------
   // PERIOD + PAYMENTS
   // ---------------------------------------------------------
@@ -938,6 +1081,191 @@ export default function VATPage() {
             )}
           </>
         )}
+
+        {/* NEW: VAT MTD Connection Status */}
+        <ResponsiveCard title="HMRC VAT MTD Connection Status">
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              onClick={loadVatStatus}
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm"
+              disabled={loadingStatus}
+            >
+              {loadingStatus ? "Checking connection…" : "Refresh Status"}
+            </button>
+          </div>
+
+          {!vatStatus ? (
+            <p className="text-sm text-gray-600">
+              No VAT MTD connection status loaded yet.
+            </p>
+          ) : (
+            <div className="text-sm space-y-1">
+              <p>
+                <strong>Connected:</strong>{" "}
+                {vatStatus.isConnected ? "Yes" : "No"}
+              </p>
+              <p>
+                <strong>Token valid:</strong>{" "}
+                {vatStatus.tokenValid ? "Yes" : "No"}
+              </p>
+              <p>
+                <strong>VRN linked:</strong>{" "}
+                {vatStatus.vrnLinked ? "Yes" : "No"}
+              </p>
+              <p>
+                <strong>MTD enabled:</strong>{" "}
+                {vatStatus.mtdEnabled ? "Yes" : "No"}
+              </p>
+              {vatStatus.expiresAt && (
+                <p>
+                  <strong>Token expires:</strong> {vatStatus.expiresAt}
+                </p>
+              )}
+              {Array.isArray(vatStatus.scopes) && vatStatus.scopes.length > 0 && (
+                <p>
+                  <strong>Scopes:</strong> {vatStatus.scopes.join(", ")}
+                </p>
+              )}
+              {vatStatus.needsReconnect && (
+                <p className="text-red-600 font-semibold">
+                  HMRC connection needs to be refreshed.
+                </p>
+              )}
+            </div>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: VAT Liabilities (HMRC) */}
+        <ResponsiveCard title="VAT Liabilities (from HMRC)">
+          <button
+            onClick={loadVatLiabilities}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingLiabilities}
+          >
+            {loadingLiabilities ? "Loading liabilities…" : "Load Liabilities"}
+          </button>
+
+          {!vatLiabilities ? (
+            <p className="text-sm text-gray-600">
+              No liabilities loaded yet.
+            </p>
+          ) : Array.isArray(vatLiabilities.liabilities) &&
+            vatLiabilities.liabilities.length > 0 ? (
+            <ResponsiveTable
+              columns={[
+                { header: "Type", accessor: "type" },
+                { header: "From", accessor: "taxPeriodFrom" },
+                { header: "To", accessor: "taxPeriodTo" },
+                { header: "Outstanding", accessor: "outstandingAmount" },
+                { header: "Due", accessor: "due" },
+              ]}
+              data={vatLiabilities.liabilities}
+            />
+          ) : (
+            <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+              {JSON.stringify(vatLiabilities, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: VAT Payments (HMRC) */}
+        <ResponsiveCard title="VAT Payments (from HMRC)">
+          <button
+            onClick={loadVatPayments}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingVatPayments}
+          >
+            {loadingVatPayments ? "Loading payments…" : "Load Payments"}
+          </button>
+
+          {!vatPayments ? (
+            <p className="text-sm text-gray-600">
+              No HMRC VAT payments loaded yet.
+            </p>
+          ) : Array.isArray(vatPayments.payments) &&
+            vatPayments.payments.length > 0 ? (
+            <ResponsiveTable
+              columns={[
+                { header: "Date", accessor: "received" },
+                { header: "Amount", accessor: "amount" },
+                { header: "Method", accessor: "method" },
+              ]}
+              data={vatPayments.payments}
+            />
+          ) : (
+            <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+              {JSON.stringify(vatPayments, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: VAT Periods (HMRC) */}
+        <ResponsiveCard title="HMRC VAT Periods">
+          <button
+            onClick={loadVatPeriods}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingPeriods}
+          >
+            {loadingPeriods ? "Loading periods…" : "Load VAT Periods"}
+          </button>
+
+          {!vatPeriods ? (
+            <p className="text-sm text-gray-600">
+              No HMRC VAT periods loaded yet.
+            </p>
+          ) : Array.isArray(vatPeriods) && vatPeriods.length > 0 ? (
+            <ResponsiveTable
+              columns={[
+                { header: "Period Key", accessor: "periodKey" },
+                { header: "Start", accessor: "start" },
+                { header: "End", accessor: "end" },
+                { header: "Status", accessor: "status" },
+                { header: "Due", accessor: "due" },
+              ]}
+              data={vatPeriods}
+            />
+          ) : (
+            <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
+              {JSON.stringify(vatPeriods, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: VAT Receipt Lookup (JSON view) */}
+        <ResponsiveCard title="HMRC VAT Receipt Lookup">
+          <div className="space-y-3 text-sm">
+            <p>
+              Use this tool to inspect the raw HMRC receipt by{" "}
+              <code>submissionId</code>.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={receiptSubmissionId}
+                onChange={(e) => setReceiptSubmissionId(e.target.value)}
+                placeholder="Enter HMRC submissionId"
+                className="border p-2 rounded flex-1"
+              />
+              <button
+                onClick={loadVatReceipt}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+                disabled={loadingReceipt}
+              >
+                {loadingReceipt ? "Loading receipt…" : "Load Receipt"}
+              </button>
+            </div>
+
+            {receiptError && (
+              <p className="text-sm text-red-600">{receiptError}</p>
+            )}
+
+            {vatReceipt && (
+              <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto mt-2">
+                {JSON.stringify(vatReceipt, null, 2)}
+              </pre>
+            )}
+          </div>
+        </ResponsiveCard>
       </div>
 
       {/* Filing Disclaimer */}
