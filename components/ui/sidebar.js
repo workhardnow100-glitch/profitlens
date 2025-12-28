@@ -66,17 +66,21 @@ function ClientSwitcher() {
 
   if (!clients || clients.length <= 1) return null;
 
-  const handleChange = async (e) => {
-    const newClientId = e.target.value;
-    setCurrent(newClientId);
-
+  const switchClient = async (clientId) => {
     await fetch("/api/accountant/switch-client", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: newClientId }),
+      body: JSON.stringify({ clientId }),
     });
 
-    router.reload();
+    await fetch("/api/auth/session?update=1");
+
+    setCurrent(clientId);
+  };
+
+  const handleChange = async (e) => {
+    const newClientId = e.target.value;
+    await switchClient(newClientId);
   };
 
   return (
@@ -107,7 +111,6 @@ export function SidebarMenu() {
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
 
-  // ⭐ Accountant session + clients
   const [clients, setClients] = useState([]);
   const [me, setMe] = useState(null);
 
@@ -127,6 +130,18 @@ export function SidebarMenu() {
     }
     load();
   }, []);
+
+  const switchClient = async (clientId) => {
+    await fetch("/api/accountant/switch-client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId }),
+    });
+
+    await fetch("/api/auth/session?update=1");
+
+    setMe((prev) => ({ ...prev, actingAsClientId: clientId }));
+  };
 
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
@@ -171,7 +186,7 @@ export function SidebarMenu() {
         user?.role === "admin") && (
         <SidebarMenuItem>
 
-          {/* ⭐ RESTORED ACCOUNTANT DASHBOARD BUTTON */}
+          {/* ⭐ Accountant Dashboard */}
           <Link
             href="/accountant/dashboard"
             className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
@@ -184,19 +199,12 @@ export function SidebarMenu() {
             <span>Accountant Dashboard</span>
           </Link>
 
-          {/* Dropdown */}
+          {/* ⭐ Client List */}
           <div className="ml-6 mt-1 space-y-1">
             {clients?.map((c) => (
               <button
                 key={c.id}
-                onClick={async () => {
-                  await fetch("/api/accountant/switch-client", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ clientId: c.id }),
-                  });
-                  router.push("/accountant/dashboard");
-                }}
+                onClick={() => switchClient(c.id)}
                 className={`block w-full text-left px-3 py-1 rounded text-sm ${
                   me?.actingAsClientId === c.id
                     ? "bg-blue-50 text-blue-700"
