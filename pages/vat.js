@@ -271,36 +271,36 @@ export default function VATPage() {
   // ---------------------------------------------------------
   // SAVE VAT NUMBER
   // ---------------------------------------------------------
-  async function saveVatNumber() {
-    if (!vatOverview?.tempVatNumber) {
-      alert("Please enter a VAT number.");
-      return;
-    }
-
-    try {
-      const res = await fetch("/api/tax-hub/save-vat-number", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: session.user.clientId,
-          vatNumber: vatOverview.tempVatNumber,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to save VAT number");
-
-      alert("VAT number saved successfully.");
-
-      // Update local state so UI refreshes
-      setVatOverview((prev) => ({
-        ...prev,
-        vat_number: vatOverview.tempVatNumber,
-      }));
-    } catch (err) {
-      alert(err.message);
-    }
+async function saveVatNumber() {
+  if (!vatOverview?.tempVatNumber) {
+    alert("Please enter a VAT number.");
+    return;
   }
+
+  try {
+    const res = await fetch("/api/tax-hub/save-vat-number", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: session.user.actingAsClientId ?? session.user.clientId,
+        vatNumber: vatOverview.tempVatNumber,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to save VAT number");
+
+    alert("VAT number saved successfully.");
+
+    setVatOverview((prev) => ({
+      ...prev,
+      vat_number: vatOverview.tempVatNumber,
+    }));
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
 
   // ---------------------------------------------------------
   // FETCH VAT SUMMARY
@@ -600,14 +600,17 @@ export default function VATPage() {
         {/* HMRC Authorisation */}
         {vatOverview?.vat_number && !vatOverview?.hmrcConnected && (
           <div className="mt-4">
-            <button
-              onClick={() =>
-                (window.location.href = `/api/hmrc/oauth/start?clientId=${session.user.clientId}`)
-              }
-              className="bg-purple-600 text-white px-4 py-2 rounded"
-            >
-              Authorise HMRC (Required for MTD)
-            </button>
+           <button
+  onClick={() =>
+    (window.location.href = `/api/hmrc/oauth/start?clientId=${
+      session.user.actingAsClientId ?? session.user.clientId
+    }`)
+  }
+  className="bg-purple-600 text-white px-4 py-2 rounded"
+>
+  Authorise HMRC (Required for MTD)
+</button>
+
 
             <p className="text-sm text-gray-600 mt-1">
               You must authorise HMRC before validating or submitting VAT
