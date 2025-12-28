@@ -29,6 +29,7 @@ export default async function handler(req, res) {
     });
   }
 
+  // ⭐ Validate accountant access
   if (role === "ACCOUNTANT") {
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
@@ -49,6 +50,7 @@ export default async function handler(req, res) {
     }
   }
 
+  // ⭐ Audit log
   await supabaseAdmin.from("audit").insert([
     {
       client_id: clientId,
@@ -59,7 +61,7 @@ export default async function handler(req, res) {
     },
   ]);
 
-  // ⭐ Update DB — this is what the session callback reads
+  // ⭐ Update DB — session callback will read this
   const { error } = await supabaseAdmin
     .from("app_users")
     .update({ acting_client_id: clientId })
@@ -70,9 +72,12 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to update acting client" });
   }
 
-  // ⭐ No unstable_update — session refresh happens on the client
+  // ⭐ Return updated user object so UI knows the switch succeeded
   return res.status(200).json({
     success: true,
-    actingAsClientId: clientId,
+    user: {
+      ...session.user,
+      actingAsClientId: clientId,
+    },
   });
 }
