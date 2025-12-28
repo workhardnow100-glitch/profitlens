@@ -14,22 +14,21 @@ export default async function handler(req, res) {
   // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
-  const userId = session.user.id; // ⭐ FIXED
+  const userId = session.user.id;
 
   const { clientId } = req.body;
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ⭐ Allowed roles (normalized)
+  // ⭐ Allowed roles
   const allowedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
-
   if (!allowedRoles.includes(role)) {
     return res.status(403).json({
       error: "You do not have permission to switch clients",
     });
   }
 
-  // ⭐ If accountant, validate access
+  // ⭐ Validate accountant access
   if (role === "ACCOUNTANT") {
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
@@ -65,12 +64,15 @@ export default async function handler(req, res) {
   const { error: updateErr } = await supabaseAdmin
     .from("app_users")
     .update({ acting_client_id: clientId })
-    .eq("id", userId); // ⭐ FIXED
+    .eq("id", userId);
 
   if (updateErr) {
     console.error("Failed to update acting client:", updateErr);
     return res.status(500).json({ error: "Failed to update acting client" });
   }
+
+  // ⭐ Force NextAuth to reload JWT on next request
+  res.setHeader("x-nextauth-reload", "1");
 
   return res.status(200).json({
     success: true,
