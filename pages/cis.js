@@ -16,6 +16,27 @@ export default function CISPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
+  // NEW: CIS MTD state
+  const [cisObligations, setCisObligations] = useState([]);
+  const [cisReturns, setCisReturns] = useState([]);
+  const [cisDeductions, setCisDeductions] = useState([]);
+
+  const [cisStatus, setCisStatus] = useState(null);
+  const [cisReceipt, setCisReceipt] = useState(null);
+  const [cisVerification, setCisVerification] = useState(null);
+
+  const [loadingObligations, setLoadingObligations] = useState(false);
+  const [loadingReturns, setLoadingReturns] = useState(false);
+  const [loadingDeductions, setLoadingDeductions] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [loadingReceipt, setLoadingReceipt] = useState(false);
+  const [loadingVerify, setLoadingVerify] = useState(false);
+
+  const [receiptSubmissionId, setReceiptSubmissionId] = useState("");
+  const [verifyUtr, setVerifyUtr] = useState("");
+  const [receiptError, setReceiptError] = useState(null);
+  const [verifyError, setVerifyError] = useState(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
@@ -28,7 +49,7 @@ export default function CISPage() {
     }
   }, [session, status, router.query]);
 
-  // ✅ Fetch CIS summary
+  // ✅ Fetch CIS summary (internal engine)
   async function fetchCIS(start, end) {
     const periodStart = start || from;
     const periodEnd = end || to;
@@ -59,7 +80,7 @@ export default function CISPage() {
     }
   }
 
-  // ✅ Submit CIS return
+  // ✅ Submit CIS return (current behaviour – internal endpoint)
   async function submitCIS() {
     if (!from || !to)
       return alert("Please select both start and end dates.");
@@ -97,6 +118,165 @@ export default function CISPage() {
       alert("Submission failed: " + err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // NEW: CIS MTD LOADERS (HMRC)
+  // ---------------------------------------------------------
+
+  // CIS MTD connection status
+  async function loadCISStatus() {
+    setLoadingStatus(true);
+    try {
+      const res = await fetch("/api/mtd/cis/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load CIS status");
+      setCisStatus(data.status || null);
+    } catch (err) {
+      console.error("Error loading CIS MTD status:", err);
+      setCisStatus(null);
+    } finally {
+      setLoadingStatus(false);
+    }
+  }
+
+  // CIS obligations (HMRC periods)
+  async function loadCISObligations() {
+    setLoadingObligations(true);
+    try {
+      const res = await fetch("/api/mtd/cis/obligations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to load CIS obligations");
+      setCisObligations(data.obligations || []);
+    } catch (err) {
+      console.error("Error loading CIS obligations:", err);
+      setCisObligations([]);
+    } finally {
+      setLoadingObligations(false);
+    }
+  }
+
+  // CIS returns (HMRC history)
+  async function loadCISReturns() {
+    setLoadingReturns(true);
+    try {
+      const res = await fetch("/api/mtd/cis/returns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to load CIS returns");
+      setCisReturns(data.returns || []);
+    } catch (err) {
+      console.error("Error loading CIS returns:", err);
+      setCisReturns([]);
+    } finally {
+      setLoadingReturns(false);
+    }
+  }
+
+  // CIS deductions (contractor + suffered view)
+  async function loadCISDeductions() {
+    setLoadingDeductions(true);
+    try {
+      const res = await fetch("/api/mtd/cis/deductions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.error || "Failed to load CIS deductions");
+      setCisDeductions(data.deductions || []);
+    } catch (err) {
+      console.error("Error loading CIS deductions:", err);
+      setCisDeductions([]);
+    } finally {
+      setLoadingDeductions(false);
+    }
+  }
+
+  // CIS receipt lookup (by submissionId)
+  async function loadCISReceipt() {
+    setReceiptError(null);
+    setCisReceipt(null);
+
+    if (!receiptSubmissionId) {
+      setReceiptError("Enter a submissionId first.");
+      return;
+    }
+
+    setLoadingReceipt(true);
+    try {
+      const res = await fetch("/api/mtd/cis/receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId: receiptSubmissionId }),
+      });
+      const data = await res
+        .json()
+        .catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load CIS receipt from HMRC"
+        );
+      }
+
+      setCisReceipt(data || null);
+    } catch (err) {
+      console.error("Error loading CIS receipt:", err);
+      setReceiptError(err.message);
+    } finally {
+      setLoadingReceipt(false);
+    }
+  }
+
+  // CIS verification (subcontractor UTR)
+  async function verifySubcontractor() {
+    setVerifyError(null);
+    setCisVerification(null);
+
+    if (!verifyUtr) {
+      setVerifyError("Enter a subcontractor UTR first.");
+      return;
+    }
+
+    setLoadingVerify(true);
+    try {
+      const res = await fetch("/api/mtd/cis/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ utr: verifyUtr }),
+      });
+      const data = await res
+        .json()
+        .catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to verify subcontractor"
+        );
+      }
+
+      setCisVerification(data || null);
+    } catch (err) {
+      console.error("Error verifying subcontractor:", err);
+      setVerifyError(err.message);
+    } finally {
+      setLoadingVerify(false);
     }
   }
 
@@ -150,7 +330,9 @@ export default function CISPage() {
         {/* ✅ CIS Summary */}
         {result && (
           <>
-            <ResponsiveCard title={`CIS Totals ${result.locked ? "(Locked)" : ""}`}>
+            <ResponsiveCard
+              title={`CIS Totals ${result.locked ? "(Locked)" : ""}`}
+            >
               <div className="space-y-2">
                 <p>
                   <strong>CIS Deducted (you withheld):</strong>{" "}
@@ -184,7 +366,9 @@ export default function CISPage() {
             </ResponsiveCard>
 
             {/* ✅ CIS Transactions */}
-            <ResponsiveCard title={`Transactions Included ${result.locked ? "(Locked)" : ""}`}>
+            <ResponsiveCard
+              title={`Transactions Included ${result.locked ? "(Locked)" : ""}`}
+            >
               <ResponsiveTable
                 columns={[
                   { header: "Date", accessor: "date" },
@@ -215,6 +399,215 @@ export default function CISPage() {
             )}
           </>
         )}
+
+        {/* NEW: CIS MTD Connection Status */}
+        <ResponsiveCard title="CIS MTD Connection Status (HMRC)">
+          <div className="flex items-center gap-3 mb-3">
+            <button
+              onClick={loadCISStatus}
+              className="bg-blue-600 text-white px-4 py-2 rounded text-sm"
+              disabled={loadingStatus}
+            >
+              {loadingStatus ? "Checking status…" : "Refresh Status"}
+            </button>
+          </div>
+
+          {!cisStatus ? (
+            <p className="text-sm text-gray-600">
+              No CIS MTD status loaded yet.
+            </p>
+          ) : (
+            <div className="text-sm space-y-1">
+              <p>
+                <strong>Connected:</strong>{" "}
+                {cisStatus.isConnected ? "Yes" : "No"}
+              </p>
+              <p>
+                <strong>Token valid:</strong>{" "}
+                {cisStatus.tokenValid ? "Yes" : "No"}
+              </p>
+              {cisStatus.utrLinked !== undefined && (
+                <p>
+                  <strong>UTR linked:</strong>{" "}
+                  {cisStatus.utrLinked ? "Yes" : "No"}
+                </p>
+              )}
+              <p>
+                <strong>MTD enabled:</strong>{" "}
+                {cisStatus.mtdEnabled ? "Yes" : "No"}
+              </p>
+              {cisStatus.expiresAt && (
+                <p>
+                  <strong>Token expires:</strong> {cisStatus.expiresAt}
+                </p>
+              )}
+              {Array.isArray(cisStatus.scopes) &&
+                cisStatus.scopes.length > 0 && (
+                  <p>
+                    <strong>Scopes:</strong>{" "}
+                    {cisStatus.scopes.join(", ")}
+                  </p>
+                )}
+              {cisStatus.needsReconnect && (
+                <p className="text-red-600 font-semibold">
+                  HMRC connection needs to be refreshed.
+                </p>
+              )}
+            </div>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: CIS Obligations (HMRC) */}
+        <ResponsiveCard title="CIS Obligations (from HMRC)">
+          <button
+            onClick={loadCISObligations}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingObligations}
+          >
+            {loadingObligations ? "Loading obligations…" : "Load Obligations"}
+          </button>
+
+          {cisObligations.length === 0 ? (
+            <p className="text-sm text-gray-600">
+              No CIS obligations loaded yet.
+            </p>
+          ) : (
+            <ResponsiveTable
+              columns={[
+                { header: "Period Start", accessor: "start" },
+                { header: "Period End", accessor: "end" },
+                { header: "Due", accessor: "due" },
+                { header: "Status", accessor: "status" },
+              ]}
+              data={cisObligations}
+            />
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: CIS Returns (HMRC) */}
+        <ResponsiveCard title="CIS Returns (from HMRC)">
+          <button
+            onClick={loadCISReturns}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingReturns}
+          >
+            {loadingReturns ? "Loading returns…" : "Load Returns"}
+          </button>
+
+          {cisReturns.length === 0 ? (
+            <p className="text-sm text-gray-600">
+              No CIS returns loaded yet.
+            </p>
+          ) : (
+            <ResponsiveTable
+              columns={[
+                { header: "Period Start", accessor: "start" },
+                { header: "Period End", accessor: "end" },
+                { header: "Received", accessor: "received" },
+                { header: "Status", accessor: "status" },
+              ]}
+              data={cisReturns}
+            />
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: CIS Deductions (HMRC view) */}
+        <ResponsiveCard title="CIS Deductions (HMRC view)">
+          <button
+            onClick={loadCISDeductions}
+            className="bg-blue-600 text-white px-4 py-2 rounded text-sm mb-3"
+            disabled={loadingDeductions}
+          >
+            {loadingDeductions ? "Loading deductions…" : "Load Deductions"}
+          </button>
+
+          {cisDeductions.length === 0 ? (
+            <p className="text-sm text-gray-600">
+              No CIS deductions loaded yet.
+            </p>
+          ) : (
+            <ResponsiveTable
+              columns={[
+                { header: "Type", accessor: "type" }, // e.g. "deducted" / "suffered"
+                { header: "Period Start", accessor: "start" },
+                { header: "Period End", accessor: "end" },
+                { header: "Amount (£)", accessor: "amount" },
+              ]}
+              data={cisDeductions}
+            />
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: CIS Receipt Lookup (MTD) */}
+        <ResponsiveCard title="CIS Receipt Lookup (MTD)">
+          <div className="space-y-3 text-sm">
+            <p>
+              Inspect the raw HMRC CIS receipt by <code>submissionId</code>.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={receiptSubmissionId}
+                onChange={(e) => setReceiptSubmissionId(e.target.value)}
+                placeholder="Enter HMRC CIS submissionId"
+                className="border p-2 rounded flex-1"
+              />
+              <button
+                onClick={loadCISReceipt}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+                disabled={loadingReceipt}
+              >
+                {loadingReceipt ? "Loading receipt…" : "Load Receipt"}
+              </button>
+            </div>
+
+            {receiptError && (
+              <p className="text-sm text-red-600">{receiptError}</p>
+            )}
+
+            {cisReceipt && (
+              <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto mt-2">
+                {JSON.stringify(cisReceipt, null, 2)}
+              </pre>
+            )}
+          </div>
+        </ResponsiveCard>
+
+        {/* NEW: CIS Subcontractor Verification */}
+        <ResponsiveCard title="CIS Subcontractor Verification (HMRC)">
+          <div className="space-y-3 text-sm">
+            <p>
+              Verify a subcontractor with HMRC using their UTR. This can return
+              a verification number and deduction status.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                value={verifyUtr}
+                onChange={(e) => setVerifyUtr(e.target.value)}
+                placeholder="Enter subcontractor UTR"
+                className="border p-2 rounded flex-1"
+              />
+              <button
+                onClick={verifySubcontractor}
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+                disabled={loadingVerify}
+              >
+                {loadingVerify ? "Verifying…" : "Verify Subcontractor"}
+              </button>
+            </div>
+
+            {verifyError && (
+              <p className="text-sm text-red-600">{verifyError}</p>
+            )}
+
+            {cisVerification && (
+              <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto mt-2">
+                {JSON.stringify(cisVerification, null, 2)}
+              </pre>
+            )}
+          </div>
+        </ResponsiveCard>
       </div>
 
       {/* ✅ Filing Disclaimer (Strong Version for HMRC Submission Pages) */}
@@ -223,7 +616,6 @@ export default function CISPage() {
         only. Users are solely responsible for verifying all figures and
         ensuring accuracy before submitting any tax filings to HMRC.
       </p>
-
     </ResponsiveLayout>
   );
 }

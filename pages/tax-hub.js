@@ -47,30 +47,38 @@ export default function TaxHub() {
   // key = `${periodStart}_${periodEnd}`
   const [mtdVatState, setMtdVatState] = useState({});
 
+  // ✅ CIS MTD connection state
+  const [cisMtdStatus, setCisMtdStatus] = useState(null);
+  const [cisMtdLoading, setCisMtdLoading] = useState(false);
+  const [cisMtdError, setCisMtdError] = useState(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
-    else fetchPeriods();
+    else {
+      fetchPeriods();
+      fetchCisMtdStatus();
+    }
   }, [session, status]);
 
   useEffect(() => {
     if (router.query.authorized) {
       fetchPeriods();
+      fetchCisMtdStatus();
       router.replace("/tax-hub", undefined, { shallow: true });
     }
   }, [router.query]);
 
- async function fetchPeriods() {
-  setLoading(true);
-  try {
-    const res = await fetch("/api/tax-hub/periods", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}), // ⭐ FIXED — no clientId sent
-    });
+  async function fetchPeriods() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/tax-hub/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}), // ⭐ FIXED — no clientId sent
+      });
 
-    const data = await res.json();
-
+      const data = await res.json();
 
       setPeriods({
         vat: data.vat || [],
@@ -131,6 +139,32 @@ export default function TaxHub() {
       });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchCisMtdStatus() {
+    if (!session?.user) return;
+    setCisMtdLoading(true);
+    setCisMtdError(null);
+
+    try {
+      const res = await fetch("/api/mtd/cis/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}), // clientId resolved server-side from session
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to fetch CIS MTD status");
+      }
+
+      setCisMtdStatus(data);
+    } catch (err) {
+      console.error("CIS MTD status error:", err);
+      setCisMtdError(err.message);
+    } finally {
+      setCisMtdLoading(false);
     }
   }
 
@@ -618,242 +652,261 @@ export default function TaxHub() {
 
                     {vatPeriods.length > 0 ? (
                       <div className="mt-2 space-y-4">
-                       {/* Active / recent VAT periods */}
-<div>
-  <h4 className="font-semibold mb-2">Active VAT Periods</h4>
-  <ul className="space-y-2">
-    {activeVatPeriods.map((p) => {
-      const periodKey = getVatKey(p);
-      const mtd = mtdVatState[periodKey] || {};
+                        {/* Active / recent VAT periods */}
+                        <div>
+                          <h4 className="font-semibold mb-2">
+                            Active VAT Periods
+                          </h4>
+                          <ul className="space-y-2">
+                            {activeVatPeriods.map((p) => {
+                              const periodKey = getVatKey(p);
+                              const mtd = mtdVatState[periodKey] || {};
 
-      const isValidating = !!mtd.validating;
-      const isSubmitting = !!mtd.submitting;
-      const hasSubmissionId = !!mtd.submissionId;
+                              const isValidating = !!mtd.validating;
+                              const isSubmitting = !!mtd.submitting;
+                              const hasSubmissionId = !!mtd.submissionId;
 
-      // ⭐ VAT PAGE LOGIC (simple + reliable)
-      const canValidate = !isValidating && !isSubmitting;
-      const canSubmit = hasSubmissionId && !isSubmitting;
+                              // ⭐ VAT PAGE LOGIC (simple + reliable)
+                              const canValidate = !isValidating && !isSubmitting;
+                              const canSubmit = hasSubmissionId && !isSubmitting;
 
-      return (
-        <li
-          key={periodKey}
-          className="border p-3 rounded bg-white space-y-2"
-        >
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="font-semibold">{p.periodLabel}</p>
-              <p className="text-sm text-gray-600">
-                Status: {p.status}
-              </p>
-            </div>
+                              return (
+                                <li
+                                  key={periodKey}
+                                  className="border p-3 rounded bg-white space-y-2"
+                                >
+                                  <div className="flex justify-between items-center">
+                                    <div>
+                                      <p className="font-semibold">
+                                        {p.periodLabel}
+                                      </p>
+                                      <p className="text-sm text-gray-600">
+                                        Status: {p.status}
+                                      </p>
+                                    </div>
 
-            <button
-              className="bg-blue-600 text-white px-3 py-1 rounded"
-              onClick={() =>
-                router.push(
-                  `/vat?from=${p.periodStart}&to=${p.periodEnd}`
-                )
-              }
-            >
-              View
-            </button>
-          </div>
+                                    <button
+                                      className="bg-blue-600 text-white px-3 py-1 rounded"
+                                      onClick={() =>
+                                        router.push(
+                                          `/vat?from=${p.periodStart}&to=${p.periodEnd}`
+                                        )
+                                      }
+                                    >
+                                      View
+                                    </button>
+                                  </div>
 
-          {/* ⭐ PDF Download Button */}
-<button
-  className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
-  onClick={async () => {
-    try {
-      // 1. Fetch VAT summary (now includes clientDetails)
-      const summaryRes = await fetch("/api/vat/summary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: session.user.clientId,
-          periodStart: p.periodStart,
-          periodEnd: p.periodEnd,
-        }),
-      });
+                                  {/* ⭐ PDF Download Button */}
+                                  <button
+                                    className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
+                                    onClick={async () => {
+                                      try {
+                                        // 1. Fetch VAT summary (now includes clientDetails)
+                                        const summaryRes = await fetch(
+                                          "/api/vat/summary",
+                                          {
+                                            method: "POST",
+                                            headers: {
+                                              "Content-Type":
+                                                "application/json",
+                                            },
+                                            body: JSON.stringify({
+                                              clientId: session.user.clientId,
+                                              periodStart: p.periodStart,
+                                              periodEnd: p.periodEnd,
+                                            }),
+                                          }
+                                        );
 
-      const summary = await summaryRes.json();
-      if (!summaryRes.ok) throw new Error(summary.error);
+                                        const summary = await summaryRes.json();
+                                        if (!summaryRes.ok)
+                                          throw new Error(summary.error);
 
-      // 2. Generate VAT PDF using summary + clientDetails
-      const pdfRes = await fetch("/api/pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "vat",
-          clientId: session.user.clientId,
-          periodStart: p.periodStart,
-          periodEnd: p.periodEnd,
+                                        // 2. Generate VAT PDF using summary + clientDetails
+                                        const pdfRes = await fetch("/api/pdf", {
+                                          method: "POST",
+                                          headers: {
+                                            "Content-Type":
+                                              "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            type: "vat",
+                                            clientId: session.user.clientId,
+                                            periodStart: p.periodStart,
+                                            periodEnd: p.periodEnd,
 
-          vatBoxes: summary.boxes,
-          transactions: summary.transactions,
-          adjustments: summary.adjustments,
+                                            vatBoxes: summary.boxes,
+                                            transactions: summary.transactions,
+                                            adjustments: summary.adjustments,
 
-          companyDetails: summary.clientDetails || {},
-        }),
-      });
+                                            companyDetails:
+                                              summary.clientDetails || {},
+                                          }),
+                                        });
 
-      const pdf = await pdfRes.json();
-      if (!pdfRes.ok) throw new Error(pdf.error);
+                                        const pdf = await pdfRes.json();
+                                        if (!pdfRes.ok)
+                                          throw new Error(pdf.error);
 
-      window.open(pdf.pdf.url, "_blank");
-    } catch (err) {
-      alert("PDF error: " + err.message);
-    }
-  }}
->
-  Download VAT PDF
-</button>
+                                        window.open(pdf.pdf.url, "_blank");
+                                      } catch (err) {
+                                        alert("PDF error: " + err.message);
+                                      }
+                                    }}
+                                  >
+                                    Download VAT PDF
+                                  </button>
 
+                                  {/* MTD Buttons */}
+                                  <div className="flex gap-2">
+                                    {/* Validate VAT (MTD) */}
+                                    <button
+                                      className={`px-2 py-1 rounded text-white ${
+                                        canValidate
+                                          ? "bg-yellow-500"
+                                          : "bg-gray-400 cursor-not-allowed"
+                                      }`}
+                                      disabled={!canValidate}
+                                      onClick={async () => {
+                                        if (!canValidate) return;
+                                        if (
+                                          !confirm(
+                                            `Validate VAT period ${p.periodLabel} for MTD?`
+                                          )
+                                        )
+                                          return;
 
+                                        updateMtdVatState(periodKey, {
+                                          validating: true,
+                                        });
 
+                                        try {
+                                          const res = await fetch(
+                                            `/api/mtd/vat/validate`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                clientId:
+                                                  session.user.clientId,
+                                                periodStart: p.periodStart,
+                                                periodEnd: p.periodEnd,
+                                              }),
+                                            }
+                                          );
 
+                                          const data = await res.json();
 
+                                          if (
+                                            !res.ok ||
+                                            !data.submissionId
+                                          ) {
+                                            throw new Error(
+                                              data.error ||
+                                                "Failed to validate VAT return"
+                                            );
+                                          }
 
+                                          updateMtdVatState(periodKey, {
+                                            submissionId: data.submissionId,
+                                          });
 
+                                          alert(
+                                            `VAT period ${p.periodLabel} validated for MTD. You can now submit to HMRC.`
+                                          );
+                                        } catch (err) {
+                                          alert(
+                                            "Validation error: " +
+                                              err.message
+                                          );
+                                        } finally {
+                                          updateMtdVatState(periodKey, {
+                                            validating: false,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {isValidating
+                                        ? "Validating…"
+                                        : "Validate VAT (MTD)"}
+                                    </button>
 
+                                    {/* Submit to HMRC (MTD) */}
+                                    <button
+                                      className={`px-2 py-1 rounded text-white ${
+                                        canSubmit
+                                          ? "bg-green-600"
+                                          : "bg-gray-400 cursor-not-allowed"
+                                      }`}
+                                      disabled={!canSubmit}
+                                      onClick={async () => {
+                                        if (!canSubmit) return;
+                                        if (
+                                          !confirm(
+                                            `Submit VAT period ${p.periodLabel} to HMRC (MTD)?`
+                                          )
+                                        )
+                                          return;
 
+                                        updateMtdVatState(periodKey, {
+                                          submitting: true,
+                                        });
 
+                                        try {
+                                          const res = await fetch(
+                                            `/api/mtd/vat/submit`,
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                submissionId: mtd.submissionId,
+                                              }),
+                                            }
+                                          );
 
-          {/* MTD Buttons */}
-          <div className="flex gap-2">
-            {/* Validate VAT (MTD) */}
-            <button
-              className={`px-2 py-1 rounded text-white ${
-                canValidate
-                  ? "bg-yellow-500"
-                  : "bg-gray-400 cursor-not-allowed"
-              }`}
-              disabled={!canValidate}
-              onClick={async () => {
-                if (!canValidate) return;
-                if (
-                  !confirm(
-                    `Validate VAT period ${p.periodLabel} for MTD?`
-                  )
-                )
-                  return;
+                                          const data = await res.json();
 
-                updateMtdVatState(periodKey, {
-                  validating: true,
-                });
+                                          if (!res.ok || !data.success) {
+                                            throw new Error(
+                                              data.error ||
+                                                "HMRC submission failed"
+                                            );
+                                          }
 
-                try {
-                  const res = await fetch(
-                    `/api/mtd/vat/validate`,
-                    {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({
-                        clientId: session.user.clientId,
-                        periodStart: p.periodStart,
-                        periodEnd: p.periodEnd,
-                      }),
-                    }
-                  );
+                                          alert(
+                                            `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
+                                          );
 
-                  const data = await res.json();
-
-                  if (!res.ok || !data.submissionId) {
-                    throw new Error(
-                      data.error ||
-                        "Failed to validate VAT return"
-                    );
-                  }
-
-                  updateMtdVatState(periodKey, {
-                    submissionId: data.submissionId,
-                  });
-
-                  alert(
-                    `VAT period ${p.periodLabel} validated for MTD. You can now submit to HMRC.`
-                  );
-                } catch (err) {
-                  alert("Validation error: " + err.message);
-                } finally {
-                  updateMtdVatState(periodKey, {
-                    validating: false,
-                  });
-                }
-              }}
-            >
-              {isValidating ? "Validating…" : "Validate VAT (MTD)"}
-            </button>
-
-            {/* Submit to HMRC (MTD) */}
-            <button
-              className={`px-2 py-1 rounded text-white ${
-                canSubmit
-                  ? "bg-green-600"
-                  : "bg-gray-400 cursor-not-allowed"
-              }`}
-              disabled={!canSubmit}
-              onClick={async () => {
-                if (!canSubmit) return;
-                if (
-                  !confirm(
-                    `Submit VAT period ${p.periodLabel} to HMRC (MTD)?`
-                  )
-                )
-                  return;
-
-                updateMtdVatState(periodKey, {
-                  submitting: true,
-                });
-
-                try {
-                  const res = await fetch(
-                    `/api/mtd/vat/submit`,
-                    {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                      },
-                      body: JSON.stringify({
-                        submissionId: mtd.submissionId,
-                      }),
-                    }
-                  );
-
-                  const data = await res.json();
-
-                  if (!res.ok || !data.success) {
-                    throw new Error(
-                      data.error ||
-                        "HMRC submission failed"
-                    );
-                  }
-
-                  alert(
-                    `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
-                  );
-
-                  await fetchPeriods();
-                } catch (err) {
-                  alert(
-                    "Submission error: " + err.message
-                  );
-                } finally {
-                  updateMtdVatState(periodKey, {
-                    submitting: false,
-                  });
-                }
-              }}
-            >
-              {isSubmitting ? "Submitting…" : "Submit to HMRC (MTD)"}
-            </button>
-          </div>
-        </li>
-      );
-    })}
-  </ul>
-</div>
-
+                                          await fetchPeriods();
+                                        } catch (err) {
+                                          alert(
+                                            "Submission error: " +
+                                              err.message
+                                          );
+                                        } finally {
+                                          updateMtdVatState(periodKey, {
+                                            submitting: false,
+                                          });
+                                        }
+                                      }}
+                                    >
+                                      {isSubmitting
+                                        ? "Submitting…"
+                                        : "Submit to HMRC (MTD)"}
+                                    </button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
 
                         {/* Older VAT periods (collapsible) */}
                         {olderVatPeriods.length > 0 && (
@@ -933,6 +986,48 @@ export default function TaxHub() {
                 ) : tax.key === "cis" ? (
                   <>
                     {/* ✅ CIS cockpit summary + help + periods */}
+                    {/* CIS MTD connection status */}
+                    <div className="mt-4 p-3 rounded bg-slate-900 text-white text-sm flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold">CIS MTD connection</p>
+                        {cisMtdLoading && (
+                          <p className="text-slate-300">
+                            Checking CIS MTD link with HMRC…
+                          </p>
+                        )}
+                        {!cisMtdLoading && cisMtdError && (
+                          <p className="text-red-300">
+                            {cisMtdError}
+                          </p>
+                        )}
+                        {!cisMtdLoading && !cisMtdError && cisMtdStatus && (
+                          <p
+                            className={
+                              cisMtdStatus.isConnected
+                                ? "text-green-300"
+                                : "text-yellow-300"
+                            }
+                          >
+                            {cisMtdStatus.isConnected
+                              ? "CIS MTD is connected and responding."
+                              : "CIS MTD is not connected. Reconnect via the HMRC link above."}
+                          </p>
+                        )}
+                        {!cisMtdLoading &&
+                          !cisMtdError &&
+                          !cisMtdStatus && (
+                            <p className="text-slate-300">
+                              CIS MTD status not available yet.
+                            </p>
+                          )}
+                      </div>
+                      <button
+                        className="ml-4 bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded"
+                        onClick={fetchCisMtdStatus}
+                      >
+                        Refresh CIS MTD status
+                      </button>
+                    </div>
 
                     {/* Overdue CIS warning */}
                     {overdueCisCount > 0 && (
