@@ -11,13 +11,17 @@ export default function ClientSwitcher({ clients, currentClient }) {
     const newClientId = e.target.value;
     setSelected(newClientId);
 
-    await fetch("/api/accountant/switch-client", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: newClientId }),
-    });
+  await fetch("/api/accountant/switch-client", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ clientId: newClientId }),
+});
 
-    router.refresh();
+// ⭐ THIS is the missing piece — forces NextAuth to reload the session
+await fetch("/api/auth/session?update=1");
+
+router.refresh();
+
   };
 
   // If only one client, no need to show switcher
