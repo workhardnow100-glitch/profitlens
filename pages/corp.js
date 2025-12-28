@@ -24,6 +24,15 @@ export default function CorpPage() {
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentTotals, setPaymentTotals] = useState(null);
 
+  // CT MTD (HMRC) cockpit state
+  const [ctStatus, setCtStatus] = useState(null);
+  const [ctObligations, setCtObligations] = useState([]);
+  const [ctReturns, setCtReturns] = useState([]);
+  const [ctLiabilities, setCtLiabilities] = useState([]);
+  const [ctPayments, setCtPayments] = useState([]);
+  const [ctLoading, setCtLoading] = useState(false);
+  const [ctError, setCtError] = useState(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
@@ -166,6 +175,52 @@ export default function CorpPage() {
     }
   }
 
+  // Fetch CT MTD data from HMRC via new API routes
+  async function fetchCtMtd() {
+    setCtLoading(true);
+    setCtError(null);
+
+    try {
+      const [statusRes, obligationsRes, returnsRes, liabilitiesRes, paymentsRes] =
+        await Promise.all([
+          fetch("/api/mtd/ct/status"),
+          fetch("/api/mtd/ct/obligations"),
+          fetch("/api/mtd/ct/returns"),
+          fetch("/api/mtd/ct/liabilities"),
+          fetch("/api/mtd/ct/payments"),
+        ]);
+
+      const [statusData, obligationsData, returnsData, liabilitiesData, paymentsData] =
+        await Promise.all([
+          statusRes.json(),
+          obligationsRes.json(),
+          returnsRes.json(),
+          liabilitiesRes.json(),
+          paymentsRes.json(),
+        ]);
+
+      if (!statusRes.ok) throw new Error(statusData.error || "Error fetching CT MTD status");
+      if (!obligationsRes.ok)
+        throw new Error(obligationsData.error || "Error fetching CT obligations");
+      if (!returnsRes.ok) throw new Error(returnsData.error || "Error fetching CT returns");
+      if (!liabilitiesRes.ok)
+        throw new Error(liabilitiesData.error || "Error fetching CT liabilities");
+      if (!paymentsRes.ok)
+        throw new Error(paymentsData.error || "Error fetching CT payments");
+
+      setCtStatus(statusData.status || statusData || null);
+      setCtObligations(obligationsData.obligations || obligationsData || []);
+      setCtReturns(returnsData.returns || returnsData || []);
+      setCtLiabilities(liabilitiesData.liabilities || liabilitiesData || []);
+      setCtPayments(paymentsData.payments || paymentsData || []);
+    } catch (err) {
+      console.error("CT MTD fetch error:", err);
+      setCtError(err.message);
+    } finally {
+      setCtLoading(false);
+    }
+  }
+
   if (!session?.user) return null;
 
   const hasResult = !!result;
@@ -175,7 +230,8 @@ export default function CorpPage() {
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold text-slate-900">Corporation Tax</h1>
         <p className="text-slate-600">
-          Cockpit view of trading income, allowable expenses, add‑backs, and Corporation Tax liability for your chosen accounting year.
+          Cockpit view of trading income, allowable expenses, add‑backs, and Corporation Tax
+          liability for your chosen accounting year.
         </p>
 
         {/* Period controls */}
@@ -231,7 +287,9 @@ export default function CorpPage() {
         {/* Summary + KPIs */}
         {hasResult && (
           <>
-            <ResponsiveCard title={`Corporation Tax Summary ${result.locked ? "(Locked)" : ""}`}>
+            <ResponsiveCard
+              title={`Corporation Tax Summary ${result.locked ? "(Locked)" : ""}`}
+            >
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div className="border rounded p-3 bg-slate-50">
                   <p className="text-xs uppercase text-slate-500">Trading income</p>
@@ -280,8 +338,8 @@ export default function CorpPage() {
               {reviewRows.length > 0 && (
                 <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
                   There are <strong>{reviewRows.length}</strong> transactions marked as{" "}
-                  <strong>review/uncategorised</strong>. These do not slot cleanly
-                  into HMRC‑aligned CT rules and should be checked before filing.
+                  <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
+                  CT rules and should be checked before filing.
                 </div>
               )}
             </ResponsiveCard>
@@ -384,6 +442,142 @@ export default function CorpPage() {
             )}
           </>
         )}
+
+        {/* CT MTD – HMRC cockpit (placed at the bottom) */}
+        <ResponsiveCard title="HMRC MTD – Corporation Tax">
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <p className="text-sm text-slate-600">
+              Live HMRC view for Corporation Tax: obligations, returns, liabilities and payments for
+              the selected client.
+            </p>
+            <button
+              onClick={fetchCtMtd}
+              className="bg-indigo-600 text-white px-4 py-2 rounded text-sm"
+              disabled={ctLoading}
+            >
+              {ctLoading ? "Refreshing…" : "Refresh from HMRC"}
+            </button>
+          </div>
+
+          {ctError && (
+            <div className="mb-3 p-3 rounded border border-red-300 bg-red-50 text-red-800 text-sm">
+              HMRC error: {ctError}
+            </div>
+          )}
+
+          {ctStatus && (
+            <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="border rounded p-3 bg-slate-50">
+                <p className="text-xs uppercase text-slate-500">MTD connection</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {ctStatus.isConnected ? "Connected" : "Not connected"}
+                </p>
+                {!ctStatus.isConnected && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    HMRC did not return CT obligations. Check authorisation or UTR.
+                  </p>
+                )}
+              </div>
+              <div className="border rounded p-3 bg-slate-50">
+                <p className="text-xs uppercase text-slate-500">Token</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {ctStatus.tokenValid ? "Valid" : "Invalid / expired"}
+                </p>
+              </div>
+              <div className="border rounded p-3 bg-slate-50">
+                <p className="text-xs uppercase text-slate-500">UTR linked</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {ctStatus.utrLinked ? "Yes" : "No"}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Obligations */}
+          {ctObligations && ctObligations.length > 0 && (
+            <div className="mt-4">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                HMRC CT obligations
+              </h3>
+              <ResponsiveTable
+                columns={[
+                  { header: "Period start", accessor: "start" },
+                  { header: "Period end", accessor: "end" },
+                  { header: "Due date", accessor: "due" },
+                  { header: "Status", accessor: "status" },
+                ]}
+                data={ctObligations}
+              />
+            </div>
+          )}
+
+          {/* Returns */}
+          {ctReturns && ctReturns.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                HMRC CT returns
+              </h3>
+              <ResponsiveTable
+                columns={[
+                  { header: "Period start", accessor: "start" },
+                  { header: "Period end", accessor: "end" },
+                  { header: "Received", accessor: "received" },
+                  { header: "Status", accessor: "status" },
+                ]}
+                data={ctReturns}
+              />
+            </div>
+          )}
+
+          {/* Liabilities */}
+          {ctLiabilities && ctLiabilities.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                HMRC CT liabilities
+              </h3>
+              <ResponsiveTable
+                columns={[
+                  { header: "Tax year", accessor: "taxYear" },
+                  { header: "Amount (£)", accessor: "amount" },
+                  { header: "Due date", accessor: "due" },
+                  { header: "Status", accessor: "status" },
+                ]}
+                data={ctLiabilities}
+              />
+            </div>
+          )}
+
+          {/* Payments */}
+          {ctPayments && ctPayments.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-semibold text-slate-800 mb-2">
+                HMRC CT payments
+              </h3>
+              <ResponsiveTable
+                columns={[
+                  { header: "Date", accessor: "date" },
+                  { header: "Amount (£)", accessor: "amount" },
+                  { header: "Reference", accessor: "reference" },
+                  { header: "Method", accessor: "method" },
+                ]}
+                data={ctPayments}
+              />
+            </div>
+          )}
+
+          {!ctLoading &&
+            !ctError &&
+            !ctStatus &&
+            ctObligations.length === 0 &&
+            ctReturns.length === 0 &&
+            ctLiabilities.length === 0 &&
+            ctPayments.length === 0 && (
+              <p className="text-xs text-slate-500 mt-2">
+                No HMRC CT data loaded yet. Use “Refresh from HMRC” to pull the latest obligations,
+                returns, liabilities and payments.
+              </p>
+            )}
+        </ResponsiveCard>
       </div>
 
       {/* Payment Modal */}
@@ -454,11 +648,10 @@ export default function CorpPage() {
 
       {/* ✅ Filing Disclaimer (Strong Version for Corporation Tax) */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-        ProfitLens does not provide tax advice. All calculations are estimates
-        only. Users are solely responsible for verifying all figures and
-        ensuring accuracy before submitting any tax filings to HMRC.
+        ProfitLens does not provide tax advice. All calculations are estimates only. Users are
+        solely responsible for verifying all figures and ensuring accuracy before submitting any tax
+        filings to HMRC.
       </p>
-
     </ResponsiveLayout>
   );
 }
