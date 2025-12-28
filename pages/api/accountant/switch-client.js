@@ -63,7 +63,7 @@ export default async function handler(req, res) {
     .update({ acting_client_id: clientId })
     .eq("id", userId);
 
-  // ⭐ CRITICAL: Update the NextAuth session
+  // ⭐ CRITICAL: Update NextAuth session
   await unstable_update({
     user: {
       ...session.user,
