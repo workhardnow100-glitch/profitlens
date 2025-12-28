@@ -2,6 +2,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { unstable_update } from "next-auth"; // ⭐ REQUIRED
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
@@ -11,7 +12,6 @@ export default async function handler(req, res) {
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
-  // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
   const userId = session.user.id;
@@ -20,7 +20,6 @@ export default async function handler(req, res) {
   if (!clientId)
     return res.status(400).json({ error: "Missing clientId" });
 
-  // ⭐ Allowed roles
   const allowedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
   if (!allowedRoles.includes(role)) {
     return res.status(403).json({
@@ -28,7 +27,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // ⭐ Validate accountant access
   if (role === "ACCOUNTANT") {
     const { data: access, error: accessErr } = await supabaseAdmin
       .from("accountant_clients")
@@ -49,7 +47,6 @@ export default async function handler(req, res) {
     }
   }
 
-  // ⭐ Log the switch
   await supabaseAdmin.from("audit").insert([
     {
       client_id: clientId,
@@ -60,19 +57,19 @@ export default async function handler(req, res) {
     },
   ]);
 
-  // ⭐ Persist acting client in database
-  const { error: updateErr } = await supabaseAdmin
+  // ⭐ Update DB (optional but fine)
+  await supabaseAdmin
     .from("app_users")
     .update({ acting_client_id: clientId })
     .eq("id", userId);
 
-  if (updateErr) {
-    console.error("Failed to update acting client:", updateErr);
-    return res.status(500).json({ error: "Failed to update acting client" });
-  }
-
-  // ⭐ Force NextAuth to reload JWT on next request
-  res.setHeader("x-nextauth-reload", "1");
+  // ⭐ CRITICAL: Update the NextAuth session
+  await unstable_update({
+    user: {
+      ...session.user,
+      actingAsClientId: clientId,
+    },
+  });
 
   return res.status(200).json({
     success: true,
