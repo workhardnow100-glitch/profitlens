@@ -51,7 +51,7 @@ export default async function handler(req, res) {
     const mtd = await createClient(clientId);
 
     // ⭐ Fetch VAT returns from HMRC
-    const returns = await mtd.getReturns();
+    const returns = await mtd.getVATReturns();
 
     return res.status(200).json({
       success: true,
@@ -62,3 +62,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
+

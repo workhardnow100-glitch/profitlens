@@ -101,7 +101,7 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     const mtd = await createClient(clientId); // your OAuth + VRN wrapper
 
-    const obligations = await mtd.getObligations();
+    const obligations = await mtd.getVATObligations();
 
     if (!obligations?.obligations?.length) {
       return res.status(400).json({
@@ -163,3 +163,4 @@ export default async function handler(req, res) {
     });
   }
 }
+
