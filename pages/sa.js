@@ -41,6 +41,14 @@ export default function SAPage() {
   const [payments, setPayments] = useState([]);
   const [analytics, setAnalytics] = useState(null);
 
+  // ⭐ MTD SA state (HMRC)
+  const [mtdObligations, setMtdObligations] = useState(null);
+  const [mtdSummaries, setMtdSummaries] = useState(null);
+  const [mtdEops, setMtdEops] = useState(null);
+  const [mtdFinalDec, setMtdFinalDec] = useState(null);
+  const [mtdReturns, setMtdReturns] = useState(null);
+  const [mtdReceipt, setMtdReceipt] = useState(null);
+
   // ✅ Auto-generate SA tax years (2020/21 → 2030/31)
   const saYears = [];
   for (let y = 2020; y <= 2030; y++) {
@@ -101,7 +109,6 @@ export default function SAPage() {
 
       const analyticsData = await analyticsRes.json();
       setAnalytics(analyticsData.analytics || []);
-
     } catch (err) {
       console.error(err);
       alert("Error fetching SA summary: " + err.message);
@@ -346,12 +353,23 @@ export default function SAPage() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
                   <input type="date" className="border p-2 rounded" id="saPaymentDate" />
-                  <input type="number" step="0.01" className="border p-2 rounded" placeholder="Amount (£)" id="saPaymentAmount" />
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="border p-2 rounded"
+                    placeholder="Amount (£)"
+                    id="saPaymentAmount"
+                  />
                   <select className="border p-2 rounded" id="saPaymentDirection">
                     <option value="payment">Payment to HMRC</option>
                     <option value="refund">Refund from HMRC</option>
                   </select>
-                  <input type="text" className="border p-2 rounded" placeholder="Reference (optional)" id="saPaymentReference" />
+                  <input
+                    type="text"
+                    className="border p-2 rounded"
+                    placeholder="Reference (optional)"
+                    id="saPaymentReference"
+                  />
                 </div>
 
                 <button
@@ -372,7 +390,11 @@ export default function SAPage() {
                       className="flex justify-between items-center border p-2 rounded bg-white"
                     >
                       <span>{p.payment_date}</span>
-                      <span className={p.direction === "payment" ? "text-red-600" : "text-green-600"}>
+                      <span
+                        className={
+                          p.direction === "payment" ? "text-red-600" : "text-green-600"
+                        }
+                      >
                         {p.direction === "payment" ? "Paid to HMRC" : "Refund from HMRC"}
                       </span>
                       <span className="font-semibold">£{p.amount.toFixed(2)}</span>
@@ -396,9 +418,232 @@ export default function SAPage() {
                 ]}
                 data={result.transactions}
               />
-              </ResponsiveCard>
+            </ResponsiveCard>
           </>
         )}
+
+        {/* ========================================================= */}
+        {/* ⭐⭐⭐ MTD SELF ASSESSMENT (HMRC) ⭐⭐⭐ */}
+        {/* ========================================================= */}
+
+        <ResponsiveCard title="MTD SA – HMRC Obligations">
+          <button
+            onClick={async () => {
+              const res = await fetch("/api/mtd/sa/get-obligations", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+              const data = await res.json();
+              setMtdObligations(data.obligations || null);
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded mb-4"
+          >
+            Load HMRC Obligations
+          </button>
+
+          {!mtdObligations ? (
+            <p>No obligations loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdObligations, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        <ResponsiveCard title="MTD SA – Period Summaries">
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={async () => {
+                const res = await fetch("/api/mtd/sa/get-period-summaries", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                });
+                const data = await res.json();
+                setMtdSummaries(data.summaries || null);
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded"
+            >
+              Load Period Summaries
+            </button>
+
+            <button
+              onClick={async () => {
+                const periodStart = prompt("Enter period start (YYYY-MM-DD)");
+                const periodEnd = prompt("Enter period end (YYYY-MM-DD)");
+                if (!periodStart || !periodEnd) return;
+
+                const res = await fetch("/api/mtd/sa/create-period-summary", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ periodStart, periodEnd }),
+                });
+
+                const data = await res.json();
+                alert("Period summary created.");
+                setMtdSummaries(data.summary || null);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded"
+            >
+              Create Period Summary
+            </button>
+          </div>
+
+          {!mtdSummaries ? (
+            <p>No summaries loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdSummaries, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        <ResponsiveCard title="MTD SA – End of Period Statement (EOPS)">
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={async () => {
+                const res = await fetch("/api/mtd/sa/get-eops", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                });
+                const data = await res.json();
+                setMtdEops(data.eops || null);
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded"
+            >
+              Load EOPS
+            </button>
+
+            <button
+              onClick={async () => {
+                const taxYear = prompt("Enter tax year (e.g. 2023-24)");
+                const incomeSourceType = prompt(
+                  "Income source type (self-employment/property)"
+                );
+                if (!taxYear || !incomeSourceType) return;
+
+                const res = await fetch("/api/mtd/sa/submit-eops", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ taxYear, incomeSourceType }),
+                });
+
+                const data = await res.json();
+                alert("EOPS submitted.");
+                setMtdEops(data.response || null);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded"
+            >
+              Submit EOPS
+            </button>
+          </div>
+
+          {!mtdEops ? (
+            <p>No EOPS loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdEops, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        <ResponsiveCard title="MTD SA – Final Declaration">
+          <div className="flex gap-3 mb-4">
+            <button
+              onClick={async () => {
+                const res = await fetch("/api/mtd/sa/get-final-declaration", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                });
+                const data = await res.json();
+                setMtdFinalDec(data.declaration || null);
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded"
+            >
+              Load Final Declaration
+            </button>
+
+            <button
+              onClick={async () => {
+                const taxYear = prompt("Enter tax year (e.g. 2023-24)");
+                if (!taxYear) return;
+
+                const res = await fetch("/api/mtd/sa/submit-final-declaration", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ taxYear }),
+                });
+
+                const data = await res.json();
+                alert("Final Declaration submitted.");
+                setMtdFinalDec(data.response || null);
+              }}
+              className="bg-green-600 text-white px-4 py-2 rounded"
+            >
+              Submit Final Declaration
+            </button>
+          </div>
+
+          {!mtdFinalDec ? (
+            <p>No final declaration loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdFinalDec, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        <ResponsiveCard title="MTD SA – HMRC Returns">
+          <button
+            onClick={async () => {
+              const res = await fetch("/api/mtd/sa/get-returns", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+              const data = await res.json();
+              setMtdReturns(data.returns || null);
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded mb-4"
+          >
+            Load SA Returns
+          </button>
+
+          {!mtdReturns ? (
+            <p>No returns loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdReturns, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
+
+        <ResponsiveCard title="MTD SA – Receipt Lookup">
+          <button
+            onClick={async () => {
+              const submissionId = prompt("Enter submissionId");
+              if (!submissionId) return;
+
+              const res = await fetch("/api/mtd/sa/get-receipt", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ submissionId }),
+              });
+
+              const data = await res.json();
+              setMtdReceipt(data.receipt || null);
+            }}
+            className="bg-blue-600 text-white px-4 py-2 rounded mb-4"
+          >
+            Load Receipt
+          </button>
+
+          {!mtdReceipt ? (
+            <p>No receipt loaded.</p>
+          ) : (
+            <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+              {JSON.stringify(mtdReceipt, null, 2)}
+            </pre>
+          )}
+        </ResponsiveCard>
       </div>
 
       {/* ✅ Filing Disclaimer (Strong Version for SA) */}
@@ -407,7 +652,6 @@ export default function SAPage() {
         only. Users are solely responsible for verifying all figures and
         ensuring accuracy before submitting any tax filings to HMRC.
       </p>
-
     </ResponsiveLayout>
   );
 }
