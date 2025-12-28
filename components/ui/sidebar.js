@@ -45,9 +45,29 @@ export const SidebarMenuButton = ({ children, className }) => (
   <div className={className}>{children}</div>
 );
 
-// ⭐ Client Switcher (top of sidebar)
+// ⭐ ONE SINGLE, RELIABLE CLIENT SWITCH FUNCTION
+async function switchClientGlobal(clientId) {
+  try {
+    // 1. Update acting client in DB
+    await fetch("/api/accountant/switch-client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId }),
+    });
+
+    // 2. Force NextAuth to reload session
+    await fetch("/api/auth/session?update=1");
+
+    // 3. Hard reload so every page sees the new acting client
+    window.location.reload();
+  } catch (err) {
+    console.error("Client switch failed:", err);
+    alert("Failed to switch client");
+  }
+}
+
+// ⭐ Client Switcher (top dropdown)
 function ClientSwitcher() {
-  const router = useRouter();
   const [clients, setClients] = useState([]);
   const [current, setCurrent] = useState(null);
 
@@ -66,21 +86,9 @@ function ClientSwitcher() {
 
   if (!clients || clients.length <= 1) return null;
 
-  const switchClient = async (clientId) => {
-    await fetch("/api/accountant/switch-client", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId }),
-    });
-
-    await fetch("/api/auth/session?update=1");
-
-    setCurrent(clientId);
-  };
-
   const handleChange = async (e) => {
     const newClientId = e.target.value;
-    await switchClient(newClientId);
+    await switchClientGlobal(newClientId);
   };
 
   return (
@@ -131,18 +139,6 @@ export function SidebarMenu() {
     load();
   }, []);
 
-  const switchClient = async (clientId) => {
-    await fetch("/api/accountant/switch-client", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId }),
-    });
-
-    await fetch("/api/auth/session?update=1");
-
-    setMe((prev) => ({ ...prev, actingAsClientId: clientId }));
-  };
-
   const navigationItems = [
     { title: "Dashboard", url: "/dashboard", icon: BarChart },
     { title: "Profile", url: "/profile", icon: Users },
@@ -180,13 +176,12 @@ export function SidebarMenu() {
         user?.role === "founder" ||
         user?.role === "admin") && <ClientSwitcher />}
 
-      {/* ⭐ Accountant Dashboard + Client Dropdown */}
+      {/* ⭐ Accountant Dashboard + Client List */}
       {(user?.role === "accountant" ||
         user?.role === "founder" ||
         user?.role === "admin") && (
         <SidebarMenuItem>
 
-          {/* ⭐ Accountant Dashboard */}
           <Link
             href="/accountant/dashboard"
             className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
@@ -204,7 +199,7 @@ export function SidebarMenu() {
             {clients?.map((c) => (
               <button
                 key={c.id}
-                onClick={() => switchClient(c.id)}
+                onClick={() => switchClientGlobal(c.id)}
                 className={`block w-full text-left px-3 py-1 rounded text-sm ${
                   me?.actingAsClientId === c.id
                     ? "bg-blue-50 text-blue-700"
