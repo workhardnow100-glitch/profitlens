@@ -985,49 +985,52 @@ export default function TaxHub() {
                   </>
                 ) : tax.key === "cis" ? (
                   <>
-                    {/* ✅ CIS cockpit summary + help + periods */}
-                    {/* CIS MTD connection status */}
-                    <div className="mt-4 p-3 rounded bg-slate-900 text-white text-sm flex justify-between items-start">
-                      <div>
-                        <p className="font-semibold">CIS MTD connection</p>
-                        {cisMtdLoading && (
-                          <p className="text-slate-300">
-                            Checking CIS MTD link with HMRC…
-                          </p>
-                        )}
-                        {!cisMtdLoading && cisMtdError && (
-                          <p className="text-red-300">
-                            {cisMtdError}
-                          </p>
-                        )}
-                        {!cisMtdLoading && !cisMtdError && cisMtdStatus && (
-                          <p
-                            className={
-                              cisMtdStatus.isConnected
-                                ? "text-green-300"
-                                : "text-yellow-300"
-                            }
-                          >
-                            {cisMtdStatus.isConnected
-                              ? "CIS MTD is connected and responding."
-                              : "CIS MTD is not connected. Reconnect via the HMRC link above."}
-                          </p>
-                        )}
-                        {!cisMtdLoading &&
-                          !cisMtdError &&
-                          !cisMtdStatus && (
-                            <p className="text-slate-300">
-                              CIS MTD status not available yet.
-                            </p>
-                          )}
-                      </div>
-                      <button
-                        className="ml-4 bg-slate-700 hover:bg-slate-600 text-xs px-3 py-1 rounded"
-                        onClick={fetchCisMtdStatus}
-                      >
-                        Refresh CIS MTD status
-                      </button>
-                    </div>
+                   {/* CIS MTD connection status */}
+<div className="mt-4 p-3 rounded bg-gray-50 border border-gray-300 text-sm flex justify-between items-start">
+  <div>
+    <p className="font-semibold text-blue-700">CIS MTD connection</p>
+
+    {cisMtdLoading && (
+      <p className="text-gray-700">
+        Checking CIS MTD link with HMRC…
+      </p>
+    )}
+
+    {!cisMtdLoading && cisMtdError && (
+      <p className="text-red-600">
+        {cisMtdError}
+      </p>
+    )}
+
+    {!cisMtdLoading && !cisMtdError && cisMtdStatus && (
+      <p
+        className={
+          cisMtdStatus.isConnected
+            ? "text-green-700"
+            : "text-yellow-700"
+        }
+      >
+        {cisMtdStatus.isConnected
+          ? "CIS MTD is connected and responding."
+          : "CIS MTD is not connected. Reconnect via the HMRC link above."}
+      </p>
+    )}
+
+    {!cisMtdLoading && !cisMtdError && !cisMtdStatus && (
+      <p className="text-gray-700">
+        CIS MTD status not available yet.
+      </p>
+    )}
+  </div>
+
+  <button
+    className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded"
+    onClick={fetchCisMtdStatus}
+  >
+    Refresh
+  </button>
+</div>
+
 
                     {/* Overdue CIS warning */}
                     {overdueCisCount > 0 && (
