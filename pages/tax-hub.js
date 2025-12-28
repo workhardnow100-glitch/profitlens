@@ -52,6 +52,24 @@ export default function TaxHub() {
   const [cisMtdLoading, setCisMtdLoading] = useState(false);
   const [cisMtdError, setCisMtdError] = useState(null);
 
+  // ✅ CT MTD cockpit state
+  const [ctStatus, setCtStatus] = useState(null);
+  const [ctObligations, setCtObligations] = useState([]);
+  const [ctReturns, setCtReturns] = useState([]);
+  const [ctLiabilities, setCtLiabilities] = useState([]);
+  const [ctPaymentsMtd, setCtPaymentsMtd] = useState([]);
+  const [ctLoading, setCtLoading] = useState(false);
+  const [ctError, setCtError] = useState(null);
+
+  // ✅ SA MTD cockpit state
+  const [saStatus, setSaStatus] = useState(null);
+  const [saObligations, setSaObligations] = useState([]);
+  const [saReturns, setSaReturns] = useState([]);
+  const [saEops, setSaEops] = useState([]);
+  const [saFinal, setSaFinal] = useState([]);
+  const [saLoading, setSaLoading] = useState(false);
+  const [saError, setSaError] = useState(null);
+
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) router.replace("/login");
@@ -422,7 +440,6 @@ export default function TaxHub() {
                             id="vatPaymentReference"
                           />
                         </div>
-
                         <button
                           className="mt-3 bg-blue-600 text-white px-4 py-2 rounded"
                           onClick={async () => {
@@ -547,6 +564,194 @@ export default function TaxHub() {
                       </span>
                     </p>
 
+                    {/* ✅ CT MTD cockpit inside CT card */}
+                    <div className="mt-4 p-3 rounded bg-gray-50 border border-gray-300 text-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-semibold text-blue-700">
+                            CT MTD connection
+                          </p>
+
+                          {ctLoading && (
+                            <p className="text-gray-700">
+                              Checking CT MTD link with HMRC…
+                            </p>
+                          )}
+
+                          {!ctLoading && ctError && (
+                            <p className="text-red-600">{ctError}</p>
+                          )}
+
+                          {!ctLoading && !ctError && ctStatus && (
+                            <p
+                              className={
+                                ctStatus.isConnected
+                                  ? "text-green-700"
+                                  : "text-yellow-700"
+                              }
+                            >
+                              {ctStatus.isConnected
+                                ? "CT MTD is connected and responding."
+                                : "CT MTD is not connected. Reconnect via the HMRC link above."}
+                            </p>
+                          )}
+
+                          {!ctLoading && !ctError && !ctStatus && (
+                            <p className="text-gray-700">
+                              CT MTD status not available yet.
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded"
+                          onClick={async () => {
+                            setCtLoading(true);
+                            setCtError(null);
+
+                            try {
+                              const [s, o, r, l, p] = await Promise.all([
+                                fetch("/api/mtd/ct/status", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/ct/obligations", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/ct/returns", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/ct/liabilities", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/ct/payments", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                              ]);
+
+                              const statusData = await s.json();
+                              const obligationsData = await o.json();
+                              const returnsData = await r.json();
+                              const liabilitiesData = await l.json();
+                              const paymentsData = await p.json();
+
+                              setCtStatus(statusData.status || statusData);
+                              setCtObligations(
+                                obligationsData.obligations || []
+                              );
+                              setCtReturns(returnsData.returns || []);
+                              setCtLiabilities(
+                                liabilitiesData.liabilities || []
+                              );
+                              setCtPaymentsMtd(paymentsData.payments || []);
+                            } catch (err) {
+                              console.error("CT MTD error:", err);
+                              setCtError(err.message);
+                            } finally {
+                              setCtLoading(false);
+                            }
+                          }}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      {/* CT obligations */}
+                      {ctObligations.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            CT Obligations
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {ctObligations.map((o, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {o.start} → {o.end} • Due {o.due} • {o.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* CT returns */}
+                      {ctReturns.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            CT Returns
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {ctReturns.map((r, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {r.start} → {r.end} • {r.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* CT liabilities */}
+                      {ctLiabilities.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            CT Liabilities
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {ctLiabilities.map((l, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {l.taxYear} • £{l.amount} • Due {l.due}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* CT payments */}
+                      {ctPaymentsMtd.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            CT Payments
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {ctPaymentsMtd.map((p, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {p.date} • £{p.amount} • {p.reference}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="mt-4 flex gap-2">
                       <button
                         onClick={() => router.push("/corp")}
@@ -614,6 +819,190 @@ export default function TaxHub() {
                         {periods.saLocked ? "Locked" : "Open"}
                       </span>
                     </p>
+
+                    {/* ✅ SA MTD cockpit inside SA card */}
+                    <div className="mt-4 p-3 rounded bg-gray-50 border border-gray-300 text-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-semibold text-blue-700">
+                            SA MTD connection
+                          </p>
+
+                          {saLoading && (
+                            <p className="text-gray-700">
+                              Checking SA MTD link with HMRC…
+                            </p>
+                          )}
+
+                          {!saLoading && saError && (
+                            <p className="text-red-600">{saError}</p>
+                          )}
+
+                          {!saLoading && !saError && saStatus && (
+                            <p
+                              className={
+                                saStatus.isConnected
+                                  ? "text-green-700"
+                                  : "text-yellow-700"
+                              }
+                            >
+                              {saStatus.isConnected
+                                ? "SA MTD is connected and responding."
+                                : "SA MTD is not connected. Reconnect via the HMRC link above."}
+                            </p>
+                          )}
+
+                          {!saLoading && !saError && !saStatus && (
+                            <p className="text-gray-700">
+                              SA MTD status not available yet.
+                            </p>
+                          )}
+                        </div>
+
+                        <button
+                          className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded"
+                          onClick={async () => {
+                            setSaLoading(true);
+                            setSaError(null);
+
+                            try {
+                              const [s, o, r, e, f] = await Promise.all([
+                                fetch("/api/mtd/sa/status", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/sa/obligations", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/sa/returns", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/sa/eops", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                                fetch("/api/mtd/sa/final", {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({}),
+                                }),
+                              ]);
+
+                              const statusData = await s.json();
+                              const obligationsData = await o.json();
+                              const returnsData = await r.json();
+                              const eopsData = await e.json();
+                              const finalData = await f.json();
+
+                              setSaStatus(statusData.status || statusData);
+                              setSaObligations(
+                                obligationsData.obligations || []
+                              );
+                              setSaReturns(returnsData.returns || []);
+                              setSaEops(eopsData.eops || []);
+                              setSaFinal(finalData.final || []);
+                            } catch (err) {
+                              console.error("SA MTD error:", err);
+                              setSaError(err.message);
+                            } finally {
+                              setSaLoading(false);
+                            }
+                          }}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+
+                      {/* SA obligations */}
+                      {saObligations.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            SA Obligations
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {saObligations.map((o, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {o.start} → {o.end} • Due {o.due} • {o.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* SA returns */}
+                      {saReturns.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            SA Returns
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {saReturns.map((r, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {r.start} → {r.end} • {r.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* SA EOPS */}
+                      {saEops.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">SA EOPS</p>
+                          <ul className="text-xs space-y-1">
+                            {saEops.map((e, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {e.period} • {e.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* SA Final Declaration */}
+                      {saFinal.length > 0 && (
+                        <div>
+                          <p className="font-semibold mb-1 text-xs">
+                            SA Final Declaration
+                          </p>
+                          <ul className="text-xs space-y-1">
+                            {saFinal.map((f, i) => (
+                              <li
+                                key={i}
+                                className="border p-2 rounded bg-white"
+                              >
+                                {f.taxYear} • {f.status}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
 
                     <div className="mt-4 flex gap-2">
                       <button
@@ -985,52 +1374,51 @@ export default function TaxHub() {
                   </>
                 ) : tax.key === "cis" ? (
                   <>
-                   {/* CIS MTD connection status */}
-<div className="mt-4 p-3 rounded bg-gray-50 border border-gray-300 text-sm flex justify-between items-start">
-  <div>
-    <p className="font-semibold text-blue-700">CIS MTD connection</p>
+                    {/* CIS MTD connection status */}
+                    <div className="mt-4 p-3 rounded bg-gray-50 border border-gray-300 text-sm flex justify-between items-start">
+                      <div>
+                        <p className="font-semibold text-blue-700">
+                          CIS MTD connection
+                        </p>
 
-    {cisMtdLoading && (
-      <p className="text-gray-700">
-        Checking CIS MTD link with HMRC…
-      </p>
-    )}
+                        {cisMtdLoading && (
+                          <p className="text-gray-700">
+                            Checking CIS MTD link with HMRC…
+                          </p>
+                        )}
 
-    {!cisMtdLoading && cisMtdError && (
-      <p className="text-red-600">
-        {cisMtdError}
-      </p>
-    )}
+                        {!cisMtdLoading && cisMtdError && (
+                          <p className="text-red-600">{cisMtdError}</p>
+                        )}
 
-    {!cisMtdLoading && !cisMtdError && cisMtdStatus && (
-      <p
-        className={
-          cisMtdStatus.isConnected
-            ? "text-green-700"
-            : "text-yellow-700"
-        }
-      >
-        {cisMtdStatus.isConnected
-          ? "CIS MTD is connected and responding."
-          : "CIS MTD is not connected. Reconnect via the HMRC link above."}
-      </p>
-    )}
+                        {!cisMtdLoading && !cisMtdError && cisMtdStatus && (
+                          <p
+                            className={
+                              cisMtdStatus.isConnected
+                                ? "text-green-700"
+                                : "text-yellow-700"
+                            }
+                          >
+                            {cisMtdStatus.isConnected
+                              ? "CIS MTD is connected and responding."
+                              : "CIS MTD is not connected. Reconnect via the HMRC link above."}
+                          </p>
+                        )}
 
-    {!cisMtdLoading && !cisMtdError && !cisMtdStatus && (
-      <p className="text-gray-700">
-        CIS MTD status not available yet.
-      </p>
-    )}
-  </div>
+                        {!cisMtdLoading && !cisMtdError && !cisMtdStatus && (
+                          <p className="text-gray-700">
+                            CIS MTD status not available yet.
+                          </p>
+                        )}
+                      </div>
 
-  <button
-    className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded"
-    onClick={fetchCisMtdStatus}
-  >
-    Refresh
-  </button>
-</div>
-
+                      <button
+                        className="ml-4 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded"
+                        onClick={fetchCisMtdStatus}
+                      >
+                        Refresh
+                      </button>
+                    </div>
 
                     {/* Overdue CIS warning */}
                     {overdueCisCount > 0 && (
@@ -1186,7 +1574,6 @@ export default function TaxHub() {
                                     >
                                       View
                                     </button>
-
                                     <button
                                       className={`px-2 py-1 rounded text-white ${
                                         canSubmit
@@ -1335,7 +1722,7 @@ export default function TaxHub() {
                     )}
                   </>
                 ) : (
-                  // Generic period list for Corporation Tax / SA
+                  // Generic period list for Corporation Tax / SA (fallback)
                   (periods[tax.key] || []).length > 0 ? (
                     <ul className="space-y-2 mt-4">
                       {(periods[tax.key] || []).map((p) => (
