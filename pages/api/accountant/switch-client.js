@@ -2,23 +2,25 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { unstable_update } from "next-auth"; // ⭐ REQUIRED
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
 
   const session = await getServerSession(req, res, authOptions);
-  if (!session?.user)
+  if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const role = (session.user.role || "").toUpperCase();
   const accountantEmail = session.user.email.toLowerCase();
   const userId = session.user.id;
 
   const { clientId } = req.body;
-  if (!clientId)
+  if (!clientId) {
     return res.status(400).json({ error: "Missing clientId" });
+  }
 
   const allowedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
   if (!allowedRoles.includes(role)) {
@@ -57,20 +59,18 @@ export default async function handler(req, res) {
     },
   ]);
 
-  // ⭐ Update DB (optional but fine)
-  await supabaseAdmin
+  // ⭐ Update DB — this is what the session callback reads
+  const { error } = await supabaseAdmin
     .from("app_users")
     .update({ acting_client_id: clientId })
     .eq("id", userId);
 
-  // ⭐ CRITICAL: Update NextAuth session
-  await unstable_update({
-    user: {
-      ...session.user,
-      actingAsClientId: clientId,
-    },
-  });
+  if (error) {
+    console.error("Failed to update acting client:", error);
+    return res.status(500).json({ error: "Failed to update acting client" });
+  }
 
+  // ⭐ No unstable_update — session refresh happens on the client
   return res.status(200).json({
     success: true,
     actingAsClientId: clientId,
