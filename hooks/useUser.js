@@ -13,7 +13,7 @@ export function useUser() {
         email: session.user.email,
         role: session.user.role,
         clientId: session.user.actingAsClientId ?? session.user.clientId,
-        actingAsClientId: session.user.actingAsClientId,   // ⭐ LOG IT
+        actingAsClientId: session.user.actingAsClientId,
         subscriptionStatus: session.user.subscriptionStatus,
       });
     } else {
@@ -26,12 +26,13 @@ export function useUser() {
     email: session?.user?.email ?? "unknown@example.com",
     role: session?.user?.role?.toLowerCase() ?? "user",
     clientId: session?.user?.clientId ?? null,
-    actingAsClientId: session?.user?.actingAsClientId ?? null,  // ⭐ FIXED
+    actingAsClientId: session?.user?.actingAsClientId ?? null,
     subscriptionStatus: session?.user?.subscriptionStatus ?? "incomplete",
   };
 
   return {
     user,
+    status, // ⭐ FIX: return status so pages don't freeze
     isLoading: status === "loading",
     isAuthenticated: !!session?.user,
     isPremium: ["basic", "pro"].includes(user.subscriptionStatus),
@@ -39,4 +40,3 @@ export function useUser() {
     isAdmin: user.role === "admin",
   };
 }
-
