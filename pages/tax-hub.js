@@ -79,24 +79,45 @@ export default function TaxHub() {
     }
   }, [session, status]);
 
-  useEffect(() => {
-    if (router.query.authorized) {
-      fetchPeriods();
-      fetchCisMtdStatus();
-      router.replace("/tax-hub", undefined, { shallow: true });
-    }
-  }, [router.query]);
+ // Re-run after HMRC OAuth redirect
+useEffect(() => {
+  if (router.query.authorized && status === "authenticated" && session?.user) {
+    fetchPeriods();
+    fetchCisMtdStatus();
+    router.replace("/tax-hub", undefined, { shallow: true });
+  }
+}, [router.query, status, session]);
 
-  async function fetchPeriods() {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/tax-hub/periods", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}), // ⭐ FIXED — no clientId sent
-      });
+// Main load effect — only run when session is fully ready
+useEffect(() => {
+  if (status !== "authenticated") return;
+  if (!session?.user) return;
 
-      const data = await res.json();
+  // For accountants, wait until actingAsClientId is available
+  if (
+    session.user.role === "accountant" &&
+    !session.user.actingAsClientId
+  ) {
+    console.log("⏳ Waiting for actingAsClientId before loading Tax Hub...");
+    return;
+  }
+
+  fetchPeriods();
+  fetchCisMtdStatus();
+}, [status, session]);
+
+async function fetchPeriods() {
+  setLoading(true);
+  try {
+    const res = await fetch("/api/tax-hub/periods", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}), // clientId resolved server-side from session
+    });
+
+    const data = await res.json();
+    // ... rest of your existing logic
+
 
       setPeriods({
         vat: data.vat || [],
