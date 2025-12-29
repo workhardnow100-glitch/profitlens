@@ -2,7 +2,6 @@
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 
 const HMRC_TOKEN_URL = "https://test-api.service.hmrc.gov.uk/oauth/token";
-const HMRC_USERINFO_URL = "https://test-api.service.hmrc.gov.uk/oauth/token/userinfo";
 
 export default async function handler(req, res) {
   const { code, state, error, error_description } = req.query;
@@ -18,7 +17,9 @@ export default async function handler(req, res) {
 
   let decodedState;
   try {
-    decodedState = JSON.parse(Buffer.from(state, "base64url").toString("utf8"));
+    decodedState = JSON.parse(
+      Buffer.from(state, "base64url").toString("utf8")
+    );
   } catch (e) {
     console.error("Invalid state:", e);
     return res.status(400).send("Invalid state.");
@@ -39,10 +40,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1️⃣ Exchange code for tokens
+    // Exchange code for tokens
     const tokenResponse = await fetch(HMRC_TOKEN_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
       body:
         `grant_type=authorization_code` +
         `&code=${encodeURIComponent(code)}` +
@@ -67,26 +70,7 @@ export default async function handler(req, res) {
 
     const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
 
-    // 2️⃣ Fetch VRN from HMRC userinfo endpoint
-    const userinfoRes = await fetch(HMRC_USERINFO_URL, {
-      headers: { Authorization: `Bearer ${access_token}` },
-    });
-
-    if (!userinfoRes.ok) {
-      const text = await userinfoRes.text();
-      console.error("Failed to fetch HMRC VRN:", text);
-      return res.status(500).send("Failed to fetch HMRC VRN.");
-    }
-
-    const userinfo = await userinfoRes.json();
-    const vrn = userinfo.vrn;
-
-    if (!vrn) {
-      console.error("No VRN returned from HMRC userinfo:", userinfo);
-      return res.status(500).send("No VRN returned from HMRC.");
-    }
-
-    // 3️⃣ Save tokens + VRN
+    // Save tokens for this client
     const { error: upsertError } = await supabaseAdmin
       .from("hmrc_tokens")
       .upsert(
@@ -95,7 +79,6 @@ export default async function handler(req, res) {
           access_token,
           refresh_token,
           expires_at: expiresAt,
-          vrn,
         },
         { onConflict: "client_id" }
       );
@@ -105,8 +88,8 @@ export default async function handler(req, res) {
       return res.status(500).send("Failed to save HMRC tokens.");
     }
 
-    // 4️⃣ Redirect back to VAT page
-    return res.redirect(`/vat?clientId=${clientId}&hmrc=connected`);
+    // Redirect back to VAT page
+    return res.redirect(`/vat?clientId=${encodeURIComponent(clientId)}&hmrc=connected`);
 
   } catch (err) {
     console.error("HMRC callback error:", err);
