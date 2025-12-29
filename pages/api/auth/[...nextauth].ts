@@ -229,7 +229,7 @@ export const authOptions: NextAuthOptions = {
 
         const { data: user, error } = await supabaseAdmin
           .from("app_users")
-          .select("id, email, name, role, client_id")
+          .select("id, email, name, role, client_id, acting_client_id")
           .eq("email", email)
           .single();
 
@@ -244,12 +244,15 @@ export const authOptions: NextAuthOptions = {
           },
         ]);
 
-        return {
-          id: String(user.id),
-          email: user.email,
-          name: user.name ?? null,
-          role: user.role ?? "USER",
-        };
+     return {
+  id: String(user.id),
+  email: user.email,
+  name: user.name ?? null,
+  role: user.role ?? "USER",
+  client_id: user.client_id ?? null,            // ⭐ add this
+  acting_client_id: user.acting_client_id ?? null, // ⭐ add this
+};
+
       },
     }),
   ],
