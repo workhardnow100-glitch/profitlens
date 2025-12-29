@@ -254,8 +254,9 @@ export default function TaxHub() {
             </p>
             <a
               href={`/api/hmrc/oauth/start?clientId=${encodeURIComponent(
-                session.user.clientId
-              )}`}
+  session.user.actingAsClientId ?? session.user.clientId
+)}`}
+
               className="bg-orange-600 text-white px-4 py-2 rounded"
             >
               Connect to HMRC
