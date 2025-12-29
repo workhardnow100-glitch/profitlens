@@ -208,17 +208,24 @@ function buildCorpPeriods(corpTxs) {
 // MAIN HANDLER
 // ------------------------------
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
   const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  // ⭐ DEBUG SESSION
-  console.log("🧪 Tax Hub session.user:", JSON.stringify(session.user, null, 2));
+  // ⭐ THIS is the correct place
+  console.log("🧪 TaxHub API session.user:", JSON.stringify(session?.user, null, 2));
+
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
-  if (!(isFounder || isSubscribedOrTrial)) return res.status(403).json({ error: "Upgrade required" });
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
 
   let clientId = null;
 
@@ -227,6 +234,7 @@ export default async function handler(req, res) {
   } else {
     clientId = session.user.clientId;
   }
+
 
   if (!clientId) {
     console.log("🧪 Tax Hub resolved clientId is NULL. Role:", session.user.role);
