@@ -25,7 +25,7 @@ export default function SAHistory() {
       const res = await fetch("/api/sa/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.clientId }),
+        body: JSON.stringify({ clientId: session.user.actingAsClientId ?? session.user.clientId }),
       });
 
       const data = await res.json();
@@ -104,3 +104,4 @@ export default function SAHistory() {
     </ResponsiveLayout>
   );
 }
+

@@ -43,7 +43,7 @@ export default function Upload() {
         setSessionUser({
           id: session.user.id,
           email: session.user.email,
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           role: session.user.role,
           subscriptionStatus: session.user.subscriptionStatus,
         });
@@ -153,3 +153,4 @@ export default function Upload() {
     </ResponsiveLayout>
   );
 }
+

@@ -77,7 +77,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -90,7 +90,7 @@ export default function SAPage() {
       const payRes = await fetch("/api/sa/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.clientId }),
+        body: JSON.stringify({ clientId: session.user.actingAsClientId ?? session.user.clientId }),
       });
 
       const payData = await payRes.json();
@@ -101,7 +101,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -131,7 +131,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -167,7 +167,7 @@ export default function SAPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        clientId: session.user.clientId,
+        clientId: session.user.actingAsClientId ?? session.user.clientId,
         paymentDate: date,
         amount,
         direction,
@@ -655,3 +655,4 @@ export default function SAPage() {
     </ResponsiveLayout>
   );
 }
+

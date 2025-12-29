@@ -282,7 +282,7 @@ export default function TaxHub() {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            clientId: session.user.clientId,
+                            clientId: session.user.actingAsClientId ?? session.user.clientId,
                             stagger: newStagger,
                           }),
                         });
@@ -465,7 +465,7 @@ export default function TaxHub() {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
-                                clientId: session.user.clientId,
+                                clientId: session.user.actingAsClientId ?? session.user.clientId,
                                 paymentDate,
                                 amount,
                                 direction,
@@ -1101,7 +1101,7 @@ export default function TaxHub() {
                                                 "application/json",
                                             },
                                             body: JSON.stringify({
-                                              clientId: session.user.clientId,
+                                              clientId: session.user.actingAsClientId ?? session.user.clientId,
                                               periodStart: p.periodStart,
                                               periodEnd: p.periodEnd,
                                             }),
@@ -1121,7 +1121,7 @@ export default function TaxHub() {
                                           },
                                           body: JSON.stringify({
                                             type: "vat",
-                                            clientId: session.user.clientId,
+                                            clientId: session.user.actingAsClientId ?? session.user.clientId,
                                             periodStart: p.periodStart,
                                             periodEnd: p.periodEnd,
 
@@ -1180,8 +1180,7 @@ export default function TaxHub() {
                                                   "application/json",
                                               },
                                               body: JSON.stringify({
-                                                clientId:
-                                                  session.user.clientId,
+                                                clientId: session.user.actingAsClientId ?? session.user.clientId,
                                                 periodStart: p.periodStart,
                                                 periodEnd: p.periodEnd,
                                               }),
@@ -1600,8 +1599,7 @@ export default function TaxHub() {
                                                   "application/json",
                                               },
                                               body: JSON.stringify({
-                                                clientId:
-                                                  session.user.clientId,
+                                                clientId: session.user.actingAsClientId ?? session.user.clientId,
                                                 periodStart: p.periodStart,
                                                 periodEnd: p.periodEnd,
                                               }),
@@ -1776,3 +1774,4 @@ export default function TaxHub() {
     </ResponsiveLayout>
   );
 }
+

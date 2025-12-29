@@ -26,7 +26,7 @@ export default function CorpHistory() {
       const res = await fetch("/api/corp/history", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.clientId }),
+        body: JSON.stringify({ clientId: session.user.actingAsClientId ?? session.user.clientId }),
       });
 
       const data = await res.json();
@@ -144,3 +144,4 @@ export default function CorpHistory() {
     </ResponsiveLayout>
   );
 }
+

@@ -75,7 +75,7 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: start,
           periodEnd: end,
         }),
@@ -107,7 +107,7 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: from,
           periodEnd: to,
         }),
@@ -138,7 +138,7 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           paymentDate,
           amount: paymentAmount,
           direction: paymentDirection,
@@ -655,3 +655,4 @@ export default function CorpPage() {
     </ResponsiveLayout>
   );
 }
+

@@ -64,7 +64,7 @@ export default function CISPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart,
           periodEnd,
         }),
@@ -95,7 +95,7 @@ export default function CISPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
           periodStart: from,
           periodEnd: to,
         }),
@@ -619,3 +619,4 @@ export default function CISPage() {
     </ResponsiveLayout>
   );
 }
+
