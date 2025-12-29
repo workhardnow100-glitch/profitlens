@@ -7,7 +7,7 @@ import { CT_MAP } from "../../../lib/constants/ctMap";
 import vatSummaryHandler from "../vat/summary";
 
 // ------------------------------
-// CORPORATION TAX CALCULATOR
+// CORPORATION TAX CALCULATORs
 // ------------------------------
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
