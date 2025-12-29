@@ -12,7 +12,7 @@ export function useUser() {
         id: session.user.id,
         email: session.user.email,
         role: session.user.role,
-        clientId: session.user.clientId,
+        clientId: session.user.actingAsClientId ?? session.user.clientId,
         actingAsClientId: session.user.actingAsClientId,   // ⭐ LOG IT
         subscriptionStatus: session.user.subscriptionStatus,
       });
