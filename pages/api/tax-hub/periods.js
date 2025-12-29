@@ -214,7 +214,6 @@ export default async function handler(req, res) {
 
   const session = await getServerSession(req, res, authOptions);
 
-  // ⭐ THIS is the correct place
   console.log("🧪 TaxHub API session.user:", JSON.stringify(session?.user, null, 2));
 
   if (!session?.user) {
@@ -222,24 +221,30 @@ export default async function handler(req, res) {
   }
 
   const isFounder = session.user.role === "admin";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(session.user.subscriptionStatus);
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
   if (!(isFounder || isSubscribedOrTrial)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
+  // ⭐ NEW: accept clientId from body as a fallback, especially for accountants
   let clientId = null;
+  const bodyClientId = req.body?.clientId || req.body?.client_id || null;
 
   if (session.user.role === "accountant") {
-    clientId = session.user.actingAsClientId;
+    // Prefer session actingAsClientId if present
+    clientId = session.user.actingAsClientId || bodyClientId;
   } else {
-    clientId = session.user.clientId;
+    // Non-accountant: prefer session clientId, but allow explicit body override if provided
+    clientId = session.user.clientId || bodyClientId;
   }
-
 
   if (!clientId) {
     console.log("🧪 Tax Hub resolved clientId is NULL. Role:", session.user.role);
     console.log("🧪 actingAsClientId:", session.user.actingAsClientId);
     console.log("🧪 accessibleClients:", session.user.accessibleClients);
+    console.log("🧪 bodyClientId:", bodyClientId);
     return res.status(400).json({ error: "No client selected" });
   }
 
@@ -248,16 +253,18 @@ export default async function handler(req, res) {
     // AUDIT (ACCOUNTANT ONLY)
     // ------------------------------
     if (session.user.role === "accountant") {
-      await supabaseAdmin.from("audit").insert([{
-        id: crypto.randomUUID(),
-        client_id: clientId,
-        actor_email: session.user.email,
-        action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
-        details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
-        timestamp: new Date().toISOString(),
-        user: null,
-        user_id: null,
-      }]);
+      await supabaseAdmin.from("audit").insert([
+        {
+          id: crypto.randomUUID(),
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_TAX_HUB_PERIODS",
+          details: "Viewed VAT/CIS/CT/SA periods in Tax Hub",
+          timestamp: new Date().toISOString(),
+          user: null,
+          user_id: null,
+        },
+      ]);
     }
 
     // ------------------------------
@@ -304,7 +311,8 @@ export default async function handler(req, res) {
       if (c.includes("vat")) grouped.vat.push(tx);
       else if (c.includes("cis")) grouped.cis.push(tx);
       else if (c.includes("corporation tax")) grouped.corp.push(tx);
-      else if (c.includes("self assessment") || c.includes("sa payment")) grouped.sa.push(tx);
+      else if (c.includes("self assessment") || c.includes("sa payment"))
+        grouped.sa.push(tx);
     });
 
     // ------------------------------
@@ -314,7 +322,8 @@ export default async function handler(req, res) {
     fiveYearsAgo.setFullYear(fiveYearsAgo.getFullYear() - 5);
 
     const cisSource = (transactions || []).filter((tx) => {
-      if (!tx.cis_type || tx.cis_amount === null || tx.cis_amount === undefined) return false;
+      if (!tx.cis_type || tx.cis_amount === null || tx.cis_amount === undefined)
+        return false;
       if (!tx.date) return false;
       const d = new Date(tx.date);
       return d >= fiveYearsAgo;
@@ -367,7 +376,8 @@ export default async function handler(req, res) {
 
       const profit = income - allowable;
       const adjustedProfit = profit + disallowable;
-      const { tax: corpTaxDue, rate: effectiveRate } = calculateCorporationTax(adjustedProfit);
+      const { tax: corpTaxDue, rate: effectiveRate } =
+        calculateCorporationTax(adjustedProfit);
 
       corpPeriods.push({
         periodLabel: `${periodStart} → ${periodEnd}`,
@@ -448,14 +458,14 @@ export default async function handler(req, res) {
       const basicLimit = 50270 - personalAllowance;
       if (remaining > 0) {
         const basicTaxable = Math.min(remaining, basicLimit);
-        taxLiability += basicTaxable * 0.20;
+        taxLiability += basicTaxable * 0.2;
         remaining -= basicTaxable;
       }
 
       const higherLimit = 125140 - 50270;
       if (remaining > 0) {
         const higherTaxable = Math.min(remaining, higherLimit);
-        taxLiability += higherTaxable * 0.40;
+        taxLiability += higherTaxable * 0.4;
         remaining -= higherTaxable;
       }
 
@@ -463,7 +473,7 @@ export default async function handler(req, res) {
         taxLiability += remaining * 0.45;
       }
 
-           saPeriods.push({
+      saPeriods.push({
         periodLabel: `${periodStart} → ${periodEnd}`,
         periodStart,
         periodEnd,
@@ -478,6 +488,7 @@ export default async function handler(req, res) {
         taxLiability,
       });
     }
+
     // ------------------------------
     // VAT SETTINGS + PERIODS
     // ------------------------------
@@ -490,7 +501,6 @@ export default async function handler(req, res) {
     const stagger = vatSetting?.stagger || 1;
     const rawVatPeriods = generateVatPeriods(stagger);
 
-    // Fetch all MTD submissions for this client for all periods in view
     const { data: mtdRows } = await supabaseAdmin
       .from("vat_mtd_submissions")
       .select("*")
@@ -498,14 +508,12 @@ export default async function handler(req, res) {
       .in("period_start", rawVatPeriods.map((p) => p.periodStart))
       .in("period_end", rawVatPeriods.map((p) => p.periodEnd));
 
-    // Build lookup: "start_end" → submission row
     const mtdMap = {};
     (mtdRows || []).forEach((row) => {
       const key = `${row.period_start}_${row.period_end}`;
       mtdMap[key] = row;
     });
 
-    // VAT summary aggregation
     let totalVatOwed = 0,
       totalVatOutput = 0,
       totalVatInput = 0;
@@ -513,7 +521,6 @@ export default async function handler(req, res) {
     const vatPeriods = [];
 
     for (const p of rawVatPeriods) {
-      // Call VAT summary API internally
       const mockReq = {
         method: "POST",
         headers: { "x-internal-secret": process.env.INTERNAL_SECRET },
@@ -545,16 +552,14 @@ export default async function handler(req, res) {
       const hasActivity =
         Math.abs(box1) > 0 || Math.abs(box4) > 0 || Math.abs(box5) !== 0;
 
-      // Base status
-      let status = "Draft";
-      if (submitted) status = "Submitted";
-      else if (endDate < now && hasActivity) status = "Overdue";
-      else if (hasActivity) status = "Ready to Submit";
-      else if (endDate < now && !hasActivity) status = "Draft (No Activity)";
+      let statusText = "Draft";
+      if (submitted) statusText = "Submitted";
+      else if (endDate < now && hasActivity) statusText = "Overdue";
+      else if (hasActivity) statusText = "Ready to Submit";
+      else if (endDate < now && !hasActivity) statusText = "Draft (No Activity)";
 
       let overdue = !submitted && endDate < now && hasActivity;
 
-      // 🔥 MTD submission merge
       const key = `${p.periodStart}_${p.periodEnd}`;
       const mtd = mtdMap[key];
 
@@ -568,7 +573,7 @@ export default async function handler(req, res) {
         if (mtd.status === "submitted") {
           submitted = true;
           locked = true;
-          status = "Submitted (MTD)";
+          statusText = "Submitted (MTD)";
           overdue = false;
         }
       }
@@ -585,11 +590,11 @@ export default async function handler(req, res) {
         outputVat: box1,
         inputVat: box4,
         netVat: box5,
-        status,
+        status: statusText,
         overdue,
       });
     }
-    // VAT payments + balances
+
     const { data: vatPayments, error: vatPaymentsError } = await supabaseAdmin
       .from("vat_payments")
       .select("*")
@@ -603,7 +608,6 @@ export default async function handler(req, res) {
     );
     const vatBalance = totalVatOwed - totalVatPaid;
 
-    // CT payments + balances
     const { data: ctPayments } = await supabaseAdmin
       .from("ct_payments")
       .select("*")
