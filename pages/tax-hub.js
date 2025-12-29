@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
-import { useUser } from "@/hooks/useUser";
+import { useUser } from "../hooks/useUser";
 
 export default function TaxHub() {
   const { user, status } = useUser();
