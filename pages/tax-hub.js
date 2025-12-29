@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
-import { useUser } from "../hooks/useUser";
+import { useUser } from "@/hooks/useUser";
 
 export default function TaxHub() {
   const { user, status } = useUser();
@@ -97,9 +97,10 @@ export default function TaxHub() {
     if (status !== "authenticated") return;
     if (!user) return;
 
-    // For accountants, wait until actingAsClientId is available
+    // If accountant has not selected a client yet, stop loading and show message
     if (user.role === "accountant" && !user.actingAsClientId) {
-      console.log("⏳ Waiting for actingAsClientId before loading Tax Hub...");
+      console.log("⏳ Accountant logged in but no actingAsClientId set yet");
+      setLoading(false);
       return;
     }
 
@@ -289,6 +290,14 @@ export default function TaxHub() {
     <ResponsiveLayout currentPageName="Tax Hub">
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">Tax Hub</h1>
+
+        {user.role === "accountant" && !user.actingAsClientId && (
+          <div className="p-4 bg-yellow-100 border border-yellow-300 rounded">
+            <p className="text-yellow-800 font-semibold">
+              Please select a client to continue.
+            </p>
+          </div>
+        )}
 
         {needsHMRCAuth && !loading && (
           <div className="mb-4">
@@ -654,6 +663,10 @@ export default function TaxHub() {
                             setCtError(null);
 
                             const clientId = getClientId();
+                            if (!clientId) {
+                              setCtLoading(false);
+                              return;
+                            }
 
                             try {
                               const [s, o, r, l, p] = await Promise.all([
@@ -912,6 +925,10 @@ export default function TaxHub() {
                             setSaError(null);
 
                             const clientId = getClientId();
+                            if (!clientId) {
+                              setSaLoading(false);
+                              return;
+                            }
 
                             try {
                               const [s, o, r, e, f] = await Promise.all([
@@ -1140,6 +1157,12 @@ export default function TaxHub() {
                                     onClick={async () => {
                                       try {
                                         const clientId = getClientId();
+                                        if (!clientId) {
+                                          alert(
+                                            "No client selected. Please select a client first."
+                                          );
+                                          return;
+                                        }
 
                                         // 1. Fetch VAT summary (now includes clientDetails)
                                         const summaryRes = await fetch(
@@ -1222,6 +1245,12 @@ export default function TaxHub() {
 
                                         try {
                                           const clientId = getClientId();
+                                          if (!clientId) {
+                                            alert(
+                                              "No client selected. Please select a client first."
+                                            );
+                                            return;
+                                          }
 
                                           const res = await fetch(
                                             `/api/mtd/vat/validate`,
@@ -1642,6 +1671,14 @@ export default function TaxHub() {
                                           return;
 
                                         try {
+                                          const clientId = getClientId();
+                                          if (!clientId) {
+                                            alert(
+                                              "No client selected. Please select a client first."
+                                            );
+                                            return;
+                                          }
+
                                           const res = await fetch(
                                             `/api/cis/submit`,
                                             {
@@ -1651,7 +1688,7 @@ export default function TaxHub() {
                                                   "application/json",
                                               },
                                               body: JSON.stringify({
-                                                clientId: getClientId(),
+                                                clientId,
                                                 periodStart: p.periodStart,
                                                 periodEnd: p.periodEnd,
                                               }),
