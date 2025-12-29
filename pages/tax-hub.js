@@ -116,6 +116,15 @@ async function fetchPeriods() {
   console.log("📡 fetchPeriods() called");
   console.log("📡 session.user at fetch time:", session?.user);
 
+  // 🔒 Guard: skip if accountant and actingAsClientId is missing
+  if (
+    session?.user?.role === "accountant" &&
+    !session?.user?.actingAsClientId
+  ) {
+    console.warn("⏳ Skipping fetchPeriods — actingAsClientId not ready");
+    return;
+  }
+
   setLoading(true);
   try {
     const res = await fetch("/api/tax-hub/periods", {
@@ -135,7 +144,7 @@ async function fetchPeriods() {
       return;
     }
 
-    // --- existing logic ---
+    // ✅ Your existing logic
     setPeriods({
       vat: data.vat || [],
       cis: data.cis || [],
@@ -172,6 +181,7 @@ async function fetchPeriods() {
     setLoading(false);
   }
 }
+
 
 
   async function fetchCisMtdStatus() {
