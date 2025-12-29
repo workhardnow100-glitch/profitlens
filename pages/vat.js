@@ -320,7 +320,8 @@ async function saveVatNumber() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          clientId: session.user.actingAsClientId ?? session.user.clientId,
+
           periodStart: start,
           periodEnd: end,
         }),
@@ -443,7 +444,8 @@ async function saveVatNumber() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.clientId,
+          cliclientId: session.user.actingAsClientId ?? session.user.clientId,
+
           vatPeriodId: result.vatPeriodId,
           box: Number(newAdj.box),
           amount: Number(newAdj.amount),
