@@ -1,12 +1,12 @@
 // pages/tax-hub.js
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
-import { useUser } from "../hooks/useUser"; // ⭐ use your correct session source
 
 export default function TaxHub() {
-  const { user, status } = useUser(); // ⭐ replaces useSession()
+  const { data: session, status } = useSession();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -30,6 +30,7 @@ export default function TaxHub() {
     totalCtPaid: 0,
     ctBalance: 0,
 
+    // SA summary fields
     totalSaIncome: 0,
     totalSaExpenses: 0,
     saProfit: 0,
@@ -42,11 +43,16 @@ export default function TaxHub() {
   const [showOlderVatPeriods, setShowOlderVatPeriods] = useState(false);
   const [showOlderCisPeriods, setShowOlderCisPeriods] = useState(false);
 
+  // ✅ MTD VAT per-period state: submissionId + loading flags
+  // key = `${periodStart}_${periodEnd}`
   const [mtdVatState, setMtdVatState] = useState({});
+
+  // ✅ CIS MTD connection state
   const [cisMtdStatus, setCisMtdStatus] = useState(null);
   const [cisMtdLoading, setCisMtdLoading] = useState(false);
   const [cisMtdError, setCisMtdError] = useState(null);
 
+  // ✅ CT MTD cockpit state
   const [ctStatus, setCtStatus] = useState(null);
   const [ctObligations, setCtObligations] = useState([]);
   const [ctReturns, setCtReturns] = useState([]);
@@ -55,6 +61,7 @@ export default function TaxHub() {
   const [ctLoading, setCtLoading] = useState(false);
   const [ctError, setCtError] = useState(null);
 
+  // ✅ SA MTD cockpit state
   const [saStatus, setSaStatus] = useState(null);
   const [saObligations, setSaObligations] = useState([]);
   const [saReturns, setSaReturns] = useState([]);
@@ -63,58 +70,57 @@ export default function TaxHub() {
   const [saLoading, setSaLoading] = useState(false);
   const [saError, setSaError] = useState(null);
 
-  // ---------------------------------------------
-  // ⭐ INITIAL LOAD — redirect if not authenticated
-  // ---------------------------------------------
   useEffect(() => {
     if (status === "loading") return;
-    if (!user) router.replace("/login");
-  }, [status, user]);
+    if (!session?.user) router.replace("/login");
+    else {
+      fetchPeriods();
+      fetchCisMtdStatus();
+    }
+  }, [session, status]);
 
-  // ---------------------------------------------
-  // ⭐ HMRC OAuth redirect handler
-  // ---------------------------------------------
+  // Re-run after HMRC OAuth redirect
   useEffect(() => {
-    if (router.query.authorized && status === "authenticated" && user) {
+    if (router.query.authorized && status === "authenticated" && session?.user) {
       fetchPeriods();
       fetchCisMtdStatus();
       router.replace("/tax-hub", undefined, { shallow: true });
     }
-  }, [router.query, status, user]);
+  }, [router.query, status, session]);
 
-  // ---------------------------------------------
-  // ⭐ MAIN LOAD EFFECT — uses correct acting client
-  // ---------------------------------------------
+  // Main load effect — only run when session is fully ready
+  // Main load effect — only run when session is fully ready
   useEffect(() => {
-    console.log("🔍 useEffect(status, user) fired");
+    console.log("🔍 useEffect(status, session) fired");
     console.log("🔍 status:", status);
-    console.log("🔍 user:", user);
+    console.log("🔍 session.user:", session?.user);
 
     if (status !== "authenticated") return;
-    if (!user) return;
+    if (!session?.user) return;
 
-    // Wait for accountant acting client
-    if (user.role === "ACCOUNTANT" && !user.actingAsClientId) {
+    // For accountants, wait until actingAsClientId is available
+    if (
+      session.user.role === "accountant" &&
+      !session.user.actingAsClientId
+    ) {
       console.log("⏳ Waiting for actingAsClientId before loading Tax Hub...");
       return;
     }
 
-    console.log("🚀 Loading Tax Hub data for clientId:", 
-      user.role === "ACCOUNTANT" ? user.actingAsClientId : user.clientId
-    );
-
+    console.log("🚀 Loading Tax Hub data for clientId:", session.user.actingAsClientId);
     fetchPeriods();
     fetchCisMtdStatus();
-  }, [status, user]);
+  }, [status, session]);
 
-  // ---------------------------------------------
-  // ⭐ FETCH PERIODS — uses correct user object
-  // ---------------------------------------------
   async function fetchPeriods() {
     console.log("📡 fetchPeriods() called");
-    console.log("📡 user at fetch time:", user);
+    console.log("📡 session.user at fetch time:", session?.user);
 
-    if (user?.role === "ACCOUNTANT" && !user?.actingAsClientId) {
+    // 🔒 Guard: skip if accountant and actingAsClientId is missing
+    if (
+      session?.user?.role === "accountant" &&
+      !session?.user?.actingAsClientId
+    ) {
       console.warn("⏳ Skipping fetchPeriods — actingAsClientId not ready");
       return;
     }
@@ -124,10 +130,11 @@ export default function TaxHub() {
       const res = await fetch("/api/tax-hub/periods", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({}), // clientId resolved server-side from session
       });
 
       console.log("📡 API Response status:", res.status);
+
       const data = await res.json();
       console.log("📡 API Response JSON:", data);
 
@@ -137,6 +144,7 @@ export default function TaxHub() {
         return;
       }
 
+      // ✅ Your existing logic
       setPeriods({
         vat: data.vat || [],
         cis: data.cis || [],
@@ -174,12 +182,8 @@ export default function TaxHub() {
     }
   }
 
-  // ---------------------------------------------
-  // ⭐ FETCH CIS MTD STATUS — uses correct user
-  // ---------------------------------------------
   async function fetchCisMtdStatus() {
-    if (!user) return;
-
+    if (!session?.user) return;
     setCisMtdLoading(true);
     setCisMtdError(null);
 
@@ -187,11 +191,13 @@ export default function TaxHub() {
       const res = await fetch("/api/mtd/cis/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({}), // clientId resolved server-side from session
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch CIS MTD status");
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to fetch CIS MTD status");
+      }
 
       setCisMtdStatus(data);
     } catch (err) {
@@ -202,8 +208,9 @@ export default function TaxHub() {
     }
   }
 
-  if (!user) return null;
+  if (!session?.user) return null;
 
+  // ORDER: VAT → CIS → CT → SA
   const taxTypes = [
     { key: "vat", name: "VAT", path: "/vat" },
     { key: "cis", name: "CIS", path: "/cis" },
@@ -212,6 +219,7 @@ export default function TaxHub() {
   ];
 
   const needsHMRCAuth = !(periods.vat || []).some((p) => p.hmrcAuthorized);
+
 
 
   // Derived VAT period lists for cockpit
