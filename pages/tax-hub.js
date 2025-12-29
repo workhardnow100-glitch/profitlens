@@ -89,7 +89,12 @@ useEffect(() => {
 }, [router.query, status, session]);
 
 // Main load effect — only run when session is fully ready
+// Main load effect — only run when session is fully ready
 useEffect(() => {
+  console.log("🔍 useEffect(status, session) fired");
+  console.log("🔍 status:", status);
+  console.log("🔍 session.user:", session?.user);
+
   if (status !== "authenticated") return;
   if (!session?.user) return;
 
@@ -102,11 +107,15 @@ useEffect(() => {
     return;
   }
 
+  console.log("🚀 Loading Tax Hub data for clientId:", session.user.actingAsClientId);
   fetchPeriods();
   fetchCisMtdStatus();
 }, [status, session]);
 
 async function fetchPeriods() {
+  console.log("📡 fetchPeriods() called");
+  console.log("📡 session.user at fetch time:", session?.user);
+
   setLoading(true);
   try {
     const res = await fetch("/api/tax-hub/periods", {
@@ -115,71 +124,55 @@ async function fetchPeriods() {
       body: JSON.stringify({}), // clientId resolved server-side from session
     });
 
+    console.log("📡 API Response status:", res.status);
+
     const data = await res.json();
-    // ... rest of your existing logic
+    console.log("📡 API Response JSON:", data);
 
-
-      setPeriods({
-        vat: data.vat || [],
-        cis: data.cis || [],
-        corp: data.corp || [],
-        sa: data.sa || [],
-
-        vatPayments: data.vatPayments || [],
-        totalVatOwed: data.totalVatOwed || 0,
-        totalVatPaid: data.totalVatPaid || 0,
-        vatBalance: data.vatBalance || 0,
-        totalVatOutput: data.totalVatOutput || 0,
-        totalVatInput: data.totalVatInput || 0,
-        overdueVatCount: data.overdueVatCount || 0,
-
-        ctPayments: data.ctPayments || [],
-        totalCorpTaxDue: data.totalCorpTaxDue || 0,
-        totalCtPaid: data.totalCtPaid || 0,
-        ctBalance: data.ctBalance || 0,
-
-        // SA summary fields
-        totalSaIncome: data.totalSaIncome || 0,
-        totalSaExpenses: data.totalSaExpenses || 0,
-        saProfit: data.saProfit || 0,
-        saTax: data.saTax || 0,
-        saLocked: data.saLocked || false,
-        saLatestYear: data.saLatestYear || null,
-      });
-
-      if (data.vatStagger) setVatStagger(data.vatStagger);
-      // Reset MTD VAT state whenever periods are refreshed to avoid stale submissionIds
-      setMtdVatState({});
-    } catch (err) {
-      console.error("Tax Hub periods error:", err);
-      alert("Error fetching tax periods: " + err.message);
-      setPeriods({
-        vat: [],
-        cis: [],
-        corp: [],
-        sa: [],
-        vatPayments: [],
-        totalVatOwed: 0,
-        totalVatPaid: 0,
-        vatBalance: 0,
-        totalVatOutput: 0,
-        totalVatInput: 0,
-        overdueVatCount: 0,
-        ctPayments: [],
-        totalCorpTaxDue: 0,
-        totalCtPaid: 0,
-        ctBalance: 0,
-        totalSaIncome: 0,
-        totalSaExpenses: 0,
-        saProfit: 0,
-        saTax: 0,
-        saLocked: false,
-        saLatestYear: null,
-      });
-    } finally {
-      setLoading(false);
+    if (!res.ok) {
+      console.error("❌ API returned error:", data.error);
+      alert("Tax Hub API error: " + data.error);
+      return;
     }
+
+    // --- existing logic ---
+    setPeriods({
+      vat: data.vat || [],
+      cis: data.cis || [],
+      corp: data.corp || [],
+      sa: data.sa || [],
+
+      vatPayments: data.vatPayments || [],
+      totalVatOwed: data.totalVatOwed || 0,
+      totalVatPaid: data.totalVatPaid || 0,
+      vatBalance: data.vatBalance || 0,
+      totalVatOutput: data.totalVatOutput || 0,
+      totalVatInput: data.totalVatInput || 0,
+      overdueVatCount: data.overdueVatCount || 0,
+
+      ctPayments: data.ctPayments || [],
+      totalCorpTaxDue: data.totalCorpTaxDue || 0,
+      totalCtPaid: data.totalCtPaid || 0,
+      ctBalance: data.ctBalance || 0,
+
+      totalSaIncome: data.totalSaIncome || 0,
+      totalSaExpenses: data.totalSaExpenses || 0,
+      saProfit: data.saProfit || 0,
+      saTax: data.saTax || 0,
+      saLocked: data.saLocked || false,
+      saLatestYear: data.saLatestYear || null,
+    });
+
+    if (data.vatStagger) setVatStagger(data.vatStagger);
+    setMtdVatState({});
+  } catch (err) {
+    console.error("❌ Tax Hub periods error:", err);
+    alert("Error fetching tax periods: " + err.message);
+  } finally {
+    setLoading(false);
   }
+}
+
 
   async function fetchCisMtdStatus() {
     if (!session?.user) return;
