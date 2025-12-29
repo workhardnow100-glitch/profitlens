@@ -11,12 +11,30 @@ export default function CISPage() {
   const router = useRouter();
   const { user, isLoading, isAuthenticated } = useUser();
 
+  // ---------------------------------------------------------
+  // CLIENT RESOLUTION (same pattern as VAT / Tax Hub)
+  // ---------------------------------------------------------
+  const clientId = user?.actingAsClientId ?? user?.clientId;
+
+  // ---------------------------------------------------------
+  // AUTH GUARD
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthenticated) router.replace("/login");
+  }, [isLoading, isAuthenticated, router]);
+
+  if (isLoading) return null;
+  if (!isAuthenticated || !user) return null;
+
+  // ---------------------------------------------------------
+  // STATE
+  // ---------------------------------------------------------
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  // CIS MTD state
   const [cisObligations, setCisObligations] = useState([]);
   const [cisReturns, setCisReturns] = useState([]);
   const [cisDeductions, setCisDeductions] = useState([]);
@@ -34,6 +52,7 @@ export default function CISPage() {
 
   const [receiptSubmissionId, setReceiptSubmissionId] = useState("");
   const [verifyUtr, setVerifyUtr] = useState("");
+
   const [receiptError, setReceiptError] = useState(null);
   const [verifyError, setVerifyError] = useState(null);
 
@@ -41,24 +60,6 @@ export default function CISPage() {
   const [obligationsError, setObligationsError] = useState(null);
   const [returnsError, setReturnsError] = useState(null);
   const [deductionsError, setDeductionsError] = useState(null);
-
-  // ---------------------------------------------------------
-  // CLIENT RESOLUTION (same pattern as VAT / Tax Hub)
-  // ---------------------------------------------------------
-  const clientId = user?.actingAsClientId ?? user?.clientId;
-
-  // ---------------------------------------------------------
-  // AUTH GUARD
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (isLoading) return;
-    if (!isAuthenticated) {
-      router.replace("/login");
-    }
-  }, [isLoading, isAuthenticated, router]);
-
-  if (isLoading) return null;
-  if (!isAuthenticated || !user) return null;
 
   // ---------------------------------------------------------
   // AUTO-FILL PERIOD FROM TAX HUB LINK
@@ -74,7 +75,7 @@ export default function CISPage() {
       setTo(qTo);
       fetchCIS(qFrom, qTo);
     }
-  }, [router.isReady, router.query]); // clientId is stable via hook
+  }, [router.isReady, router.query]);
 
   // ---------------------------------------------------------
   // INTERNAL: Fetch CIS summary
@@ -106,9 +107,7 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to fetch CIS summary");
-      }
+      if (!res.ok) throw new Error(data?.error || "Failed to fetch CIS summary");
 
       setResult({ ...data, locked: data.locked || false });
     } catch (err) {
@@ -132,9 +131,7 @@ export default function CISPage() {
       return;
     }
 
-    if (!confirm("Submit this CIS period? This will lock the period.")) {
-      return;
-    }
+    if (!confirm("Submit this CIS period? This will lock the period.")) return;
 
     setLoading(true);
 
@@ -150,12 +147,11 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-
-      if (!res.ok || !data?.success) {
+      if (!res.ok || !data?.success)
         throw new Error(data?.error || "Error submitting CIS");
-      }
 
       alert("CIS return submitted successfully. Period locked.");
+
       setResult((prev) =>
         prev
           ? {
@@ -174,15 +170,10 @@ export default function CISPage() {
   }
 
   // ---------------------------------------------------------
-  // NEW: CIS MTD LOADERS (HMRC)
+  // CIS MTD LOADERS (HMRC)
   // ---------------------------------------------------------
-
-  // CIS MTD connection status
   async function loadCISStatus() {
-    if (!clientId) {
-      alert("No client selected.");
-      return;
-    }
+    if (!clientId) return alert("No client selected.");
 
     setLoadingStatus(true);
     setStatusError(null);
@@ -195,25 +186,20 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to load CIS status");
-      }
+      if (!res.ok) throw new Error(data?.error || "Failed to load CIS status");
+
       setCisStatus(data.status || null);
     } catch (err) {
       console.error("Error loading CIS MTD status:", err);
       setCisStatus(null);
-      setStatusError(err.message || "Failed to load CIS status from HMRC.");
+      setStatusError(err.message);
     } finally {
       setLoadingStatus(false);
     }
   }
 
-  // CIS obligations (HMRC periods)
   async function loadCISObligations() {
-    if (!clientId) {
-      alert("No client selected.");
-      return;
-    }
+    if (!clientId) return alert("No client selected.");
 
     setLoadingObligations(true);
     setObligationsError(null);
@@ -226,28 +212,21 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(data?.error || "Failed to load CIS obligations");
-      }
 
       setCisObligations(data.obligations || []);
     } catch (err) {
       console.error("Error loading CIS obligations:", err);
       setCisObligations([]);
-      setObligationsError(
-        err.message || "Failed to load CIS obligations from HMRC."
-      );
+      setObligationsError(err.message);
     } finally {
       setLoadingObligations(false);
     }
   }
 
-  // CIS returns (HMRC history)
   async function loadCISReturns() {
-    if (!clientId) {
-      alert("No client selected.");
-      return;
-    }
+    if (!clientId) return alert("No client selected.");
 
     setLoadingReturns(true);
     setReturnsError(null);
@@ -260,28 +239,21 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(data?.error || "Failed to load CIS returns");
-      }
 
       setCisReturns(data.returns || []);
     } catch (err) {
       console.error("Error loading CIS returns:", err);
       setCisReturns([]);
-      setReturnsError(
-        err.message || "Failed to load CIS returns from HMRC."
-      );
+      setReturnsError(err.message);
     } finally {
       setLoadingReturns(false);
     }
   }
 
-  // CIS deductions (contractor + suffered view)
   async function loadCISDeductions() {
-    if (!clientId) {
-      alert("No client selected.");
-      return;
-    }
+    if (!clientId) return alert("No client selected.");
 
     setLoadingDeductions(true);
     setDeductionsError(null);
@@ -294,39 +266,32 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(data?.error || "Failed to load CIS deductions");
-      }
 
       setCisDeductions(data.deductions || []);
     } catch (err) {
       console.error("Error loading CIS deductions:", err);
       setCisDeductions([]);
-      setDeductionsError(
-        err.message || "Failed to load CIS deductions from HMRC."
-      );
+      setDeductionsError(err.message);
     } finally {
       setLoadingDeductions(false);
     }
   }
 
   // ---------------------------------------------------------
-  // CIS receipt lookup (by submissionId)
+  // CIS receipt lookup
   // ---------------------------------------------------------
   async function loadCISReceipt() {
     setReceiptError(null);
     setCisReceipt(null);
 
-    if (!receiptSubmissionId) {
-      setReceiptError("Enter a submissionId first.");
-      return;
-    }
-    if (!clientId) {
-      setReceiptError("No client selected.");
-      return;
-    }
+    if (!receiptSubmissionId)
+      return setReceiptError("Enter a submissionId first.");
+    if (!clientId) return setReceiptError("No client selected.");
 
     setLoadingReceipt(true);
+
     try {
       const res = await fetch("/api/mtd/cis/receipt", {
         method: "POST",
@@ -338,39 +303,32 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(
-          (data && data.error) || "Failed to load CIS receipt from HMRC"
+          data?.error || "Failed to load CIS receipt from HMRC"
         );
-      }
 
       setCisReceipt(data || null);
     } catch (err) {
       console.error("Error loading CIS receipt:", err);
-      setReceiptError(err.message || "Failed to load CIS receipt.");
+      setReceiptError(err.message);
     } finally {
       setLoadingReceipt(false);
     }
   }
 
   // ---------------------------------------------------------
-  // CIS verification (subcontractor UTR)
+  // CIS subcontractor verification
   // ---------------------------------------------------------
   async function verifySubcontractor() {
     setVerifyError(null);
     setCisVerification(null);
 
-    if (!verifyUtr) {
-      setVerifyError("Enter a subcontractor UTR first.");
-      return;
-    }
-    if (!clientId) {
-      setVerifyError("No client selected.");
-      return;
-    }
+    if (!verifyUtr) return setVerifyError("Enter a subcontractor UTR first.");
+    if (!clientId) return setVerifyError("No client selected.");
 
     setLoadingVerify(true);
+
     try {
       const res = await fetch("/api/mtd/cis/verify", {
         method: "POST",
@@ -382,17 +340,15 @@ export default function CISPage() {
       });
 
       const data = await res.json().catch(() => null);
-
-      if (!res.ok) {
+      if (!res.ok)
         throw new Error(
-          (data && data.error) || "Failed to verify subcontractor"
+          data?.error || "Failed to verify subcontractor"
         );
-      }
 
       setCisVerification(data || null);
     } catch (err) {
       console.error("Error verifying subcontractor:", err);
-      setVerifyError(err.message || "Failed to verify subcontractor.");
+      setVerifyError(err.message);
     } finally {
       setLoadingVerify(false);
     }
@@ -578,7 +534,7 @@ export default function CISPage() {
           )}
         </ResponsiveCard>
 
-        {/* CIS Obligations (HMRC) */}
+        {/* CIS Obligations */}
         <ResponsiveCard title="CIS Obligations (from HMRC)">
           <button
             onClick={loadCISObligations}
