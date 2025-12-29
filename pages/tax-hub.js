@@ -3,13 +3,14 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
-import { useUser } from "../hooks/useUser";
+import { useUser } from "@/hooks/useUser";
 
 export default function TaxHub() {
   const { user, status } = useUser();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false); // ⭐ prevent infinite refetch loops
 
   const [periods, setPeriods] = useState({
     vat: [],
@@ -44,7 +45,6 @@ export default function TaxHub() {
   const [showOlderCisPeriods, setShowOlderCisPeriods] = useState(false);
 
   // ✅ MTD VAT per-period state: submissionId + loading flags
-  // key = `${periodStart}_${periodEnd}`
   const [mtdVatState, setMtdVatState] = useState({});
 
   // ✅ CIS MTD connection state
@@ -84,30 +84,55 @@ export default function TaxHub() {
   useEffect(() => {
     if (status === "loading") return;
     if (!user) router.replace("/login");
-  }, [status, user, router]);
+  }, [status, user?.id, router]);
 
   // ---------------------------------------------
-  // Main load effect — only run when fully ready
+  // Main load effect — stable deps, one load per client
   // ---------------------------------------------
   useEffect(() => {
-    console.log("🔍 useEffect(status, user) fired");
-    console.log("🔍 status:", status);
-    console.log("🔍 user:", user);
+    console.log("🔍 TaxHub main effect fired", {
+      status,
+      userId: user?.id,
+      role: user?.role,
+      actingAsClientId: user?.actingAsClientId,
+      hasLoaded,
+    });
 
     if (status !== "authenticated") return;
     if (!user) return;
 
     // If accountant has not selected a client yet, stop loading and show message
-    if (user.role === "accountant" && !user.actingAsClientId) {
+    if (user.role === "accountant" && user.actingAsClientId === null) {
       console.log("⏳ Accountant logged in but no actingAsClientId set yet");
       setLoading(false);
+      setHasLoaded(false);
       return;
     }
 
-    console.log("🚀 Loading Tax Hub data for clientId:", getClientId());
-    fetchPeriods();
-    fetchCisMtdStatus();
-  }, [status, user]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Prevent refetching on every render — only once per "client context"
+    if (hasLoaded) {
+      return;
+    }
+
+    const load = async () => {
+      setLoading(true);
+      try {
+        await fetchPeriods();
+        await fetchCisMtdStatus();
+        setHasLoaded(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, [
+    status,
+    user?.id,
+    user?.role,
+    user?.actingAsClientId,
+    hasLoaded,
+  ]);
 
   // ---------------------------------------------
   // HMRC OAuth redirect handler
@@ -119,11 +144,21 @@ export default function TaxHub() {
       user &&
       (user.role !== "accountant" || user.actingAsClientId)
     ) {
-      fetchPeriods();
-      fetchCisMtdStatus();
+      const refreshAfterAuth = async () => {
+        setLoading(true);
+        try {
+          await fetchPeriods();
+          await fetchCisMtdStatus();
+          setHasLoaded(true);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      refreshAfterAuth();
       router.replace("/tax-hub", undefined, { shallow: true });
     }
-  }, [router.query, status, user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [router.query.authorized, status, user?.id, user?.role, user?.actingAsClientId]);
 
   // ---------------------------------------------
   // Fetch periods
@@ -140,20 +175,34 @@ export default function TaxHub() {
       return;
     }
 
-    setLoading(true);
     try {
       const res = await fetch("/api/tax-hub/periods", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId, // still safe even if API also reads from session
+          clientId: clientId ?? null, // ⭐ never undefined
         }),
       });
 
-      console.log("📡 API Response status:", res.status);
+      console.log("📡 API /tax-hub/periods status:", res.status);
 
-      const data = await res.json();
-      console.log("📡 API Response JSON:", data);
+      const text = await res.text();
+      if (!text) {
+        console.error("❌ /tax-hub/periods returned empty response");
+        alert("Failed to fetch tax periods (empty response).");
+        return;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("❌ JSON parse error for /tax-hub/periods:", e, text);
+        alert("Failed to fetch tax periods (invalid JSON).");
+        return;
+      }
+
+      console.log("📡 API /tax-hub/periods JSON:", data);
 
       if (!res.ok) {
         console.error("❌ API returned error:", data.error);
@@ -193,8 +242,6 @@ export default function TaxHub() {
     } catch (err) {
       console.error("❌ Tax Hub periods error:", err);
       alert("Error fetching tax periods: " + err.message);
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -214,12 +261,29 @@ export default function TaxHub() {
       const res = await fetch("/api/mtd/cis/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify({ clientId: clientId ?? null }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      if (!text) {
+        console.error("❌ /mtd/cis/status returned empty response");
+        setCisMtdError("Empty response from CIS MTD status API");
+        return;
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("❌ JSON parse error for /mtd/cis/status:", e, text);
+        setCisMtdError("Invalid JSON from CIS MTD status API");
+        return;
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || "Failed to fetch CIS MTD status");
+        console.error("CIS MTD status API error:", data.error);
+        setCisMtdError(data.error || "Failed to fetch CIS MTD status");
+        return;
       }
 
       setCisMtdStatus(data);
@@ -291,7 +355,7 @@ export default function TaxHub() {
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold">Tax Hub</h1>
 
-        {user.role === "accountant" && !user.actingAsClientId && (
+        {user.role === "accountant" && user.actingAsClientId === null && (
           <div className="p-4 bg-yellow-100 border border-yellow-300 rounded">
             <p className="text-yellow-800 font-semibold">
               Please select a client to continue.
@@ -335,12 +399,12 @@ export default function TaxHub() {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            clientId: getClientId(),
+                            clientId: getClientId() ?? null,
                             stagger: newStagger,
                           }),
                         });
 
-                        await fetchPeriods();
+                        setHasLoaded(false); // force reload with new stagger
                       }}
                       className="border p-2 rounded"
                     >
@@ -518,7 +582,7 @@ export default function TaxHub() {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
-                                clientId: getClientId(),
+                                clientId: getClientId() ?? null,
                                 paymentDate,
                                 amount,
                                 direction,
@@ -529,7 +593,7 @@ export default function TaxHub() {
                             const data = await res.json();
                             if (data.success) {
                               alert("VAT payment recorded.");
-                              fetchPeriods();
+                              setHasLoaded(false); // reload summary
                             } else {
                               alert("Error: " + data.error);
                             }
@@ -1164,7 +1228,6 @@ export default function TaxHub() {
                                           return;
                                         }
 
-                                        // 1. Fetch VAT summary (now includes clientDetails)
                                         const summaryRes = await fetch(
                                           "/api/vat/summary",
                                           {
@@ -1185,7 +1248,6 @@ export default function TaxHub() {
                                         if (!summaryRes.ok)
                                           throw new Error(summary.error);
 
-                                        // 2. Generate VAT PDF using summary + clientDetails
                                         const pdfRes = await fetch("/api/pdf", {
                                           method: "POST",
                                           headers: {
@@ -1353,7 +1415,7 @@ export default function TaxHub() {
                                             `VAT period ${p.periodLabel} submitted to HMRC and locked successfully.`
                                           );
 
-                                          await fetchPeriods();
+                                          setHasLoaded(false); // reload periods
                                         } catch (err) {
                                           alert(
                                             "Submission error: " +
@@ -1439,7 +1501,6 @@ export default function TaxHub() {
                                       >
                                         View
                                       </button>
-                                      {/* Older VAT periods kept as view-only for now; filing done via active list respecting chronological rules */}
                                     </div>
                                   </li>
                                 ))}
@@ -1701,7 +1762,7 @@ export default function TaxHub() {
                                             alert(
                                               `CIS period submitted and locked successfully.`
                                             );
-                                            fetchPeriods();
+                                            setHasLoaded(false); // reload
                                           } else {
                                             alert(
                                               "Submission failed: " +
@@ -1839,7 +1900,6 @@ export default function TaxHub() {
                             >
                               View
                             </button>
-                            {/* Generic submit left only for future extension if you ever wire CT/SA to HMRC */}
                           </div>
                         </li>
                       ))}
