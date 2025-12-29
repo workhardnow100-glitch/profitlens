@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { useUser } from "../../hooks/useUser";
+import { useSession } from "next-auth/react";
 
 // Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
@@ -66,10 +67,10 @@ async function switchClientGlobal(clientId) {
   }
 }
 
-// ⭐ Client Switcher (top dropdown)
+// ⭐ FIXED Client Switcher (top dropdown)
 function ClientSwitcher() {
+  const { data: session } = useSession();
   const [clients, setClients] = useState([]);
-  const [current, setCurrent] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -78,11 +79,12 @@ function ClientSwitcher() {
 
       if (res.ok && data.clients) {
         setClients(data.clients);
-        setCurrent(data.currentClient || null);
       }
     }
     load();
   }, []);
+
+  const current = session?.user?.actingAsClientId || "";
 
   if (!clients || clients.length <= 1) return null;
 
@@ -94,10 +96,10 @@ function ClientSwitcher() {
   return (
     <div className="p-3 border-b bg-white">
       <label className="block text-xs font-semibold text-slate-500 mb-1">
-        Acting as:
+        Acting For Client:
       </label>
       <select
-        value={current || ""}
+        value={current}
         onChange={handleChange}
         className="w-full border p-2 rounded text-sm"
       >
