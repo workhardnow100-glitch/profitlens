@@ -1,15 +1,15 @@
 // pages/vat.js
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
+import useUser from "../hooks/useUser";
 
 export default function VATPage() {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const { user, loadingUser } = useUser();
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -26,24 +26,30 @@ export default function VATPage() {
 
   const [vatOverview, setVatOverview] = useState(null);
 
-  // NEW: HMRC obligations + returns
+  // HMRC obligations + returns
   const [hmrcObligations, setHmrcObligations] = useState([]);
   const [hmrcReturns, setHmrcReturns] = useState([]);
   const [loadingObligations, setLoadingObligations] = useState(false);
   const [loadingReturns, setLoadingReturns] = useState(false);
+  const [obligationsError, setObligationsError] = useState(null);
+  const [returnsError, setReturnsError] = useState(null);
 
-  // NEW: VAT MTD extra data (HMRC)
+  // VAT MTD extra data (HMRC)
   const [vatStatus, setVatStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
+  const [statusError, setStatusError] = useState(null);
 
   const [vatLiabilities, setVatLiabilities] = useState(null);
   const [loadingLiabilities, setLoadingLiabilities] = useState(false);
+  const [liabilitiesError, setLiabilitiesError] = useState(null);
 
   const [vatPayments, setVatPayments] = useState(null);
   const [loadingVatPayments, setLoadingVatPayments] = useState(false);
+  const [paymentsError, setPaymentsError] = useState(null);
 
   const [vatPeriods, setVatPeriods] = useState(null);
   const [loadingPeriods, setLoadingPeriods] = useState(false);
+  const [periodsError, setPeriodsError] = useState(null);
 
   const [receiptSubmissionId, setReceiptSubmissionId] = useState("");
   const [vatReceipt, setVatReceipt] = useState(null);
@@ -51,12 +57,28 @@ export default function VATPage() {
   const [receiptError, setReceiptError] = useState(null);
 
   // ---------------------------------------------------------
-  // AUTH
+  // CLIENT RESOLUTION (same pattern as Tax Hub)
+  // ---------------------------------------------------------
+  const clientId = user?.actingAsClientId ?? user?.clientId;
+
+  // ---------------------------------------------------------
+  // AUTH GUARD
   // ---------------------------------------------------------
   useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) router.replace("/login");
-  }, [session, status, router]);
+    if (loadingUser) return;
+    if (!user) {
+      router.replace("/login");
+    }
+  }, [user, loadingUser, router]);
+
+  // While user is loading, avoid rendering the page
+  if (loadingUser) {
+    return null;
+  }
+
+  if (!user) {
+    return null;
+  }
 
   // ---------------------------------------------------------
   // AUTO‑LOAD PERIOD IF COMING FROM TAX HUB
@@ -69,25 +91,28 @@ export default function VATPage() {
     if (qFrom && qTo) {
       setFrom(qFrom);
       setTo(qTo);
+      // We can trigger immediately; fetchVAT will use current clientId
       fetchVAT(qFrom, qTo);
     }
-  }, [router.isReady, router.query]);
+  }, [router.isReady, router.query]); // clientId is stable enough; no need to depend
 
   // ---------------------------------------------------------
   // LOAD VAT STAGGER + VAT OVERVIEW + HMRC DATA
   // ---------------------------------------------------------
   useEffect(() => {
-    async function loadStaggerAndOverview() {
-      if (!session?.user) return;
+    if (!clientId) return;
 
+    async function loadStaggerAndOverview() {
       try {
         const res = await fetch("/api/tax-hub/periods", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clientId: session.user.actingAsClientId ?? session.user.clientId }),
+          body: JSON.stringify({ clientId }),
         });
 
-        const data = await res.json();
+        const data = await res.json().catch(() => null);
+        if (!data) return;
+
         if (data.vatStagger) setVatStagger(data.vatStagger);
         setVatOverview(data);
       } catch (err) {
@@ -98,25 +123,43 @@ export default function VATPage() {
     loadStaggerAndOverview();
     loadObligations();
     loadReturns();
-  }, [session]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
 
   // ---------------------------------------------------------
   // LOAD HMRC OBLIGATIONS
   // ---------------------------------------------------------
   async function loadObligations() {
+    if (!clientId) return;
     setLoadingObligations(true);
+    setObligationsError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/obligations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (res.ok && data.obligations?.obligations) {
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg =
+          (data && data.error) ||
+          "Failed to load obligations from HMRC (test mode or not authorised).";
+        setObligationsError(msg);
+        setHmrcObligations([]);
+        return;
+      }
+
+      if (data?.obligations?.obligations) {
         setHmrcObligations(data.obligations.obligations);
+      } else {
+        setHmrcObligations([]);
       }
     } catch (err) {
       console.error("Error loading obligations:", err);
+      setObligationsError("Error loading obligations from HMRC.");
+      setHmrcObligations([]);
     } finally {
       setLoadingObligations(false);
     }
@@ -126,19 +169,36 @@ export default function VATPage() {
   // LOAD HMRC RETURNS
   // ---------------------------------------------------------
   async function loadReturns() {
+    if (!clientId) return;
     setLoadingReturns(true);
+    setReturnsError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/returns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (res.ok && data.returns?.returns) {
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg =
+          (data && data.error) ||
+          "Failed to load VAT returns from HMRC (test mode or not authorised).";
+        setReturnsError(msg);
+        setHmrcReturns([]);
+        return;
+      }
+
+      if (data?.returns?.returns) {
         setHmrcReturns(data.returns.returns);
+      } else {
+        setHmrcReturns([]);
       }
     } catch (err) {
       console.error("Error loading returns:", err);
+      setReturnsError("Error loading VAT returns from HMRC.");
+      setHmrcReturns([]);
     } finally {
       setLoadingReturns(false);
     }
@@ -148,19 +208,28 @@ export default function VATPage() {
   // LOAD VAT MTD CONNECTION STATUS
   // ---------------------------------------------------------
   async function loadVatStatus() {
+    if (!clientId) return;
     setLoadingStatus(true);
+    setStatusError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load VAT status");
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load VAT MTD connection status"
+        );
+      }
       setVatStatus(data.status || null);
     } catch (err) {
       console.error("Error loading VAT status:", err);
       setVatStatus(null);
+      setStatusError(err.message || "Failed to load VAT MTD connection status");
     } finally {
       setLoadingStatus(false);
     }
@@ -170,19 +239,30 @@ export default function VATPage() {
   // LOAD HMRC VAT LIABILITIES
   // ---------------------------------------------------------
   async function loadVatLiabilities() {
+    if (!clientId) return;
     setLoadingLiabilities(true);
+    setLiabilitiesError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/get-liabilities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load liabilities");
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load VAT liabilities"
+        );
+      }
       setVatLiabilities(data.liabilities || null);
     } catch (err) {
       console.error("Error loading VAT liabilities:", err);
       setVatLiabilities(null);
+      setLiabilitiesError(
+        err.message || "Failed to load VAT liabilities from HMRC."
+      );
     } finally {
       setLoadingLiabilities(false);
     }
@@ -192,19 +272,30 @@ export default function VATPage() {
   // LOAD HMRC VAT PAYMENTS
   // ---------------------------------------------------------
   async function loadVatPayments() {
+    if (!clientId) return;
     setLoadingVatPayments(true);
+    setPaymentsError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/get-payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load VAT payments");
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load VAT payments from HMRC"
+        );
+      }
       setVatPayments(data.payments || null);
     } catch (err) {
       console.error("Error loading VAT payments:", err);
       setVatPayments(null);
+      setPaymentsError(
+        err.message || "Failed to load VAT payments from HMRC."
+      );
     } finally {
       setLoadingVatPayments(false);
     }
@@ -214,19 +305,30 @@ export default function VATPage() {
   // LOAD HMRC VAT PERIODS
   // ---------------------------------------------------------
   async function loadVatPeriods() {
+    if (!clientId) return;
     setLoadingPeriods(true);
+    setPeriodsError(null);
+
     try {
       const res = await fetch("/api/mtd/vat/get-periods", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ clientId }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load VAT periods");
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(
+          (data && data.error) || "Failed to load VAT periods from HMRC"
+        );
+      }
       setVatPeriods(data.periods || null);
     } catch (err) {
       console.error("Error loading VAT periods:", err);
       setVatPeriods(null);
+      setPeriodsError(
+        err.message || "Failed to load VAT periods from HMRC."
+      );
     } finally {
       setLoadingPeriods(false);
     }
@@ -244,12 +346,20 @@ export default function VATPage() {
       return;
     }
 
+    if (!clientId) {
+      setReceiptError("No client selected for receipt lookup.");
+      return;
+    }
+
     setLoadingReceipt(true);
     try {
       const res = await fetch("/api/mtd/vat/receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId: receiptSubmissionId }),
+        body: JSON.stringify({
+          clientId,
+          submissionId: receiptSubmissionId,
+        }),
       });
 
       const data = await res.json().catch(() => null);
@@ -262,7 +372,7 @@ export default function VATPage() {
       setVatReceipt(data || null);
     } catch (err) {
       console.error("Error loading VAT receipt:", err);
-      setReceiptError(err.message);
+      setReceiptError(err.message || "Failed to load HMRC VAT receipt.");
     } finally {
       setLoadingReceipt(false);
     }
@@ -271,36 +381,40 @@ export default function VATPage() {
   // ---------------------------------------------------------
   // SAVE VAT NUMBER
   // ---------------------------------------------------------
-async function saveVatNumber() {
-  if (!vatOverview?.tempVatNumber) {
-    alert("Please enter a VAT number.");
-    return;
+  async function saveVatNumber() {
+    if (!vatOverview?.tempVatNumber) {
+      alert("Please enter a VAT number.");
+      return;
+    }
+
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/tax-hub/save-vat-number", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          vatNumber: vatOverview.tempVatNumber,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to save VAT number");
+
+      alert("VAT number saved successfully.");
+
+      setVatOverview((prev) => ({
+        ...(prev || {}),
+        vat_number: vatOverview.tempVatNumber,
+      }));
+    } catch (err) {
+      alert(err.message || "Failed to save VAT number.");
+    }
   }
-
-  try {
-    const res = await fetch("/api/tax-hub/save-vat-number", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId: session.user.actingAsClientId ?? session.user.clientId,
-        vatNumber: vatOverview.tempVatNumber,
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to save VAT number");
-
-    alert("VAT number saved successfully.");
-
-    setVatOverview((prev) => ({
-      ...prev,
-      vat_number: vatOverview.tempVatNumber,
-    }));
-  } catch (err) {
-    alert(err.message);
-  }
-}
-
 
   // ---------------------------------------------------------
   // FETCH VAT SUMMARY
@@ -313,6 +427,11 @@ async function saveVatNumber() {
       alert("Please select both start and end dates.");
       return;
     }
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -320,21 +439,22 @@ async function saveVatNumber() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
-
+          clientId,
           periodStart: start,
           periodEnd: end,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch VAT summary");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch VAT summary");
+      }
 
       setResult(data);
       setSubmissionId(null);
     } catch (err) {
       console.error(err);
-      alert("Error fetching VAT summary: " + err.message);
+      alert("Error fetching VAT summary: " + (err.message || "Unknown error"));
     } finally {
       setLoading(false);
     }
@@ -352,6 +472,10 @@ async function saveVatNumber() {
       alert("Load the VAT summary first.");
       return;
     }
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
 
     setMtdValidating(true);
     try {
@@ -359,15 +483,18 @@ async function saveVatNumber() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          clientId,
           periodStart: from,
           periodEnd: to,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to validate VAT return");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to validate VAT return");
+      }
 
-      if (!data.submissionId) throw new Error("No submissionId returned");
+      if (!data?.submissionId) throw new Error("No submissionId returned");
 
       setSubmissionId(data.submissionId);
 
@@ -376,7 +503,7 @@ async function saveVatNumber() {
       alert("VAT return validated for MTD. You can now submit to HMRC.");
     } catch (err) {
       console.error(err);
-      alert("Error validating VAT return: " + err.message);
+      alert("Error validating VAT return: " + (err.message || "Unknown error"));
     } finally {
       setMtdValidating(false);
     }
@@ -390,7 +517,15 @@ async function saveVatNumber() {
       alert("Please validate the VAT return for MTD first.");
       return;
     }
-    if (!confirm("Submit this VAT period to HMRC? This will lock the period.")) {
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
+    if (
+      !confirm(
+        "Submit this VAT period to HMRC? This will lock the period for this client."
+      )
+    ) {
       return;
     }
 
@@ -399,12 +534,13 @@ async function saveVatNumber() {
       const res = await fetch("/api/mtd/vat/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId }),
+        body: JSON.stringify({ clientId, submissionId }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success)
-        throw new Error(data.error || "HMRC submission failed");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "HMRC submission failed");
+      }
 
       alert("VAT submitted to HMRC successfully. Period locked.");
 
@@ -423,7 +559,7 @@ async function saveVatNumber() {
       );
     } catch (err) {
       console.error(err);
-      alert("Submission failed: " + err.message);
+      alert("Submission failed: " + (err.message || "Unknown error"));
     } finally {
       setMtdSubmitting(false);
     }
@@ -438,30 +574,33 @@ async function saveVatNumber() {
       alert("Enter an amount for the adjustment.");
       return;
     }
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
 
     try {
       const res = await fetch("/api/vat/adjustment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cliclientId: session.user.actingAsClientId ?? session.user.clientId,
-
+          clientId, // FIXED typo: was "cliclientId"
           vatPeriodId: result.vatPeriodId,
           box: Number(newAdj.box),
           amount: Number(newAdj.amount),
           reason: newAdj.reason,
-          userId: session.user.id,
+          userId: user.id,
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add adjustment");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to add adjustment");
 
       await fetchVAT(from, to);
       setNewAdj({ box: 1, amount: "", reason: "" });
     } catch (err) {
       console.error(err);
-      alert("Error adding adjustment: " + err.message);
+      alert("Error adding adjustment: " + (err.message || "Unknown error"));
     }
   }
 
@@ -480,12 +619,17 @@ async function saveVatNumber() {
       alert("Missing VAT period dates.");
       return;
     }
+    if (!clientId) {
+      alert("No client selected.");
+      return;
+    }
 
     try {
       const res = await fetch("/api/mtd/vat/receipt", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          clientId,
           periodStart: start,
           periodEnd: end,
         }),
@@ -507,7 +651,7 @@ async function saveVatNumber() {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert("Error downloading HMRC receipt: " + err.message);
+      alert("Error downloading HMRC receipt: " + (err.message || "Unknown error"));
     }
   }
 
@@ -520,14 +664,14 @@ async function saveVatNumber() {
   let periodPaymentsTotal = 0;
 
   if (vatOverview?.vat && from && to) {
-    const vatPeriods = vatOverview.vat;
-    const idx = vatPeriods.findIndex(
+    const vatPeriodsList = vatOverview.vat;
+    const idx = vatPeriodsList.findIndex(
       (p) => p.periodStart === from && p.periodEnd === to
     );
     if (idx !== -1) {
-      currentVatPeriod = vatPeriods[idx];
-      if (idx + 1 < vatPeriods.length) {
-        previousVatPeriod = vatPeriods[idx + 1];
+      currentVatPeriod = vatPeriodsList[idx];
+      if (idx + 1 < vatPeriodsList.length) {
+        previousVatPeriod = vatPeriodsList[idx + 1];
       }
     }
   }
@@ -546,8 +690,6 @@ async function saveVatNumber() {
       return sum + (p.direction === "payment" ? amount : -amount);
     }, 0);
   }
-
-  if (!session?.user) return null;
 
   const locked = result?.locked;
   const statusLabel = result
@@ -582,7 +724,7 @@ async function saveVatNumber() {
               value={vatOverview?.tempVatNumber || ""}
               onChange={(e) =>
                 setVatOverview((prev) => ({
-                  ...prev,
+                  ...(prev || {}),
                   tempVatNumber: e.target.value,
                 }))
               }
@@ -602,17 +744,18 @@ async function saveVatNumber() {
         {/* HMRC Authorisation */}
         {vatOverview?.vat_number && !vatOverview?.hmrcConnected && (
           <div className="mt-4">
-           <button
-  onClick={() =>
-    (window.location.href = `/api/hmrc/oauth/start?clientId=${
-      session.user.actingAsClientId ?? session.user.clientId
-    }`)
-  }
-  className="bg-purple-600 text-white px-4 py-2 rounded"
->
-  Authorise HMRC (Required for MTD)
-</button>
-
+            <button
+              onClick={() => {
+                if (!clientId) {
+                  alert("No client selected.");
+                  return;
+                }
+                window.location.href = `/api/hmrc/oauth/start?clientId=${clientId}`;
+              }}
+              className="bg-purple-600 text-white px-4 py-2 rounded"
+            >
+              Authorise HMRC (Required for MTD)
+            </button>
 
             <p className="text-sm text-gray-600 mt-1">
               You must authorise HMRC before validating or submitting VAT
@@ -625,6 +768,8 @@ async function saveVatNumber() {
         <ResponsiveCard title="HMRC Obligations (Live from HMRC)">
           {loadingObligations ? (
             <p className="text-sm text-gray-600">Loading obligations…</p>
+          ) : obligationsError ? (
+            <p className="text-sm text-red-600">{obligationsError}</p>
           ) : hmrcObligations.length === 0 ? (
             <p className="text-sm text-gray-600">No obligations found.</p>
           ) : (
@@ -745,7 +890,7 @@ async function saveVatNumber() {
                   </p>
                   <p>
                     <strong>Status:</strong>{" "}
-                    {result.submitted ? "Submitted (MTD)" : "Not Submitted"}
+                      {result.submitted ? "Submitted (MTD)" : "Not Submitted"}
                   </p>
                   <button
                     onClick={() => downloadReceipt()}
@@ -1036,6 +1181,8 @@ async function saveVatNumber() {
             <ResponsiveCard title="HMRC VAT Returns (from HMRC)">
               {loadingReturns ? (
                 <p className="text-sm text-gray-600">Loading HMRC returns…</p>
+              ) : returnsError ? (
+                <p className="text-sm text-red-600">{returnsError}</p>
               ) : hmrcReturns.length === 0 ? (
                 <p className="text-sm text-gray-600">No HMRC returns found.</p>
               ) : (
@@ -1099,6 +1246,10 @@ async function saveVatNumber() {
             </button>
           </div>
 
+          {statusError && (
+            <p className="text-sm text-red-600 mb-2">{statusError}</p>
+          )}
+
           {!vatStatus ? (
             <p className="text-sm text-gray-600">
               No VAT MTD connection status loaded yet.
@@ -1150,6 +1301,10 @@ async function saveVatNumber() {
             {loadingLiabilities ? "Loading liabilities…" : "Load Liabilities"}
           </button>
 
+          {liabilitiesError && (
+            <p className="text-sm text-red-600 mb-2">{liabilitiesError}</p>
+          )}
+
           {!vatLiabilities ? (
             <p className="text-sm text-gray-600">
               No liabilities loaded yet.
@@ -1183,6 +1338,10 @@ async function saveVatNumber() {
             {loadingVatPayments ? "Loading payments…" : "Load Payments"}
           </button>
 
+          {paymentsError && (
+            <p className="text-sm text-red-600 mb-2">{paymentsError}</p>
+          )}
+
           {!vatPayments ? (
             <p className="text-sm text-gray-600">
               No HMRC VAT payments loaded yet.
@@ -1213,6 +1372,10 @@ async function saveVatNumber() {
           >
             {loadingPeriods ? "Loading periods…" : "Load VAT Periods"}
           </button>
+
+          {periodsError && (
+            <p className="text-sm text-red-600 mb-2">{periodsError}</p>
+          )}
 
           {!vatPeriods ? (
             <p className="text-sm text-gray-600">
@@ -1271,15 +1434,14 @@ async function saveVatNumber() {
             )}
           </div>
         </ResponsiveCard>
-      </div>
 
-      {/* Filing Disclaimer */}
-      <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-        ProfitLens does not provide tax advice. All calculations are estimates
-        only. Users are solely responsible for verifying all figures and
-        ensuring accuracy before submitting any tax filings to HMRC.
-      </p>
+        {/* Filing Disclaimer */}
+        <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
+          ProfitLens does not provide tax advice. All calculations are estimates
+          only. Users are solely responsible for verifying all figures and
+          ensuring accuracy before submitting any tax filings to HMRC.
+        </p>
+      </div>
     </ResponsiveLayout>
   );
 }
-
