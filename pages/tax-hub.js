@@ -1,12 +1,12 @@
 // pages/tax-hub.js
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
+import { useUser } from "@/hooks/useUser";
 
 export default function TaxHub() {
-  const { data: session, status } = useSession();
+  const { user, status } = useUser();
   const router = useRouter();
 
   const [loading, setLoading] = useState(true);
@@ -70,57 +70,71 @@ export default function TaxHub() {
   const [saLoading, setSaLoading] = useState(false);
   const [saError, setSaError] = useState(null);
 
+  // ---------------------------------------------
+  // Helper to resolve effective clientId
+  // ---------------------------------------------
+  const getClientId = () => {
+    if (!user) return undefined;
+    return user.role === "accountant" ? user.actingAsClientId : user.clientId;
+  };
+
+  // ---------------------------------------------
+  // Auth redirect
+  // ---------------------------------------------
   useEffect(() => {
     if (status === "loading") return;
-    if (!session?.user) router.replace("/login");
-    else {
-      fetchPeriods();
-      fetchCisMtdStatus();
-    }
-  }, [session, status]);
+    if (!user) router.replace("/login");
+  }, [status, user, router]);
 
-  // Re-run after HMRC OAuth redirect
+  // ---------------------------------------------
+  // Main load effect — only run when fully ready
+  // ---------------------------------------------
   useEffect(() => {
-    if (router.query.authorized && status === "authenticated" && session?.user) {
-      fetchPeriods();
-      fetchCisMtdStatus();
-      router.replace("/tax-hub", undefined, { shallow: true });
-    }
-  }, [router.query, status, session]);
-
-  // Main load effect — only run when session is fully ready
-  // Main load effect — only run when session is fully ready
-  useEffect(() => {
-    console.log("🔍 useEffect(status, session) fired");
+    console.log("🔍 useEffect(status, user) fired");
     console.log("🔍 status:", status);
-    console.log("🔍 session.user:", session?.user);
+    console.log("🔍 user:", user);
 
     if (status !== "authenticated") return;
-    if (!session?.user) return;
+    if (!user) return;
 
     // For accountants, wait until actingAsClientId is available
-    if (
-      session.user.role === "accountant" &&
-      !session.user.actingAsClientId
-    ) {
+    if (user.role === "accountant" && !user.actingAsClientId) {
       console.log("⏳ Waiting for actingAsClientId before loading Tax Hub...");
       return;
     }
 
-    console.log("🚀 Loading Tax Hub data for clientId:", session.user.actingAsClientId);
+    console.log("🚀 Loading Tax Hub data for clientId:", getClientId());
     fetchPeriods();
     fetchCisMtdStatus();
-  }, [status, session]);
+  }, [status, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---------------------------------------------
+  // HMRC OAuth redirect handler
+  // ---------------------------------------------
+  useEffect(() => {
+    if (
+      router.query.authorized &&
+      status === "authenticated" &&
+      user &&
+      (user.role !== "accountant" || user.actingAsClientId)
+    ) {
+      fetchPeriods();
+      fetchCisMtdStatus();
+      router.replace("/tax-hub", undefined, { shallow: true });
+    }
+  }, [router.query, status, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------------------------------------------
+  // Fetch periods
+  // ---------------------------------------------
   async function fetchPeriods() {
     console.log("📡 fetchPeriods() called");
-    console.log("📡 session.user at fetch time:", session?.user);
+    console.log("📡 user at fetch time:", user);
+
+    const clientId = getClientId();
 
     // 🔒 Guard: skip if accountant and actingAsClientId is missing
-    if (
-      session?.user?.role === "accountant" &&
-      !session?.user?.actingAsClientId
-    ) {
+    if (user?.role === "accountant" && !clientId) {
       console.warn("⏳ Skipping fetchPeriods — actingAsClientId not ready");
       return;
     }
@@ -130,7 +144,9 @@ export default function TaxHub() {
       const res = await fetch("/api/tax-hub/periods", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}), // clientId resolved server-side from session
+        body: JSON.stringify({
+          clientId, // still safe even if API also reads from session
+        }),
       });
 
       console.log("📡 API Response status:", res.status);
@@ -144,7 +160,6 @@ export default function TaxHub() {
         return;
       }
 
-      // ✅ Your existing logic
       setPeriods({
         vat: data.vat || [],
         cis: data.cis || [],
@@ -182,8 +197,15 @@ export default function TaxHub() {
     }
   }
 
+  // ---------------------------------------------
+  // Fetch CIS MTD status
+  // ---------------------------------------------
   async function fetchCisMtdStatus() {
-    if (!session?.user) return;
+    if (!user) return;
+
+    const clientId = getClientId();
+    if (user.role === "accountant" && !clientId) return;
+
     setCisMtdLoading(true);
     setCisMtdError(null);
 
@@ -191,7 +213,7 @@ export default function TaxHub() {
       const res = await fetch("/api/mtd/cis/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}), // clientId resolved server-side from session
+        body: JSON.stringify({ clientId }),
       });
 
       const data = await res.json();
@@ -208,7 +230,7 @@ export default function TaxHub() {
     }
   }
 
-  if (!session?.user) return null;
+  if (!user) return null;
 
   // ORDER: VAT → CIS → CT → SA
   const taxTypes = [
@@ -219,8 +241,6 @@ export default function TaxHub() {
   ];
 
   const needsHMRCAuth = !(periods.vat || []).some((p) => p.hmrcAuthorized);
-
-
 
   // Derived VAT period lists for cockpit
   const vatPeriods = periods.vat || [];
@@ -278,9 +298,8 @@ export default function TaxHub() {
             </p>
             <a
               href={`/api/hmrc/oauth/start?clientId=${encodeURIComponent(
-  session.user.actingAsClientId ?? session.user.clientId
-)}`}
-
+                getClientId() || ""
+              )}`}
               className="bg-orange-600 text-white px-4 py-2 rounded"
             >
               Connect to HMRC
@@ -307,7 +326,7 @@ export default function TaxHub() {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            clientId: session.user.actingAsClientId ?? session.user.clientId,
+                            clientId: getClientId(),
                             stagger: newStagger,
                           }),
                         });
@@ -490,7 +509,7 @@ export default function TaxHub() {
                               method: "POST",
                               headers: { "Content-Type": "application/json" },
                               body: JSON.stringify({
-                                clientId: session.user.actingAsClientId ?? session.user.clientId,
+                                clientId: getClientId(),
                                 paymentDate,
                                 amount,
                                 direction,
@@ -634,6 +653,8 @@ export default function TaxHub() {
                             setCtLoading(true);
                             setCtError(null);
 
+                            const clientId = getClientId();
+
                             try {
                               const [s, o, r, l, p] = await Promise.all([
                                 fetch("/api/mtd/ct/status", {
@@ -641,35 +662,35 @@ export default function TaxHub() {
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/ct/obligations", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/ct/returns", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/ct/liabilities", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/ct/payments", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                               ]);
 
@@ -890,6 +911,8 @@ export default function TaxHub() {
                             setSaLoading(true);
                             setSaError(null);
 
+                            const clientId = getClientId();
+
                             try {
                               const [s, o, r, e, f] = await Promise.all([
                                 fetch("/api/mtd/sa/status", {
@@ -897,35 +920,35 @@ export default function TaxHub() {
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/sa/obligations", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/sa/returns", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/sa/eops", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                                 fetch("/api/mtd/sa/final", {
                                   method: "POST",
                                   headers: {
                                     "Content-Type": "application/json",
                                   },
-                                  body: JSON.stringify({}),
+                                  body: JSON.stringify({ clientId }),
                                 }),
                               ]);
 
@@ -1116,6 +1139,8 @@ export default function TaxHub() {
                                     className="bg-purple-600 text-white px-3 py-1 rounded text-sm"
                                     onClick={async () => {
                                       try {
+                                        const clientId = getClientId();
+
                                         // 1. Fetch VAT summary (now includes clientDetails)
                                         const summaryRes = await fetch(
                                           "/api/vat/summary",
@@ -1126,7 +1151,7 @@ export default function TaxHub() {
                                                 "application/json",
                                             },
                                             body: JSON.stringify({
-                                              clientId: session.user.actingAsClientId ?? session.user.clientId,
+                                              clientId,
                                               periodStart: p.periodStart,
                                               periodEnd: p.periodEnd,
                                             }),
@@ -1146,7 +1171,7 @@ export default function TaxHub() {
                                           },
                                           body: JSON.stringify({
                                             type: "vat",
-                                            clientId: session.user.actingAsClientId ?? session.user.clientId,
+                                            clientId,
                                             periodStart: p.periodStart,
                                             periodEnd: p.periodEnd,
 
@@ -1196,6 +1221,8 @@ export default function TaxHub() {
                                         });
 
                                         try {
+                                          const clientId = getClientId();
+
                                           const res = await fetch(
                                             `/api/mtd/vat/validate`,
                                             {
@@ -1205,7 +1232,7 @@ export default function TaxHub() {
                                                   "application/json",
                                               },
                                               body: JSON.stringify({
-                                                clientId: session.user.actingAsClientId ?? session.user.clientId,
+                                                clientId,
                                                 periodStart: p.periodStart,
                                                 periodEnd: p.periodEnd,
                                               }),
@@ -1624,7 +1651,7 @@ export default function TaxHub() {
                                                   "application/json",
                                               },
                                               body: JSON.stringify({
-                                                clientId: session.user.actingAsClientId ?? session.user.clientId,
+                                                clientId: getClientId(),
                                                 periodStart: p.periodStart,
                                                 periodEnd: p.periodEnd,
                                               }),
@@ -1799,4 +1826,3 @@ export default function TaxHub() {
     </ResponsiveLayout>
   );
 }
-
