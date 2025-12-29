@@ -7,6 +7,7 @@ export function useUser() {
   useEffect(() => {
     console.log("🔍 useUser session:", session);
     console.log("🔍 useUser status:", status);
+
     if (session?.user) {
       console.log("✅ Extracted user:", {
         id: session.user.id,
@@ -21,18 +22,27 @@ export function useUser() {
     }
   }, [session, status]);
 
+  // ⭐ Normalize actingAsClientId so it is ALWAYS null when not selected
+  const normalizedActingId =
+    session?.user?.actingAsClientId &&
+    session.user.actingAsClientId !== "null" &&
+    session.user.actingAsClientId !== "undefined" &&
+    session.user.actingAsClientId !== ""
+      ? session.user.actingAsClientId
+      : null;
+
   const user = {
     id: session?.user?.id ?? null,
     email: session?.user?.email ?? "unknown@example.com",
     role: session?.user?.role?.toLowerCase() ?? "user",
     clientId: session?.user?.clientId ?? null,
-    actingAsClientId: session?.user?.actingAsClientId ?? null,
+    actingAsClientId: normalizedActingId,
     subscriptionStatus: session?.user?.subscriptionStatus ?? "incomplete",
   };
 
   return {
     user,
-    status, // ⭐ FIX: return status so pages don't freeze
+    status, // ⭐ REQUIRED by Tax Hub
     isLoading: status === "loading",
     isAuthenticated: !!session?.user,
     isPremium: ["basic", "pro"].includes(user.subscriptionStatus),
