@@ -116,6 +116,7 @@ export function SidebarMenu() {
 
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
+  const [invoicesOpen, setInvoicesOpen] = useState(true); // ⭐ NEW
 
   const [clients, setClients] = useState([]);
   const [me, setMe] = useState(null);
@@ -300,6 +301,91 @@ export function SidebarMenu() {
                 </Link>
               </SidebarMenuItem>
             ))}
+          </SidebarGroupContent>
+        </div>
+      </SidebarGroup>
+
+      {/* ⭐ NEW — Invoicing */}
+      <SidebarGroup className="mt-4">
+        <button
+          onClick={() => setInvoicesOpen(!invoicesOpen)}
+          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+        >
+          <span>Invoicing</span>
+          <ChevronDown
+            size={16}
+            className={`transition-transform ${invoicesOpen ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        <div
+          className={`overflow-hidden transition-all duration-300 ${
+            invoicesOpen ? "max-h-[1000px]" : "max-h-0"
+          }`}
+        >
+          <SidebarGroupContent>
+
+            {/* All Invoices */}
+            <SidebarMenuItem>
+              <Link
+                href="/invoices"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname.startsWith("/invoices") &&
+                  !router.pathname.includes("/settings")
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <FileText size={16} />
+                <span>Invoices</span>
+              </Link>
+            </SidebarMenuItem>
+
+            {/* New Invoice */}
+            <SidebarMenuItem>
+              <Link
+                href="/invoices/new"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/invoices/new"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <FileText size={16} />
+                <span>New Invoice</span>
+              </Link>
+            </SidebarMenuItem>
+
+            {/* External Clients */}
+            <SidebarMenuItem>
+              <Link
+                href="/external-clients"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname.startsWith("/external-clients")
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <Users size={16} />
+                <span>Clients</span>
+              </Link>
+            </SidebarMenuItem>
+
+            {/* Invoice Settings */}
+            <SidebarMenuItem>
+              <Link
+                href="/settings/invoices"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/settings/invoices"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <FileText size={16} />
+                <span>Invoice Settings</span>
+              </Link>
+            </SidebarMenuItem>
+
           </SidebarGroupContent>
         </div>
       </SidebarGroup>
