@@ -420,29 +420,24 @@ export default function Transactions() {
 
   // Category change → updates business_category + auto_ct
   async function updateBusinessCategory(id, newCategory) {
-    const key = (newCategory || "Uncategorised").toLowerCase();
+  const key = (newCategory || "Uncategorised").toLowerCase();
 
-    const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
-    const allowableSet = new Set(
-      CT_MAP.allowable.map((c) => c.toLowerCase())
-    );
-    const disallowableSet = new Set(
-      CT_MAP.disallowable.map((c) => c.toLowerCase())
-    );
-    const ignoreSet = new Set(CT_MAP.ignore.map((c) => c.toLowerCase()));
+  const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
+  const allowableSet = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
+  const disallowableSet = new Set(CT_MAP.disallowable.map((c) => c.toLowerCase()));
 
-    let autoCT = false;
-    if (incomeSet.has(key)) autoCT = true;
-    else if (allowableSet.has(key)) autoCT = true;
-    else if (disallowableSet.has(key)) autoCT = true;
-    else if (ignoreSet.has(key)) autoCT = false;
-    else autoCT = false;
+  let includeCT = false;
+  if (incomeSet.has(key)) includeCT = true;
+  else if (allowableSet.has(key)) includeCT = true;
+  else if (disallowableSet.has(key)) includeCT = true;
 
-    await updateTransaction(id, {
-      business_category: newCategory,
-      auto_ct: autoCT,
-    });
-  }
+  await updateTransaction(id, {
+    business_category: newCategory,
+    includedinct: includeCT,
+    manualctoverride: false
+  });
+}
+
 
   // VAT update → via upsert
   async function updateVATForTx(tx, newRate) {

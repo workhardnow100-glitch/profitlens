@@ -1,3 +1,5 @@
+// pages/api/transactions/upsert.js
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -21,7 +23,6 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // Accountant-aware client ID
   const clientId =
     session.user.actingAsClientId || session.user.clientId;
 
@@ -36,7 +37,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Only update fields provided
     const updatePayload = {
       ...fields,
       updatedat: new Date().toISOString(),
