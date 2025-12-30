@@ -18,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // -----------------------------
   if (req.method === "GET") {
     try {
-      // Fetch invoice
+      // Fetch invoice - must belong to this user
       const { data: invoice, error: invoiceError } = await supabaseAdmin
         .from("invoices")
         .select("*")
@@ -30,20 +30,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "Invoice not found" });
       }
 
-      // ⭐ Fetch EXTERNAL CLIENT (correct table)
+      // Fetch EXTERNAL CLIENT:
+      // - join via invoice.client_id
+      // - enforce owner_id = userId
       const { data: externalClient, error: externalClientError } =
         await supabaseAdmin
           .from("external_clients")
           .select("*")
-          .eq("id", invoice.external_client_id)
+          .eq("id", invoice.client_id)
           .eq("owner_id", userId)
           .single();
 
       if (externalClientError || !externalClient) {
+        // We don't hard-fail the whole response, but you may prefer 404 here.
+        // For now, mirror your existing behaviour:
         return res.status(404).json({ error: "External client not found" });
       }
 
-      // Fetch line items
+      // Fetch line items - ordered by position
       const { data: lineItems, error: lineError } = await supabaseAdmin
         .from("invoice_line_items")
         .select("*")
@@ -55,10 +59,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch line items" });
       }
 
-      // Fetch matched payments
+      // Fetch matched payments with joined transactions
       const { data: payments, error: payError } = await supabaseAdmin
         .from("invoice_payments")
-        .select("*, transactions(*)")
+        .select(
+          `
+          id,
+          invoice_id,
+          transaction_id,
+          amount,
+          matched_at,
+          match_confidence,
+          source,
+          notes,
+          created_at,
+          transactions (
+            id,
+            date,
+            description,
+            amount,
+            source
+          )
+        `
+        )
         .eq("invoice_id", invoiceId);
 
       if (payError) {
@@ -66,12 +89,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch payments" });
       }
 
-      // ⭐ Return externalClient in response
+      // Derived values (for convenience in the UI)
+      const paidAmount =
+        payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) ?? 0;
+      const balance = Number(invoice.gross_amount || 0) - paidAmount;
+
       return res.status(200).json({
         invoice,
         externalClient,
-        lineItems,
-        payments,
+        lineItems: lineItems ?? [],
+        payments: payments ?? [],
+        // extra computed values (non-breaking)
+        paidAmount,
+        balance,
       });
     } catch (err) {
       console.error(err);
