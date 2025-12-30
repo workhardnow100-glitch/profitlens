@@ -11,25 +11,7 @@ export default function CISPage() {
   const router = useRouter();
   const { user, isLoading, isAuthenticated } = useUser();
 
-  // ---------------------------------------------------------
-  // CLIENT RESOLUTION (same pattern as VAT / Tax Hub)
-  // ---------------------------------------------------------
-  const clientId = user?.actingAsClientId ?? user?.clientId;
-
-  // ---------------------------------------------------------
-  // AUTH GUARD
-  // ---------------------------------------------------------
-  useEffect(() => {
-    if (isLoading) return;
-    if (!isAuthenticated) router.replace("/login");
-  }, [isLoading, isAuthenticated, router]);
-
-  if (isLoading) return null;
-  if (!isAuthenticated || !user) return null;
-
-  // ---------------------------------------------------------
-  // STATE
-  // ---------------------------------------------------------
+  // 🔹 ALL STATE HOOKS MUST COME BEFORE ANY RETURN
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
@@ -61,29 +43,38 @@ export default function CISPage() {
   const [returnsError, setReturnsError] = useState(null);
   const [deductionsError, setDeductionsError] = useState(null);
 
-  // ---------------------------------------------------------
-  // AUTO-FILL PERIOD FROM TAX HUB LINK
-  // ---------------------------------------------------------
-useEffect(() => {
-  if (!router.isReady) return;
+  // CLIENT RESOLUTION (same pattern as VAT / Tax Hub)
+  const clientId = user?.actingAsClientId ?? user?.clientId;
 
-  const { from: qFrom, to: qTo } = router.query;
+  // AUTH GUARD (effect can early-return internally; that's fine)
+  useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthenticated) {
+      router.replace("/login");
+    }
+  }, [isLoading, isAuthenticated, router]);
 
-  if (qFrom && qTo) {
-    setFrom(qFrom);
-    setTo(qTo);
+  // AUTO-FILL PERIOD FROM TAX HUB LINK (client-side only)
+  useEffect(() => {
+    if (!router.isReady) return;
 
-    // Important: wrap async calls in a microtask to avoid hydration mismatch
-    Promise.resolve().then(() => {
-      fetchCIS(qFrom, qTo);
-    });
-  }
-}, [router.isReady]);
+    const { from: qFrom, to: qTo } = router.query;
 
+    if (qFrom && qTo) {
+      setFrom(qFrom);
+      setTo(qTo);
+      // Run fetch on next tick to avoid hydration timing weirdness
+      Promise.resolve().then(() => {
+        fetchCIS(qFrom, qTo);
+      });
+    }
+  }, [router.isReady]); // do not depend on router.query to avoid SSR/client divergence
 
-  // ---------------------------------------------------------
+  // 🔹 ONLY NOW do we gate rendering
+  if (isLoading) return null;
+  if (!isAuthenticated || !user) return null;
+
   // INTERNAL: Fetch CIS summary
-  // ---------------------------------------------------------
   async function fetchCIS(start, end) {
     const periodStart = start || from;
     const periodEnd = end || to;
@@ -122,9 +113,7 @@ useEffect(() => {
     }
   }
 
-  // ---------------------------------------------------------
   // INTERNAL: Submit CIS return
-  // ---------------------------------------------------------
   async function submitCIS() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
@@ -173,9 +162,7 @@ useEffect(() => {
     }
   }
 
-  // ---------------------------------------------------------
   // CIS MTD LOADERS (HMRC)
-  // ---------------------------------------------------------
   async function loadCISStatus() {
     if (!clientId) return alert("No client selected.");
 
@@ -283,9 +270,7 @@ useEffect(() => {
     }
   }
 
-  // ---------------------------------------------------------
   // CIS receipt lookup
-  // ---------------------------------------------------------
   async function loadCISReceipt() {
     setReceiptError(null);
     setCisReceipt(null);
@@ -321,9 +306,7 @@ useEffect(() => {
     }
   }
 
-  // ---------------------------------------------------------
   // CIS subcontractor verification
-  // ---------------------------------------------------------
   async function verifySubcontractor() {
     setVerifyError(null);
     setCisVerification(null);
@@ -358,9 +341,7 @@ useEffect(() => {
     }
   }
 
-  // ---------------------------------------------------------
   // RENDER
-  // ---------------------------------------------------------
   return (
     <ResponsiveLayout currentPageName="CIS Return">
       <div className="p-6 space-y-6">
@@ -569,7 +550,7 @@ useEffect(() => {
           )}
         </ResponsiveCard>
 
-        {/* CIS Returns (HMRC) */}
+        {/* CIS Returns */}
         <ResponsiveCard title="CIS Returns (from HMRC)">
           <button
             onClick={loadCISReturns}
@@ -600,7 +581,7 @@ useEffect(() => {
           )}
         </ResponsiveCard>
 
-        {/* CIS Deductions (HMRC view) */}
+        {/* CIS Deductions */}
         <ResponsiveCard title="CIS Deductions (HMRC view)">
           <button
             onClick={loadCISDeductions}
@@ -631,7 +612,7 @@ useEffect(() => {
           )}
         </ResponsiveCard>
 
-        {/* CIS Receipt Lookup (MTD) */}
+        {/* CIS Receipt Lookup */}
         <ResponsiveCard title="CIS Receipt Lookup (MTD)">
           <div className="space-y-3 text-sm">
             <p>
