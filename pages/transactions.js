@@ -722,116 +722,145 @@ export default function Transactions() {
                     </td>
 
                     {/* Category */}
-                    <td>
-                      <select
-                        className="border p-1 rounded text-sm"
-                        value={businessCategory}
-                        onChange={(e) =>
-                          updateBusinessCategory(tx.id, e.target.value)
-                        }
-                      >
-                        {CT_CATEGORY_OPTIONS.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+<td>
+  <select
+    className="border p-1 rounded text-sm"
+    value={businessCategory}
+    onChange={(e) =>
+      updateBusinessCategory(tx.id, e.target.value)
+    }
+  >
+    {CT_CATEGORY_OPTIONS.map((cat) => (
+      <option key={cat} value={cat}>
+        {cat}
+      </option>
+    ))}
+  </select>
+</td>
 
-                    {/* VAT + CIS + SA */}
-                    <td>
-                      <div className="flex flex-col gap-1">
-                        {/* VAT */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500">VAT:</span>
-                          <select
-                            className="border p-1 rounded text-sm"
-                            value={vatRate}
-                            onChange={(e) =>
-                              updateVATForTx(tx, e.target.value)
-                            }
-                          >
-                            <option value={20}>20% Standard</option>
-                            <option value={5}>5% Reduced</option>
-                            <option value={0}>0% Zero Rated</option>
-                            <option value={0}>Exempt</option>
-                            <option value={0}>Out of Scope</option>
-                          </select>
-                        </div>
+{/* VAT + CIS + SA + Include VAT + Include CIS */}
+<td>
+  <div className="flex flex-col gap-1">
 
-                        {/* CIS */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500">CIS:</span>
-                          <select
-                            className="border p-1 rounded text-sm"
-                            value={cisSelection}
-                            onChange={(e) =>
-                              updateCISForTx(tx, e.target.value)
-                            }
-                          >
-                            <option value="none">No CIS</option>
-                            <option value="deducted">CIS Deducted</option>
-                            <option value="suffered">CIS Suffered</option>
-                          </select>
-                        </div>
+    {/* VAT */}
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-500">VAT:</span>
+      <select
+        className="border p-1 rounded text-sm"
+        value={vatRate}
+        onChange={(e) =>
+          updateVATForTx(tx, e.target.value)
+        }
+      >
+        <option value={20}>20% Standard</option>
+        <option value={5}>5% Reduced</option>
+        <option value={0}>0% Zero Rated</option>
+        <option value={0}>Exempt</option>
+        <option value={0}>Out of Scope</option>
+      </select>
+    </div>
 
-                        {/* SA */}
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="text-xs text-slate-500 cursor-help"
-                            title={SA_TAG_HELP_TEXT}
-                          >
-                            SA:
-                          </span>
-                          <select
-                            className="border p-1 rounded text-sm"
-                            value={saSelection}
-                            onChange={(e) =>
-                              updateSAForTx(tx, e.target.value)
-                            }
-                          >
-                            <option value="excluded">Not SA</option>
-                            <option value="included">Include in SA</option>
-                          </select>
-                        </div>
-                      </div>
-                    </td>
+    {/* Include in VAT */}
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-500">In VAT:</span>
+      <input
+        type="checkbox"
+        checked={tx.includedinvat === true}
+        onChange={(e) =>
+          updateTransaction(tx.id, {
+            includedinvat: e.target.checked
+          })
+        }
+      />
+    </div>
 
-                    {/* VAT Amount */}
-                    <td>£{effectiveVatAmount.toFixed(2)}</td>
+    {/* CIS */}
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-500">CIS:</span>
+      <select
+        className="border p-1 rounded text-sm"
+        value={cisSelection}
+        onChange={(e) =>
+          updateCISForTx(tx, e.target.value)
+        }
+      >
+        <option value="none">No CIS</option>
+        <option value="deducted">CIS Deducted</option>
+        <option value="suffered">CIS Suffered</option>
+      </select>
+    </div>
 
-                    {/* Asset Disposal */}
-                    <td>
-                      <select
-                        className="border p-1 rounded text-sm"
-                        value={tx.assetdisposaltype || "NONE"}
-                        onChange={(e) =>
-                          handleAssetDisposalChange(tx, e.target.value)
-                        }
-                      >
-                        <option value="NONE">No</option>
-                        <option value="MAIN_POOL">Main Pool</option>
-                        <option value="SPECIAL_RATE_POOL">
-                          Special Rate
-                        </option>
-                        <option value="CARS">Cars</option>
-                        <option value="SHORT_LIFE">Short‑Life</option>
-                      </select>
-                    </td>
+    {/* Include in CIS */}
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-slate-500">In CIS:</span>
+      <input
+        type="checkbox"
+        checked={tx.includedincis === true}
+        onChange={(e) =>
+          updateTransaction(tx.id, {
+            includedincis: e.target.checked
+          })
+        }
+      />
+    </div>
 
-                    {/* CT flag */}
-                    <td className="text-center">
-                      <input
-                        type="checkbox"
-                        checked={tx.includedinct === true}
-                        onChange={async (e) => {
-                          await updateTransaction(tx.id, {
-                            includedinct: e.target.checked,
-                            manualctoverride: true,
-                          });
-                        }}
-                      />
-                    </td>
+    {/* SA */}
+    <div className="flex items-center gap-2">
+      <span
+        className="text-xs text-slate-500 cursor-help"
+        title={SA_TAG_HELP_TEXT}
+      >
+        SA:
+      </span>
+      <select
+        className="border p-1 rounded text-sm"
+        value={saSelection}
+        onChange={(e) =>
+          updateSAForTx(tx, e.target.value)
+        }
+      >
+        <option value="excluded">Not SA</option>
+        <option value="included">Include in SA</option>
+      </select>
+    </div>
+
+  </div>
+</td>
+
+{/* VAT Amount */}
+<td>£{effectiveVatAmount.toFixed(2)}</td>
+
+{/* Asset Disposal */}
+<td>
+  <select
+    className="border p-1 rounded text-sm"
+    value={tx.assetdisposaltype || "NONE"}
+    onChange={(e) =>
+      handleAssetDisposalChange(tx, e.target.value)
+    }
+  >
+    <option value="NONE">No</option>
+    <option value="MAIN_POOL">Main Pool</option>
+    <option value="SPECIAL_RATE_POOL">Special Rate</option>
+    <option value="CARS">Cars</option>
+    <option value="SHORT_LIFE">Short‑Life</option>
+  </select>
+</td>
+
+{/* CT flag */}
+<td className="text-center">
+  <input
+    type="checkbox"
+    checked={tx.includedinct === true}
+    onChange={async (e) => {
+      await updateTransaction(tx.id, {
+        includedinct: e.target.checked,
+        manualctoverride: true,
+      });
+    }}
+  />
+</td>
+
                   </tr>
                 );
               })}
