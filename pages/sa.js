@@ -1,11 +1,11 @@
 // pages/sa.js
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
+import { useUser } from "../hooks/useUser";
 
 // ✅ Chart.js imports
 import {
@@ -32,8 +32,8 @@ ChartJS.register(
 );
 
 export default function SAPage() {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const { user, isLoading, isAuthenticated } = useUser();
 
   const [loading, setLoading] = useState(false);
   const [selectedYear, setSelectedYear] = useState("");
@@ -49,6 +49,9 @@ export default function SAPage() {
   const [mtdReturns, setMtdReturns] = useState(null);
   const [mtdReceipt, setMtdReceipt] = useState(null);
 
+  // Unified client resolution for SA
+  const clientId = user?.actingAsClientId ?? user?.clientId;
+
   // ✅ Auto-generate SA tax years (2020/21 → 2030/31)
   const saYears = [];
   for (let y = 2020; y <= 2030; y++) {
@@ -59,16 +62,21 @@ export default function SAPage() {
     });
   }
 
+  // AUTH GUARD
   useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) router.replace("/login");
-  }, [session, status]);
+    if (isLoading) return;
+    if (!isAuthenticated) router.replace("/login");
+  }, [isLoading, isAuthenticated, router]);
+
+  // 🔹 ONLY NOW do we gate rendering
+  if (isLoading) return null;
+  if (!isAuthenticated || !user) return null;
 
   async function fetchSA() {
     if (!selectedYear) return alert("Please select a tax year.");
-
     const year = saYears.find((y) => y.label === selectedYear);
     if (!year) return;
+    if (!clientId) return alert("Missing client ID.");
 
     setLoading(true);
     try {
@@ -77,7 +85,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -90,7 +98,7 @@ export default function SAPage() {
       const payRes = await fetch("/api/sa/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientId: session.user.actingAsClientId ?? session.user.clientId }),
+        body: JSON.stringify({ clientId }),
       });
 
       const payData = await payRes.json();
@@ -101,7 +109,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -119,9 +127,9 @@ export default function SAPage() {
 
   async function submitSA() {
     if (!selectedYear) return alert("Please select a tax year.");
-
     const year = saYears.find((y) => y.label === selectedYear);
     if (!year) return;
+    if (!clientId) return alert("Missing client ID.");
 
     if (!confirm("Submit this Self Assessment period? This will lock it.")) return;
 
@@ -131,7 +139,7 @@ export default function SAPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           periodStart: year.start,
           periodEnd: year.end,
         }),
@@ -140,7 +148,7 @@ export default function SAPage() {
       const data = await res.json();
       if (data.success) {
         alert("Self Assessment period locked successfully.");
-        setResult({ ...result, locked: true });
+        setResult((prev) => (prev ? { ...prev, locked: true } : prev));
       } else {
         alert("Error submitting SA: " + data.error);
       }
@@ -162,12 +170,16 @@ export default function SAPage() {
       alert("Please enter a date and amount.");
       return;
     }
+    if (!clientId) {
+      alert("Missing client ID.");
+      return;
+    }
 
     const res = await fetch("/api/sa/add-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        clientId: session.user.actingAsClientId ?? session.user.clientId,
+        clientId,
         paymentDate: date,
         amount,
         direction,
@@ -183,8 +195,6 @@ export default function SAPage() {
       alert("Error: " + data.error);
     }
   }
-
-  if (!session?.user) return null;
 
   return (
     <ResponsiveLayout currentPageName="Self Assessment">
@@ -232,14 +242,26 @@ export default function SAPage() {
         {result && (
           <>
             <ResponsiveCard title={`Summary ${result.locked ? "(Locked)" : ""}`}>
-              <p><strong>Total Income:</strong> £{result.totalIncome.toFixed(2)}</p>
-              <p><strong>Total Expenses:</strong> £{result.totalExpenses.toFixed(2)}</p>
-              <p><strong>Profit:</strong> £{result.profit.toFixed(2)}</p>
+              <p>
+                <strong>Total Income:</strong> £{result.totalIncome.toFixed(2)}
+              </p>
+              <p>
+                <strong>Total Expenses:</strong> £{result.totalExpenses.toFixed(2)}
+              </p>
+              <p>
+                <strong>Profit:</strong> £{result.profit.toFixed(2)}
+              </p>
 
               {/* ✅ Full UK Tax Band Breakdown */}
-              <p><strong>Personal Allowance:</strong> £{result.personalAllowance.toFixed(2)}</p>
-              <p><strong>Taxable Income:</strong> £{result.taxableIncome.toFixed(2)}</p>
-              <p><strong>Tax Liability (UK Bands):</strong> £{result.taxLiability.toFixed(2)}</p>
+              <p>
+                <strong>Personal Allowance:</strong> £{result.personalAllowance.toFixed(2)}
+              </p>
+              <p>
+                <strong>Taxable Income:</strong> £{result.taxableIncome.toFixed(2)}
+              </p>
+              <p>
+                <strong>Tax Liability (UK Bands):</strong> £{result.taxLiability.toFixed(2)}
+              </p>
 
               <div className="mt-4">
                 <button
@@ -655,4 +677,3 @@ export default function SAPage() {
     </ResponsiveLayout>
   );
 }
-
