@@ -1,5 +1,3 @@
-// pages/api/transactions/upsert.js
-
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -18,6 +16,7 @@ export default async function handler(req, res) {
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
+
   if (!(isFounder || isSubscribedOrTrial)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
@@ -30,50 +29,33 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
+  const { id, ...fields } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ error: "Missing transaction ID" });
+  }
+
   try {
-    const { id, ...updates } = req.body || {};
+    // Only update fields provided
+    const updatePayload = {
+      ...fields,
+      updatedat: new Date().toISOString(),
+    };
 
-    if (!id) {
-      return res.status(400).json({ error: "Missing transaction id" });
-    }
-
-    // Safety: never allow client_id/user_id to be changed through this endpoint
-    delete updates.client_id;
-    delete updates.user_id;
-    delete updates.id;
-
-    // Optional: coerce booleans if they come as strings
-    const booleanFields = [
-      "includedinvat",
-      "includedincis",
-      "includedinct",
-      "includedinsa",
-      "manualctoverride",
-      "tax_locked",
-    ];
-    for (const key of booleanFields) {
-      if (key in updates) {
-        if (updates[key] === "true") updates[key] = true;
-        if (updates[key] === "false") updates[key] = false;
-      }
-    }
-
-    const { data, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("transactions")
-      .update(updates)
+      .update(updatePayload)
       .eq("id", id)
-      .eq("client_id", clientId)
-      .select()
-      .single();
+      .eq("client_id", clientId);
 
     if (error) {
-      console.error("❌ TX UPSERT ERROR:", error.message || error);
-      return res.status(500).json({ error: error.message || "Update failed" });
+      console.error("Upsert error:", error);
+      return res.status(500).json({ error: error.message });
     }
 
-    return res.status(200).json({ success: true, transaction: data });
+    return res.status(200).json({ success: true });
   } catch (err) {
-    console.error("❌ TX UPSERT EXCEPTION:", err);
-    return res.status(500).json({ error: "Unexpected error" });
+    console.error("❌ Upsert API error:", err);
+    return res.status(500).json({ error: "Failed to update transaction" });
   }
 }
