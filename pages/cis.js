@@ -64,18 +64,22 @@ export default function CISPage() {
   // ---------------------------------------------------------
   // AUTO-FILL PERIOD FROM TAX HUB LINK
   // ---------------------------------------------------------
-  useEffect(() => {
-    if (!router.isReady) return;
+useEffect(() => {
+  if (!router.isReady) return;
 
-    const qFrom = router.query.from;
-    const qTo = router.query.to;
+  const { from: qFrom, to: qTo } = router.query;
 
-    if (qFrom && qTo) {
-      setFrom(qFrom);
-      setTo(qTo);
+  if (qFrom && qTo) {
+    setFrom(qFrom);
+    setTo(qTo);
+
+    // Important: wrap async calls in a microtask to avoid hydration mismatch
+    Promise.resolve().then(() => {
       fetchCIS(qFrom, qTo);
-    }
-  }, [router.isReady, router.query]);
+    });
+  }
+}, [router.isReady]);
+
 
   // ---------------------------------------------------------
   // INTERNAL: Fetch CIS summary
