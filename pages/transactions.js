@@ -1,16 +1,12 @@
 // pages/transactions.js
 
-
 // ❗ THIS is the real fix — forces SSR and disables static generation
 export async function getServerSideProps() {
   return { props: {} };
 }
 
-
-
 import React, { useEffect, useState, useMemo } from "react";
 import useSWR, { mutate } from "swr";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 
@@ -18,6 +14,8 @@ import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import ResponsiveHighchart from "../components/ResponsiveHighchart";
+
+import { useUser } from "../hooks/useUser";
 
 import { CT_MAP } from "../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
@@ -52,8 +50,8 @@ const SA_TAG_HELP_TEXT =
   "Mark transactions that should feed into Self Assessment (SA100 / SA103 / SA105 / SA110).";
 
 export default function Transactions() {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const { user, isLoading, isAuthenticated } = useUser();
 
   const [period, setPeriod] = useState("month");
   const [customFrom, setCustomFrom] = useState("");
@@ -65,21 +63,23 @@ export default function Transactions() {
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [assetModalTx, setAssetModalTx] = useState(null);
 
-  // 🔑 Access control (subscription)
+  // 🔐 Subscription / access guard (unified with useUser)
   useEffect(() => {
-    if (status === "loading") return;
-    if (session?.user) {
-      const isAdmin = session.user.role === "admin";
-      const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-        session.user.subscriptionStatus
-      );
-      if (!(isAdmin || isSubscribedOrTrial)) {
-        router.replace("/upgrade");
-      }
-    } else {
+    if (isLoading) return;
+    if (!isAuthenticated || !user) {
       router.replace("/login");
+      return;
     }
-  }, [session, status, router]);
+
+    const isAdmin = user.role === "admin";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      user.subscriptionStatus
+    );
+
+    if (!(isAdmin || isSubscribedOrTrial)) {
+      router.replace("/upgrade");
+    }
+  }, [isLoading, isAuthenticated, user, router]);
 
   // 📈 Load Highcharts + modules
   useEffect(() => {
@@ -388,13 +388,38 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
-  // ✅ Generic transaction upsert helper — used for CT, category, disposal, etc.
+  // ✅ Generic transaction upsert helper — used for CT, category, disposal, SA, etc.
   async function updateTransaction(id, payload) {
-    await fetch("/api/transactions/upsert", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, ...payload }),
-    });
+    try {
+      console.log("🔧 TX UPDATE START", { id, payload });
+      const res = await fetch("/api/transactions/upsert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...payload }),
+      });
+
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (e) {
+        console.warn("TX UPDATE: response not JSON", e);
+      }
+
+      if (!res.ok || (data && data.success === false)) {
+        console.error("❌ TX UPDATE FAILED", {
+          status: res.status,
+          data,
+        });
+        return false;
+      }
+
+      console.log("✅ TX UPDATE OK", { id, payload, data });
+      await mutate("/api/transactions");
+      return true;
+    } catch (err) {
+      console.error("❌ TX UPDATE ERROR", err);
+      return false;
+    }
   }
 
   // ✅ Mode A Auto‑CT: category → suggested CT flag
@@ -422,8 +447,6 @@ export default function Transactions() {
       category: newCategory,
       auto_ct: autoCT,
     });
-
-    mutate("/api/transactions");
   }
 
   async function updateVATForTx(tx, newRate) {
@@ -441,7 +464,7 @@ export default function Transactions() {
       }),
     });
 
-    mutate("/api/transactions");
+    await mutate("/api/transactions");
   }
 
   async function updateCISForTx(tx, newValue) {
@@ -455,15 +478,14 @@ export default function Transactions() {
       }),
     });
 
-    mutate("/api/transactions");
+    await mutate("/api/transactions");
   }
 
-  // ⭐ NEW: SA helper (simple toggle, uses existing includedinsa column)
+  // ⭐ SA helper (simple toggle, uses existing includedinsa column)
   async function updateSAForTx(tx, newValue) {
     await updateTransaction(tx.id, {
       includedinsa: newValue === "included",
     });
-    mutate("/api/transactions");
   }
 
   // ✅ Asset Disposal handler: open modal, clear fields when "No"
@@ -476,8 +498,6 @@ export default function Transactions() {
         assettwdv: null,
         assetbalancingcharge: null,
         assetbalancingallowance: null,
-      }).then(() => {
-        mutate("/api/transactions");
       });
       return;
     }
@@ -487,6 +507,16 @@ export default function Transactions() {
       assetdisposaltype: value,
     });
     setAssetModalOpen(true);
+  }
+
+  if (isLoading || !isAuthenticated || !user) {
+    return (
+      <ResponsiveLayout>
+        <div className="p-8">
+          <p className="text-slate-500">Loading transactions…</p>
+        </div>
+      </ResponsiveLayout>
+    );
   }
 
   return (
@@ -512,7 +542,7 @@ export default function Transactions() {
               }`}
             >
               {btn.label}
-          </button>
+            </button>
           ))}
         </div>
 
@@ -804,7 +834,9 @@ export default function Transactions() {
                       >
                         <option value="NONE">No</option>
                         <option value="MAIN_POOL">Main Pool</option>
-                        <option value="SPECIAL_RATE_POOL">Special Rate</option>
+                        <option value="SPECIAL_RATE_POOL">
+                          Special Rate
+                        </option>
                         <option value="CARS">Cars</option>
                         <option value="SHORT_LIFE">Short‑Life</option>
                       </select>
@@ -815,14 +847,12 @@ export default function Transactions() {
                       <input
                         type="checkbox"
                         checked={tx.includedinct === true}
-                        onChange={(e) =>
-                          updateTransaction(tx.id, {
+                        onChange={async (e) => {
+                          await updateTransaction(tx.id, {
                             includedinct: e.target.checked,
                             manualctoverride: true,
-                          }).then(() => {
-                            mutate("/api/transactions");
-                          })
-                        }
+                          });
+                        }}
                       />
                     </td>
                   </tr>
@@ -844,13 +874,11 @@ export default function Transactions() {
         <AssetDisposalModal
           transaction={assetModalTx}
           onClose={() => setAssetModalOpen(false)}
-          onSave={(payload) => {
-            updateTransaction(assetModalTx.id, {
+          onSave={async (payload) => {
+            await updateTransaction(assetModalTx.id, {
               ...payload,
               includedinct: true,
               manualctoverride: true,
-            }).then(() => {
-              mutate("/api/transactions");
             });
             setAssetModalOpen(false);
           }}
