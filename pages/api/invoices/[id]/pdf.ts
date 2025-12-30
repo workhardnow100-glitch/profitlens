@@ -34,16 +34,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Invoice not found" });
     }
 
-    // 2) Fetch client (for full details)
-    const { data: client, error: clientError } = await supabaseAdmin
-      .from("clients")
+    // 2) Fetch EXTERNAL CLIENT (new architecture)
+    const { data: externalClient, error: clientError } = await supabaseAdmin
+      .from("external_clients")
       .select("*")
-      .eq("id", invoice.client_id)
+      .eq("id", invoice.external_client_id)
       .eq("user_id", userId)
       .single();
 
     if (clientError) {
-      console.error("Client fetch error:", clientError);
+      console.error("External client fetch error:", clientError);
     }
 
     // 3) Fetch line items
@@ -58,7 +58,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: "Failed to fetch line items" });
     }
 
-    // 4) Fetch matched payments (optional, for later extensions)
+    // 4) Fetch matched payments
     const { data: payments, error: payError } = await supabaseAdmin
       .from("invoice_payments")
       .select("*, transactions(*)")
@@ -68,26 +68,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.error("Payments fetch error:", payError);
     }
 
-    // Payment link, if present
     const paymentLinkUrl = invoice.stripe_payment_link_url || null;
 
-    // 5) Build PDF buffer using your engine + template
+    // 5) Build PDF buffer
     const buffer = await createPdfBuffer((doc) =>
       buildInvoicePdf(doc, {
         invoice,
-        client,
+        externalClient, // ⭐ FIXED
         lineItems: lineItems || [],
         payments: payments || [],
         paymentLinkUrl,
       })
     );
 
-    // 6) Optionally store and record in pdf_documents
+    // 6) Store PDF record
     try {
       const filename = `invoice-${invoice.invoice_number || invoice.id}.pdf`;
 
       await storePdfAndRecord({
-        clientId: invoice.client_id,
+        clientId: invoice.external_client_id, // ⭐ FIXED
         type: "invoice",
         periodStart: invoice.issue_date || null,
         periodEnd: invoice.due_date || null,
@@ -103,7 +102,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         buffer,
       });
     } catch (storeErr) {
-      // Non-fatal: log but still return PDF
       console.error("Failed to store invoice PDF:", storeErr);
     }
 
