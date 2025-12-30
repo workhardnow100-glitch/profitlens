@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 
 import { useUser } from "../../hooks/useUser";
-import { useSession } from "next-auth/react";
 
 // Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
@@ -49,17 +48,14 @@ export const SidebarMenuButton = ({ children, className }) => (
 // ⭐ ONE SINGLE, RELIABLE CLIENT SWITCH FUNCTION
 async function switchClientGlobal(clientId) {
   try {
-    // 1. Update acting client in DB
     await fetch("/api/accountant/switch-client", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ clientId }),
     });
 
-    // 2. Force NextAuth to reload session
     await fetch("/api/auth/session?update=1");
 
-    // 3. Hard reload so every page sees the new acting client
     window.location.reload();
   } catch (err) {
     console.error("Client switch failed:", err);
@@ -69,7 +65,7 @@ async function switchClientGlobal(clientId) {
 
 // ⭐ FIXED Client Switcher (top dropdown)
 function ClientSwitcher() {
-  const { data: session } = useSession();
+  const { user } = useUser();
   const [clients, setClients] = useState([]);
 
   useEffect(() => {
@@ -84,7 +80,7 @@ function ClientSwitcher() {
     load();
   }, []);
 
-  const current = session?.user?.actingAsClientId || "";
+  const current = user?.actingAsClientId || "";
 
   if (!clients || clients.length <= 1) return null;
 
