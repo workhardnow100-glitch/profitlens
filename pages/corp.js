@@ -1,22 +1,23 @@
 // pages/corp.js
 import { useState, useEffect, useMemo } from "react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
 
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
+import { useUser } from "../hooks/useUser";
 
 export default function CorpPage() {
-  const { data: session, status } = useSession();
   const router = useRouter();
+  const { user, isLoading, isAuthenticated } = useUser();
 
+  // 🔹 ALL HOOKS MUST COME BEFORE ANY CONDITIONAL RETURN
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
 
-  // CT payments (front-end view only; backend stores the truth)
+  // CT payments (front-end view only)
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -33,12 +34,16 @@ export default function CorpPage() {
   const [ctLoading, setCtLoading] = useState(false);
   const [ctError, setCtError] = useState(null);
 
-  useEffect(() => {
-    if (status === "loading") return;
-    if (!session?.user) router.replace("/login");
-  }, [session, status, router]);
+  // Unified client resolution
+  const clientId = user?.actingAsClientId ?? user?.clientId;
 
-  // Derived drilldown groups from result.breakdown
+  // AUTH GUARD
+  useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthenticated) router.replace("/login");
+  }, [isLoading, isAuthenticated, router]);
+
+  // Derived drilldown groups
   const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
     if (!result?.breakdown) {
       return { incomeRows: [], allowableRows: [], disallowableRows: [], reviewRows: [] };
@@ -59,12 +64,17 @@ export default function CorpPage() {
     return { incomeRows, allowableRows, disallowableRows, reviewRows };
   }, [result]);
 
+  // 🔹 ONLY NOW DO WE GATE RENDERING
+  if (isLoading) return null;
+  if (!isAuthenticated || !user) return null;
+
+  // Fetch CT summary
   async function fetchCorp(start = from, end = to) {
     if (!start || !end) {
       alert("Please select both start and end dates.");
       return;
     }
-    if (!session?.user?.clientId) {
+    if (!clientId) {
       alert("Missing client ID.");
       return;
     }
@@ -75,16 +85,18 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           periodStart: start,
           periodEnd: end,
         }),
       });
+
       const data = await res.json();
       if (!data.success) {
         alert("Error fetching Corporation Tax summary: " + (data.error || "Unknown error"));
         return;
       }
+
       setResult({ ...data, locked: data.locked || false });
     } catch (err) {
       console.error(err);
@@ -94,6 +106,7 @@ export default function CorpPage() {
     }
   }
 
+  // Submit CT period
   async function submitCorp() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
@@ -107,11 +120,12 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           periodStart: from,
           periodEnd: to,
         }),
       });
+
       const data = await res.json();
       if (data.success) {
         alert("Corporation Tax period locked successfully.");
@@ -127,6 +141,7 @@ export default function CorpPage() {
     }
   }
 
+  // Add CT payment
   async function submitPayment() {
     if (!paymentDate || !paymentAmount) {
       alert("Please enter date and amount.");
@@ -138,7 +153,7 @@ export default function CorpPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: session.user.actingAsClientId ?? session.user.clientId,
+          clientId,
           paymentDate,
           amount: paymentAmount,
           direction: paymentDirection,
@@ -161,7 +176,6 @@ export default function CorpPage() {
       setPaymentDirection("payment");
       setPaymentReference("");
 
-      // The API returns totals for all payments for this client
       if (data.totals) {
         setPaymentTotals(data.totals);
       }
@@ -175,7 +189,7 @@ export default function CorpPage() {
     }
   }
 
-  // Fetch CT MTD data from HMRC via new API routes
+  // Fetch CT MTD data
   async function fetchCtMtd() {
     setCtLoading(true);
     setCtError(null);
@@ -221,10 +235,9 @@ export default function CorpPage() {
     }
   }
 
-  if (!session?.user) return null;
-
   const hasResult = !!result;
 
+  // RENDER
   return (
     <ResponsiveLayout currentPageName="Corporation Tax">
       <div className="p-6 space-y-6">
@@ -338,8 +351,8 @@ export default function CorpPage() {
               {reviewRows.length > 0 && (
                 <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
                   There are <strong>{reviewRows.length}</strong> transactions marked as{" "}
-                  <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
-                  CT rules and should be checked before filing.
+                    <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
+                    CT rules and should be checked before filing.
                 </div>
               )}
             </ResponsiveCard>
@@ -408,7 +421,7 @@ export default function CorpPage() {
               />
             </ResponsiveCard>
 
-            {/* Drilldown: Disallowable / add-backs */}
+            {/* Drilldown: Disallowable */}
             <ResponsiveCard title="Disallowable expenses (add‑backs)">
               <ResponsiveTable
                 columns={[
@@ -421,7 +434,7 @@ export default function CorpPage() {
               />
             </ResponsiveCard>
 
-            {/* Drilldown: Review / uncategorised */}
+            {/* Drilldown: Review */}
             {reviewRows.length > 0 && (
               <ResponsiveCard title="Review / uncategorised transactions">
                 <p className="text-sm text-slate-600 mb-2">
@@ -443,7 +456,7 @@ export default function CorpPage() {
           </>
         )}
 
-        {/* CT MTD – HMRC cockpit (placed at the bottom) */}
+        {/* CT MTD – HMRC cockpit */}
         <ResponsiveCard title="HMRC MTD – Corporation Tax">
           <div className="flex items-center justify-between mb-3 gap-3">
             <p className="text-sm text-slate-600">
@@ -646,7 +659,7 @@ export default function CorpPage() {
         </div>
       )}
 
-      {/* ✅ Filing Disclaimer (Strong Version for Corporation Tax) */}
+      {/* Filing Disclaimer */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
         ProfitLens does not provide tax advice. All calculations are estimates only. Users are
         solely responsible for verifying all figures and ensuring accuracy before submitting any tax
@@ -655,4 +668,3 @@ export default function CorpPage() {
     </ResponsiveLayout>
   );
 }
-
