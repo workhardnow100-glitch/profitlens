@@ -1,6 +1,6 @@
 // pages/transactions.js
 
-// ❗ THIS is the real fix — forces SSR and disables static generation
+// Force SSR – avoids static generation issues
 export async function getServerSideProps() {
   return { props: {} };
 }
@@ -33,7 +33,7 @@ function safeDate(value) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// ✅ Single unified category list for ALL dropdowns (matches Dashboard)
+// Unified CT category list
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
@@ -45,7 +45,6 @@ const CT_CATEGORY_OPTIONS = Array.from(
   ])
 ).sort();
 
-// ✅ Simple SA tagging legend (no schema changes; uses includedinsa only)
 const SA_TAG_HELP_TEXT =
   "Mark transactions that should feed into Self Assessment (SA100 / SA103 / SA105 / SA110).";
 
@@ -59,11 +58,10 @@ export default function Transactions() {
   const [Highcharts, setHighcharts] = useState(null);
   const [hcReady, setHcReady] = useState(false);
 
-  // ✅ Asset Disposal Modal State
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [assetModalTx, setAssetModalTx] = useState(null);
 
-  // 🔐 Subscription / access guard (unified with useUser)
+  // Subscription / access guard
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated || !user) {
@@ -81,7 +79,7 @@ export default function Transactions() {
     }
   }, [isLoading, isAuthenticated, user, router]);
 
-  // 📈 Load Highcharts + modules
+  // Highcharts + modules
   useEffect(() => {
     let mounted = true;
     if (typeof window === "undefined") return;
@@ -110,9 +108,10 @@ export default function Transactions() {
     };
   }, []);
 
+  // Read-only list API you pasted
   const { data, error } = useSWR("/api/transactions", fetcher);
 
-  // ✅ Local period filtering (API already has its own window; this is client view)
+  // Period filtering (client-side window)
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
@@ -188,7 +187,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // ✅ Auto VAT logic (unchanged, but now reading business_category consistently)
+  // Auto VAT (same logic as before, still uses update-vat API if you keep it)
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -235,7 +234,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // ✅ Aggregation logic (income/expenses, category breakdown, top payers/merchants)
+  // Aggregation (income/expenses, categories, top payers/merchants)
   const {
     totalIncome,
     totalExpenses,
@@ -252,7 +251,6 @@ export default function Transactions() {
       incomeByPayer = {},
       expenseByMerchant = {};
 
-    // ✅ Exclude system-only categories from CT/VAT world (matches API & Dashboard intent)
     const excludedCategories = new Set([
       "Asset Disposal",
       "Insurance Payout",
@@ -328,7 +326,7 @@ export default function Transactions() {
     };
   }, [filtered]);
 
-  // ✅ Highcharts pie + drilldown options
+  // Chart options
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
     if (!filtered.length) return "NO_DATA";
@@ -388,10 +386,9 @@ export default function Transactions() {
     { key: "custom", label: "Custom" },
   ];
 
-  // ✅ Generic transaction upsert helper — used for CT, category, disposal, SA, etc.
+  // Generic upsert helper → /api/transactions/upsert
   async function updateTransaction(id, payload) {
     try {
-      console.log("🔧 TX UPDATE START", { id, payload });
       const res = await fetch("/api/transactions/upsert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -401,29 +398,27 @@ export default function Transactions() {
       let data = null;
       try {
         data = await res.json();
-      } catch (e) {
-        console.warn("TX UPDATE: response not JSON", e);
+      } catch {
+        // ignore non-JSON
       }
 
       if (!res.ok || (data && data.success === false)) {
-        console.error("❌ TX UPDATE FAILED", {
+        console.error("Transaction update failed", {
           status: res.status,
           data,
         });
         return false;
       }
 
-      console.log("✅ TX UPDATE OK", { id, payload, data });
       await mutate("/api/transactions");
       return true;
     } catch (err) {
-      console.error("❌ TX UPDATE ERROR", err);
+      console.error("Transaction update error", err);
       return false;
     }
   }
 
-  // ✅ Mode A Auto‑CT: category → suggested CT flag
-  //    Backend will apply this only if manualctoverride is NOT set.
+  // Category change → updates business_category + auto_ct
   async function updateBusinessCategory(id, newCategory) {
     const key = (newCategory || "Uncategorised").toLowerCase();
 
@@ -444,51 +439,38 @@ export default function Transactions() {
     else autoCT = false;
 
     await updateTransaction(id, {
-      category: newCategory,
+      business_category: newCategory,
       auto_ct: autoCT,
     });
   }
 
+  // VAT update → via upsert
   async function updateVATForTx(tx, newRate) {
     const rate = Number(newRate);
     const gross = Number(tx.amount);
     const vatAmount = rate > 0 ? gross * (rate / 100) : 0;
 
-    await fetch("/api/transactions/update-vat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: tx.id,
-        vat_rate: rate,
-        vat_amount: vatAmount,
-      }),
+    await updateTransaction(tx.id, {
+      vat_rate: rate,
+      vat_amount: vatAmount,
     });
-
-    await mutate("/api/transactions");
   }
 
+  // CIS update → via upsert
   async function updateCISForTx(tx, newValue) {
-    await fetch("/api/transactions/update-cis", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: tx.id,
-        cisType: newValue,
-        amount: tx.amount,
-      }),
+    await updateTransaction(tx.id, {
+      cis_type: newValue, // "deducted" | "suffered" | "none"
     });
-
-    await mutate("/api/transactions");
   }
 
-  // ⭐ SA helper (simple toggle, uses existing includedinsa column)
+  // SA flag → includedinsa
   async function updateSAForTx(tx, newValue) {
     await updateTransaction(tx.id, {
       includedinsa: newValue === "included",
     });
   }
 
-  // ✅ Asset Disposal handler: open modal, clear fields when "No"
+  // Asset disposal
   function handleAssetDisposalChange(tx, value) {
     if (value === "" || value === "NONE") {
       updateTransaction(tx.id, {
@@ -744,7 +726,7 @@ export default function Transactions() {
                         : `−£${Math.abs(tx.amount).toFixed(2)}`}
                     </td>
 
-                    {/* ✅ Category dropdown + auto‑CT hint via updateBusinessCategory */}
+                    {/* Category */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -761,7 +743,7 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* ✅ VAT + CIS + SA */}
+                    {/* VAT + CIS + SA */}
                     <td>
                       <div className="flex flex-col gap-1">
                         {/* VAT */}
@@ -798,7 +780,7 @@ export default function Transactions() {
                           </select>
                         </div>
 
-                        {/* ⭐ SA */}
+                        {/* SA */}
                         <div className="flex items-center gap-2">
                           <span
                             className="text-xs text-slate-500 cursor-help"
@@ -820,10 +802,10 @@ export default function Transactions() {
                       </div>
                     </td>
 
-                    {/* ✅ VAT Amount */}
+                    {/* VAT Amount */}
                     <td>£{effectiveVatAmount.toFixed(2)}</td>
 
-                    {/* ✅ Asset Disposal Column */}
+                    {/* Asset Disposal */}
                     <td>
                       <select
                         className="border p-1 rounded text-sm"
@@ -842,7 +824,7 @@ export default function Transactions() {
                       </select>
                     </td>
 
-                    {/* ✅ CT Flag: ON/OFF manual override toggle */}
+                    {/* CT flag */}
                     <td className="text-center">
                       <input
                         type="checkbox"
@@ -861,7 +843,7 @@ export default function Transactions() {
           </ResponsiveTable>
         </ResponsiveCard>
 
-        {/* ✅ In‑App Disclaimer */}
+        {/* Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
           ProfitLens provides estimates only. Always verify figures before
           filing with HMRC. Nothing displayed here constitutes tax, accounting,
@@ -869,7 +851,7 @@ export default function Transactions() {
         </p>
       </div>
 
-      {/* ✅ Asset Disposal Modal */}
+      {/* Asset Disposal Modal */}
       {assetModalOpen && assetModalTx && (
         <AssetDisposalModal
           transaction={assetModalTx}
@@ -888,7 +870,6 @@ export default function Transactions() {
   );
 }
 
-/* ✅ FULL ASSET DISPOSAL MODAL COMPONENT */
 function AssetDisposalModal({ transaction, onClose, onSave }) {
   const [purchasePrice, setPurchasePrice] = useState("");
   const [capitalClaimed, setCapitalClaimed] = useState("");
@@ -966,7 +947,6 @@ function AssetDisposalModal({ transaction, onClose, onSave }) {
             />
           </div>
 
-          {/* ✅ ENGINE OUTPUT PANEL */}
           <div className="bg-slate-50 p-3 rounded border text-sm">
             <p>
               <span className="font-semibold">TWDV:</span>{" "}
