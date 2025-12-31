@@ -1,4 +1,3 @@
-// pages/api/recurring-invoices/index.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -8,14 +7,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
-  const userId = session.user.id as string;
+  // ⭐ Support accountant acting-as-client
+  const actingFor = session.user.actingAsClientId || session.user.id;
 
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .select("*")
-        .eq("user_id", userId)
+        .eq("client_id", actingFor)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -51,8 +51,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .insert({
-          user_id: userId,
-          client_id: clientId,
+          user_id: session.user.id,
+          client_id: clientId || actingFor,
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
