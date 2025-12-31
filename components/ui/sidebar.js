@@ -144,7 +144,7 @@ export function SidebarMenu() {
   }, []);
 
   const taxItems = [
-    { title: "Tax Hub", url: "/tax-hub", icon: DollarSign },
+    { title: "Tax Hub", url: "/tax-hub", icon: PoundSterling },
     { title: "VAT", url: "/vat", icon: FileText },
     { title: "VAT History", url: "/vat/history", icon: History },
     { title: "CIS", url: "/cis", icon: FileText },
