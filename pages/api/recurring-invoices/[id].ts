@@ -12,7 +12,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid ID" });
   }
 
-  // Determine who we are acting for
+  // ⭐ Determine who we are acting for
   const actingFor = session.user.actingAsClientId || session.user.id;
   const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
 
@@ -23,10 +23,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .select("*")
         .eq("id", id)
         .eq(filterColumn, actingFor)
-        .single();
+        .maybeSingle(); // ⭐ FIXED: no more PGRST116
 
       if (error) {
         console.error("Supabase error:", error);
+        return res.status(500).json({ error: "Failed to fetch recurring invoice" });
+      }
+
+      if (!data) {
         return res.status(404).json({ error: "Recurring invoice not found" });
       }
 
