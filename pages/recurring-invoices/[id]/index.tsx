@@ -49,17 +49,18 @@ export default function RecurringInvoiceDetailPage() {
   const [active, setActive] = useState(true);
 
   useEffect(() => {
-    if (!user) return;
+  if (!user || !loadingClients) return;
 
-    async function loadClients() {
-      const res = await fetch("/api/external-clients");
-      const data = await res.json();
-      setExternalClients(data.externalClients || []);
-      setLoadingClients(false);
-    }
+  async function loadClients() {
+    const res = await fetch("/api/external-clients");
+    const data = await res.json();
+    setExternalClients(data.externalClients || []);
+    setLoadingClients(false);
+  }
 
-    loadClients();
-  }, [user]);
+  loadClients();
+}, [user, loadingClients]);
+
 
   useEffect(() => {
     if (!user || !id) return;
