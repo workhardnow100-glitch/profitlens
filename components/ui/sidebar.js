@@ -122,6 +122,8 @@ export function SidebarMenu() {
   const [recurringOpen, setRecurringOpen] = useState(true);
   const [paymentsOpen, setPaymentsOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(true);
+  const [toolsOpen, setToolsOpen] = useState(true);
+
 
   const [clients, setClients] = useState([]);
   const [me, setMe] = useState(null);
