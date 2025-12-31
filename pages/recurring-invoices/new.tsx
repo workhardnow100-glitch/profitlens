@@ -139,7 +139,7 @@ export default function NewRecurringInvoicePage() {
       }
 
       const data = await res.json();
-      router.push(`/recurring-invoice/${data.recurring.id}`);
+      router.push(`/recurring-invoices/${data.recurring.id}`);
     } catch (err) {
       console.error(err);
       setSaving(false);
