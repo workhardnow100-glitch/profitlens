@@ -8,7 +8,7 @@ interface ExternalClient {
   business_name?: string;
   trading_name?: string;
   contact_email?: string;
-  contact_phone?: string;
+  phone?: string;
   address_line1?: string;
   address_line2?: string;
   city?: string;
@@ -62,7 +62,7 @@ export default function ExternalClientDetailPage() {
         <div>
           <div className="font-medium text-gray-900">Contact</div>
           {client.contact_email && <div>Email: {client.contact_email}</div>}
-          {client.contact_phone && <div>Phone: {client.contact_phone}</div>}
+          {client.phone && <div>Phone: {client.phone}</div>}
         </div>
 
         <div>

@@ -10,7 +10,7 @@ type MatchType = "full" | "partial" | "overpayment";
 interface InvoiceRow {
   id: string;
   user_id: string;
-  external_client_id: string;
+  client_id: string; // FIXED
   issue_date: string;
   gross_amount: number;
   status: string;
@@ -21,7 +21,7 @@ interface InvoiceRow {
 interface TransactionRow {
   id: string;
   user_id: string;
-  client_id: string; // ProfitLens client (business), not external client
+  client_id: string;
   amount: number;
   description: string | null;
   date: string;
@@ -62,15 +62,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Fetch candidate transactions
-    // NOTE: We NO LONGER filter by invoice.client_id because that was the old table.
-    // Transactions belong to the business (user), not the external customer.
+    // 2) Prevent duplicate matching
+    //
+    const { data: existingPayments } = await supabaseAdmin
+      .from("invoice_payments")
+      .select("id")
+      .eq("invoice_id", invoiceId);
+
+    if (existingPayments && existingPayments.length > 0) {
+      return res.status(200).json({
+        matched: true,
+        reason: "Invoice already matched",
+      });
+    }
+
+    //
+    // 3) Fetch candidate transactions
+    // Filter by BOTH user_id and client_id
     //
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .eq("user_id", userId)
-      .gte("date", new Date(invoice.issue_date).toISOString())
+      .eq("client_id", invoice.client_id)
+      .gte("date", invoice.issue_date)
       .order("date", { ascending: true });
 
     if (txError) {
@@ -82,7 +97,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const matches: MatchResult[] = [];
 
     //
-    // 3) Scoring logic
+    // 4) Scoring logic
     //
     for (const tx of txList) {
       let confidence = 0;
@@ -125,7 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 4) Pick best match
+    // 5) Pick best match
     //
     matches.sort((a, b) => b.confidence - a.confidence);
     const best = matches[0];
@@ -139,7 +154,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 5) Create invoice_payments row
+    // 6) Create invoice_payments row
     //
     const { error: payError } = await supabaseAdmin
       .from("invoice_payments")
@@ -157,7 +172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 6) Update invoice status
+    // 7) Update invoice status
     //
     const newStatus = best.match_type === "full" ? "paid" : "part_paid";
     const newPaymentStatus = best.match_type === "full" ? "paid" : "processing";

@@ -39,14 +39,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Fetch EXTERNAL CLIENT (correct table)
+    // 2) Fetch EXTERNAL CLIENT (correct table + correct FK)
     //
-    const { data: externalClient, error: externalClientError } = await supabaseAdmin
-      .from("external_clients")
-      .select("*")
-      .eq("id", invoice.external_client_id)
-      .eq("owner_id", userId)
-      .single();
+    const { data: externalClient, error: externalClientError } =
+      await supabaseAdmin
+        .from("external_clients")
+        .select("*")
+        .eq("id", invoice.client_id)       // FIXED
+        .eq("owner_id", userId)
+        .single();
 
     if (externalClientError || !externalClient) {
       return res.status(400).json({ error: "External client not found or missing" });
@@ -90,7 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const pdfBuffer = await createPdfBuffer((doc) =>
       buildInvoicePdf(doc, {
         invoice,
-        externalClient, // UPDATED
+        externalClient,
         lineItems: lineItems || [],
         payments: payments || [],
         paymentLinkUrl,
@@ -104,7 +105,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     //
     const { subject, html, text } = buildInvoiceEmail({
       invoice,
-      externalClient, // UPDATED
+      externalClient,
       paymentLinkUrl,
     });
 
@@ -112,7 +113,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // 7) Send email
     //
     await sendMail({
-      to: externalClient.contact_email, // UPDATED
+      to: externalClient.contact_email,
       subject,
       html,
       text,
@@ -132,7 +133,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       await supabaseAdmin.from("invoice_email_events").insert([
         {
           invoice_id: invoiceId,
-          external_client_id: invoice.external_client_id, // UPDATED
+          external_client_id: invoice.client_id, // FIXED
           user_id: userId,
           to_email: externalClient.contact_email,
           subject,

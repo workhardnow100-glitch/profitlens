@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "POST") {
     try {
       const {
-        externalClientId,   // UPDATED — replaces clientId
+        clientId,            // FIXED — correct FK
         invoiceNumber,
         issueDate,
         dueDate,
@@ -31,8 +31,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         markSent,
       } = req.body;
 
-      if (!externalClientId) {
-        return res.status(400).json({ error: "Missing externalClientId" });
+      if (!clientId) {
+        return res.status(400).json({ error: "Missing clientId" });
       }
 
       // Calculate totals
@@ -60,7 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("invoices")
         .insert({
           user_id: userId,
-          external_client_id: externalClientId, // UPDATED
+          client_id: clientId,                 // FIXED
           invoice_number: finalInvoiceNumber,
           status,
           issue_date: issueDate,

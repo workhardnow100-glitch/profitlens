@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { useUser } from "../../hooks/useUser";
+import { useUser } from "../../../hooks/useUser";
 
 // -----------------------------
 // Types
@@ -9,7 +9,7 @@ import { useUser } from "../../hooks/useUser";
 interface Invoice {
   id: string;
   invoice_number: string;
-  external_client_id: string;
+  client_id: string; // FIXED
   issue_date: string;
   due_date: string;
   status: string;
@@ -29,7 +29,7 @@ interface ExternalClient {
   business_name?: string;
   trading_name?: string;
   contact_email?: string;
-  contact_phone?: string;
+  phone?: string; // FIXED
   address_line1?: string;
   address_line2?: string;
   city?: string;
@@ -310,13 +310,13 @@ export default function InvoiceViewPage() {
               </div>
             )}
 
-            {(externalClient.contact_email || externalClient.contact_phone) && (
+            {(externalClient.contact_email || externalClient.phone) && (
               <div className="text-gray-700">
                 {externalClient.contact_email && (
                   <div>Email: {externalClient.contact_email}</div>
                 )}
-                {externalClient.contact_phone && (
-                  <div>Phone: {externalClient.contact_phone}</div>
+                {externalClient.phone && (
+                  <div>Phone: {externalClient.phone}</div>
                 )}
               </div>
             )}

@@ -40,13 +40,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Fetch EXTERNAL CLIENT (correct table)
+    // 2) Fetch EXTERNAL CLIENT (correct FK: client_id)
     //
     const { data: externalClient, error: externalClientError } =
       await supabaseAdmin
         .from("external_clients")
         .select("*")
-        .eq("id", invoice.external_client_id)
+        .eq("id", invoice.client_id)   // FIXED
         .eq("owner_id", userId)
         .single();
 
@@ -65,7 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/invoices/${invoiceId}?paid=1`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/invoices/${invoiceId}?cancelled=1`,
-      customer_email: externalClient.contact_email, // UPDATED
+      customer_email: externalClient.contact_email,
       metadata: {
         invoice_id: invoiceId,
         user_id: userId,

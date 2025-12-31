@@ -8,7 +8,7 @@ interface ExternalClient {
   business_name?: string;
   trading_name?: string;
   contact_email?: string;
-  contact_phone?: string;
+  phone?: string;
   address_line1?: string;
   address_line2?: string;
   city?: string;
@@ -79,7 +79,7 @@ export default function ExternalClientsPage() {
                 <tr key={c.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2">{displayName}</td>
                   <td className="px-4 py-2">{c.contact_email || "—"}</td>
-                  <td className="px-4 py-2">{c.contact_phone || "—"}</td>
+                  <td className="px-4 py-2">{c.phone || "—"}</td>
                   <td className="px-4 py-2">{c.city || "—"}</td>
                   <td className="px-4 py-2 text-right">
                     <Link

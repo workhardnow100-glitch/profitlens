@@ -34,12 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Invoice not found" });
     }
 
-    // 2) Fetch EXTERNAL CLIENT (new architecture)
+    // 2) Fetch EXTERNAL CLIENT (correct FK + correct owner field)
     const { data: externalClient, error: clientError } = await supabaseAdmin
       .from("external_clients")
       .select("*")
-      .eq("id", invoice.external_client_id)
-      .eq("user_id", userId)
+      .eq("id", invoice.client_id)     // FIXED
+      .eq("owner_id", userId)          // FIXED
       .single();
 
     if (clientError) {
@@ -74,7 +74,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const buffer = await createPdfBuffer((doc) =>
       buildInvoicePdf(doc, {
         invoice,
-        externalClient, // ⭐ FIXED
+        externalClient,
         lineItems: lineItems || [],
         payments: payments || [],
         paymentLinkUrl,
@@ -86,7 +86,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const filename = `invoice-${invoice.invoice_number || invoice.id}.pdf`;
 
       await storePdfAndRecord({
-        clientId: invoice.external_client_id, // ⭐ FIXED
+        clientId: invoice.client_id,     // FIXED
         type: "invoice",
         periodStart: invoice.issue_date || null,
         periodEnd: invoice.due_date || null,
