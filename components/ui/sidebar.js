@@ -6,10 +6,11 @@ import {
   BarChart,
   Users,
   FileText,
-  DollarSign,
+  PoundSterling,
   History,
   ChevronDown,
 } from "lucide-react";
+
 
 import { useUser } from "../../hooks/useUser";
 
