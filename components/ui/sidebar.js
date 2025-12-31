@@ -218,6 +218,150 @@ export function SidebarMenu() {
           <span>Dashboard</span>
         </Link>
       </SidebarMenuItem>
+      {/* ⭐ PROFILE */}
+<SidebarMenuItem>
+  <Link
+    href="/profile"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/profile"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <Users size={16} />
+    <span>Profile</span>
+  </Link>
+</SidebarMenuItem>
+{/* ⭐ TOOLS */}
+<SidebarGroup className="mt-4">
+  <button
+    onClick={() => setToolsOpen(!toolsOpen)}
+    className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+  >
+    <span>Tools</span>
+    <ChevronDown
+      size={16}
+      className={`transition-transform ${toolsOpen ? "rotate-180" : ""}`}
+    />
+  </button>
+
+  <div
+    className={`overflow-hidden transition-all duration-300 ${
+      toolsOpen ? "max-h-[1000px]" : "max-h-0"
+    }`}
+  >
+    <SidebarGroupContent>
+
+      {/* Clients */}
+      <SidebarMenuItem>
+        <Link
+          href="/clients"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname.startsWith("/clients")
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <Users size={16} />
+          <span>Clients</span>
+        </Link>
+      </SidebarMenuItem>
+
+      {/* Email Setup */}
+      <SidebarMenuItem>
+        <Link
+          href="/emailsetup"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/emailsetup"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <FileText size={16} />
+          <span>Email Setup</span>
+        </Link>
+      </SidebarMenuItem>
+
+      {/* Forecasts */}
+      <SidebarMenuItem>
+        <Link
+          href="/forecasts"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/forecasts"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <BarChart size={16} />
+          <span>Forecasts</span>
+        </Link>
+      </SidebarMenuItem>
+
+      {/* Upload */}
+      <SidebarMenuItem>
+        <Link
+          href="/upload"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/upload"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <FileText size={16} />
+          <span>Upload</span>
+        </Link>
+      </SidebarMenuItem>
+
+      {/* Reports */}
+      <SidebarMenuItem>
+        <Link
+          href="/reports"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/reports"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <FileText size={16} />
+          <span>Reports</span>
+        </Link>
+      </SidebarMenuItem>
+
+      {/* Transactions */}
+      <SidebarMenuItem>
+        <Link
+          href="/transactions"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/transactions"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <History size={16} />
+          <span>Transactions</span>
+        </Link>
+      </SidebarMenuItem>
+
+    </SidebarGroupContent>
+  </div>
+</SidebarGroup>
+{/* ⭐ BULK PROCESSING — LAST ITEM */}
+<SidebarMenuItem className="mt-4">
+  <Link
+    href="/bulkprocessing"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/bulkprocessing"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Bulk Processing</span>
+  </Link>
+</SidebarMenuItem>
+
+
+
 
       {/* ⭐ TAXES */}
       <SidebarGroup className="mt-4">
