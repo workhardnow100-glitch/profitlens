@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/router";
+
 import {
   BarChart,
   Users,
@@ -116,7 +117,10 @@ export function SidebarMenu() {
 
   const [taxOpen, setTaxOpen] = useState(true);
   const [formsOpen, setFormsOpen] = useState(true);
-  const [invoicesOpen, setInvoicesOpen] = useState(true); // ⭐ NEW
+  const [invoicesOpen, setInvoicesOpen] = useState(true);
+  const [recurringOpen, setRecurringOpen] = useState(true);
+  const [paymentsOpen, setPaymentsOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(true);
 
   const [clients, setClients] = useState([]);
   const [me, setMe] = useState(null);
@@ -137,18 +141,6 @@ export function SidebarMenu() {
     }
     load();
   }, []);
-
-  const navigationItems = [
-    { title: "Dashboard", url: "/dashboard", icon: BarChart },
-    { title: "Profile", url: "/profile", icon: Users },
-    { title: "Clients", url: "/clients", icon: Users },
-    { title: "Upload", url: "/upload", icon: Users },
-    { title: "Transactions", url: "/transactions", icon: BarChart },
-    { title: "Reports", url: "/reports", icon: BarChart },
-    { title: "Forecasts", url: "/forecasts", icon: BarChart },
-    { title: "Email Setup", url: "/emailsetup", icon: Users },
-    { title: "Bulk Processing", url: "/bulkprocessing", icon: BarChart },
-  ];
 
   const taxItems = [
     { title: "Tax Hub", url: "/tax-hub", icon: DollarSign },
@@ -175,12 +167,11 @@ export function SidebarMenu() {
         user?.role === "founder" ||
         user?.role === "admin") && <ClientSwitcher />}
 
-      {/* ⭐ Accountant Dashboard + Client List */}
+      {/* ⭐ Accountant Dashboard */}
       {(user?.role === "accountant" ||
         user?.role === "founder" ||
         user?.role === "admin") && (
         <SidebarMenuItem>
-
           <Link
             href="/accountant/dashboard"
             className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
@@ -212,41 +203,32 @@ export function SidebarMenu() {
         </SidebarMenuItem>
       )}
 
-      {/* Default navigation */}
-      {navigationItems.map(({ title, url, icon: Icon }) => (
-        <SidebarMenuItem key={title}>
-          <Link
-            href={url}
-            className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-              router.pathname === url
-                ? "bg-blue-50 text-blue-700 font-semibold"
-                : "text-slate-700 hover:bg-slate-100"
-            }`}
-          >
-            <Icon size={16} />
-            <span>{title}</span>
-          </Link>
-        </SidebarMenuItem>
-      ))}
+      {/* ⭐ MAIN NAVIGATION */}
+      <SidebarMenuItem>
+        <Link
+          href="/dashboard"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/dashboard"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <BarChart size={16} />
+          <span>Dashboard</span>
+        </Link>
+      </SidebarMenuItem>
 
-      {/* Taxes */}
+      {/* ⭐ TAXES */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setTaxOpen(!taxOpen)}
           className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
         >
           <span>Taxes</span>
-          <ChevronDown
-            size={16}
-            className={`transition-transform ${taxOpen ? "rotate-180" : ""}`}
-          />
+          <ChevronDown size={16} className={`transition-transform ${taxOpen ? "rotate-180" : ""}`} />
         </button>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            taxOpen ? "max-h-[1000px]" : "max-h-0"
-          }`}
-        >
+        <div className={`overflow-hidden transition-all duration-300 ${taxOpen ? "max-h-[1000px]" : "max-h-0"}`}>
           <SidebarGroupContent>
             {taxItems.map(({ title, url, icon: Icon }) => (
               <SidebarMenuItem key={title}>
@@ -267,24 +249,17 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* Forms */}
+      {/* ⭐ FORMS */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setFormsOpen(!formsOpen)}
           className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
         >
           <span>Forms</span>
-          <ChevronDown
-            size={16}
-            className={`transition-transform ${formsOpen ? "rotate-180" : ""}`}
-          />
+          <ChevronDown size={16} className={`transition-transform ${formsOpen ? "rotate-180" : ""}`} />
         </button>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            formsOpen ? "max-h-[1000px]" : "max-h-0"
-          }`}
-        >
+        <div className={`overflow-hidden transition-all duration-300 ${formsOpen ? "max-h-[1000px]" : "max-h-0"}`}>
           <SidebarGroupContent>
             {formsItems.map(({ title, url, icon: Icon }) => (
               <SidebarMenuItem key={title}>
@@ -305,24 +280,17 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* ⭐ NEW — Invoicing */}
+      {/* ⭐ INVOICING COCKPIT */}
       <SidebarGroup className="mt-4">
         <button
           onClick={() => setInvoicesOpen(!invoicesOpen)}
           className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
         >
           <span>Invoicing</span>
-          <ChevronDown
-            size={16}
-            className={`transition-transform ${invoicesOpen ? "rotate-180" : ""}`}
-          />
+          <ChevronDown size={16} className={`transition-transform ${invoicesOpen ? "rotate-180" : ""}`} />
         </button>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            invoicesOpen ? "max-h-[1000px]" : "max-h-0"
-          }`}
-        >
+        <div className={`overflow-hidden transition-all duration-300 ${invoicesOpen ? "max-h-[1000px]" : "max-h-0"}`}>
           <SidebarGroupContent>
 
             {/* All Invoices */}
@@ -389,6 +357,171 @@ export function SidebarMenu() {
           </SidebarGroupContent>
         </div>
       </SidebarGroup>
+
+      {/* ⭐ RECURRING INVOICES (Orbital Engine) */}
+      <SidebarGroup className="mt-4">
+        <button
+          onClick={() => setRecurringOpen(!recurringOpen)}
+          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+        >
+          <span>Recurring</span>
+          <ChevronDown size={16} className={`transition-transform ${recurringOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        <div className={`overflow-hidden transition-all duration-300 ${recurringOpen ? "max-h-[1000px]" : "max-h-0"}`}>
+          <SidebarGroupContent>
+
+            <SidebarMenuItem>
+              <Link
+                href="/recurring-invoices"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname.startsWith("/recurring-invoices") &&
+                  !router.pathname.includes("/history")
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <History size={16} />
+                <span>Schedules</span>
+              </Link>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <Link
+                href="/recurring-invoices/new"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/recurring-invoices/new"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <History size={16} />
+                <span>New Schedule</span>
+              </Link>
+            </SidebarMenuItem>
+
+          </SidebarGroupContent>
+        </div>
+      </SidebarGroup>
+
+      {/* ⭐ PAYMENTS (Stripe Cockpit) */}
+      <SidebarGroup className="mt-4">
+        <button
+          onClick={() => setPaymentsOpen(!paymentsOpen)}
+          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+        >
+          <span>Payments</span>
+          <ChevronDown size={16} className={`transition-transform ${paymentsOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        <div className={`overflow-hidden transition-all duration-300 ${paymentsOpen ? "max-h-[1000px]" : "max-h-0"}`}>
+          <SidebarGroupContent>
+
+            <SidebarMenuItem>
+              <Link
+                href="/payments"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/payments"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <PoundSterling size={16} />
+                <span>Payment Radar</span>
+              </Link>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <Link
+                href="/payments/payouts"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/payments/payouts"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <DollarSign size={16} />
+                <span>Payouts</span>
+              </Link>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <Link
+                href="/payments/transactions"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/payments/transactions"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <DollarSign size={16} />
+                <span>Transactions</span>
+              </Link>
+            </SidebarMenuItem>
+
+          </SidebarGroupContent>
+        </div>
+      </SidebarGroup>
+
+      {/* ⭐ SETTINGS */}
+      <SidebarGroup className="mt-4">
+        <button
+          onClick={() => setSettingsOpen(!settingsOpen)}
+          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+        >
+          <span>Settings</span>
+          <ChevronDown size={16} className={`transition-transform ${settingsOpen ? "rotate-180" : ""}`} />
+        </button>
+
+        <div className={`overflow-hidden transition-all duration-300 ${settingsOpen ? "max-h-[1000px]" : "max-h-0"}`}>
+          <SidebarGroupContent>
+
+            <SidebarMenuItem>
+              <Link
+                href="/settings/invoices"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/settings/invoices"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate"
+                                    }`}
+              >
+                <FileText size={16} />
+                <span>Invoice Settings</span>
+              </Link>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <Link
+                href="/settings/payments"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/settings/payments"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <PoundSterling size={16} />
+                <span>Payment Settings</span>
+              </Link>
+            </SidebarMenuItem>
+
+            <SidebarMenuItem>
+              <Link
+                href="/settings/account"
+                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+                  router.pathname === "/settings/account"
+                    ? "bg-blue-50 text-blue-700 font-semibold"
+                    : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <Users size={16} />
+                <span>Account Settings</span>
+              </Link>
+            </SidebarMenuItem>
+
+          </SidebarGroupContent>
+        </div>
+      </SidebarGroup>
+
     </ul>
   );
 }
