@@ -12,9 +12,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid ID" });
   }
 
-  // ⭐ Determine who we are acting for
-  const actingFor = session.user.actingAsClientId || session.user.id;
-  const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
+  // ⭐ Business owner identity (accountant-aware)
+  const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
   if (req.method === "GET") {
     try {
@@ -22,8 +21,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("recurring_invoices")
         .select("*")
         .eq("id", id)
-        .eq(filterColumn, actingFor)
-        .maybeSingle(); // ⭐ FIXED: no more PGRST116
+        .eq("user_id", businessOwnerId)   // ⭐ FIXED: always filter by business owner
+        .maybeSingle();
 
       if (error) {
         console.error("Supabase error:", error);
