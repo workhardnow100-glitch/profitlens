@@ -7,25 +7,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
-  // ⭐ Support accountant acting-as-client
+  // ⭐ Determine who we are acting for
   const actingFor = session.user.actingAsClientId || session.user.id;
 
   if (req.method === "GET") {
     try {
+      // ⭐ Correct logic:
+      // - If accountant: fetch by client_id
+      // - If normal user: fetch by user_id
+      const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
+
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .select("*")
-        .eq("client_id", actingFor)
+        .eq(filterColumn, actingFor)
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error(error);
+        console.error("Supabase error:", error);
         return res.status(500).json({ error: "Failed to fetch recurring invoices" });
       }
 
       return res.status(200).json({ recurring: data || [] });
     } catch (err) {
-      console.error(err);
+      console.error("Unexpected GET error:", err);
       return res.status(500).json({ error: "Unexpected error" });
     }
   }
@@ -51,8 +56,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .insert({
-          user_id: session.user.id,
-          client_id: clientId || actingFor,
+          user_id: session.user.id,          // owner
+          client_id: clientId || actingFor,  // accountant override
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
@@ -72,13 +77,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .single();
 
       if (error) {
-        console.error(error);
+        console.error("Supabase insert error:", error);
         return res.status(500).json({ error: "Failed to create recurring invoice" });
       }
 
       return res.status(201).json({ recurring: data });
     } catch (err) {
-      console.error(err);
+      console.error("Unexpected POST error:", err);
       return res.status(500).json({ error: "Unexpected error" });
     }
   }
