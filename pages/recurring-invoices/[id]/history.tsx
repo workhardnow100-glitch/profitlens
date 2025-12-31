@@ -71,3 +71,7 @@ export default function RecurringInvoiceHistoryPage() {
     </div>
   );
 }
+// 🔒 Force SSR so static export doesn’t break on API/session usage
+export async function getServerSideProps() {
+  return { props: {} };
+}
