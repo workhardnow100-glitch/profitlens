@@ -7,19 +7,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
-  // ⭐ Determine who we are acting for
-  const actingFor = session.user.actingAsClientId || session.user.id;
-  const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
+  // ⭐ Who owns the business?
+  // If accountant is acting for a business → use that business ID
+  // If normal user → use their own user ID
+  const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
   // ============================================================
-  // GET — List recurring schedules for the acting identity
+  // GET — List recurring schedules for the business owner
   // ============================================================
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .select("*")
-        .eq(filterColumn, actingFor)
+        .eq("user_id", businessOwnerId)   // ⭐ Always filter by business owner
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -40,6 +41,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "POST") {
     try {
       const {
+        clientId,                       // ⭐ This is the CUSTOMER
         templateLineItems,
         templatePaymentInstructions,
         templateNotes,
@@ -55,12 +57,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const now = new Date().toISOString();
 
       // ⭐ CRITICAL FIX:
-      // Insert using the SAME identity logic as GET.
-      // This ensures GET will find the row immediately after creation.
+      // user_id = business owner
+      // client_id = customer
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .insert({
-          [filterColumn]: actingFor, // ⭐ MATCHES GET FILTER
+          user_id: businessOwnerId,           // ⭐ Always the business owner
+          client_id: clientId,                // ⭐ Always the customer
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
