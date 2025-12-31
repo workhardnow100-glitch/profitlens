@@ -199,8 +199,12 @@ export default function RecurringInvoiceDetailPage() {
     }
   };
 
-  if (loading || loadingClients || !record)
-    return <div className="p-6">Loading…</div>;
+  if (loading || loadingClients)
+  return <div className="p-6">Loading…</div>;
+
+if (!record)
+  return <div className="p-6 text-red-500">Recurring schedule not found</div>;
+
   if (!user) return <div className="p-6">Please sign in</div>;
 
   return (
