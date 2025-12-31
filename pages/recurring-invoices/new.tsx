@@ -1,0 +1,548 @@
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/router";
+import { useUser } from "../../hooks/useUser";
+
+type FrequencyType = "daily" | "weekly" | "monthly" | "yearly" | "custom";
+
+interface LineItemTemplate {
+  id: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  vat_rate: number;
+}
+
+function createEmptyLine(defaultVat: number = 20): LineItemTemplate {
+  return {
+    id: crypto.randomUUID(),
+    description: "",
+    quantity: 1,
+    unit_price: 0,
+    vat_rate: defaultVat,
+  };
+}
+
+export default function NewRecurringInvoicePage() {
+  const { user, loading } = useUser();
+  const router = useRouter();
+
+  const [clientId, setClientId] = useState("");
+  const [externalClients, setExternalClients] = useState<any[]>([]);
+  const [loadingClients, setLoadingClients] = useState(true);
+
+  const [frequencyType, setFrequencyType] = useState<FrequencyType>("monthly");
+  const [interval, setInterval] = useState(1);
+  const [dayOfWeek, setDayOfWeek] = useState<number | null>(null);
+  const [dayOfMonth, setDayOfMonth] = useState<number | null>(1);
+  const [customRule, setCustomRule] = useState("");
+
+  const [startDate, setStartDate] = useState<string>(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [endDate, setEndDate] = useState<string>("");
+
+  const [lineItems, setLineItems] = useState<LineItemTemplate[]>([
+    createEmptyLine(),
+  ]);
+  const [paymentInstructions, setPaymentInstructions] = useState("");
+  const [notesToClient, setNotesToClient] = useState("");
+
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+
+    async function loadClients() {
+      const res = await fetch("/api/external-clients");
+      const data = await res.json();
+      setExternalClients(data.externalClients || []);
+      setLoadingClients(false);
+    }
+
+    loadClients();
+  }, [user]);
+
+  const nextRunPreview = useMemo(() => {
+    // For now, preview is just startDate; real engine uses run.ts logic
+    return startDate || "Not set";
+  }, [startDate]);
+
+  const subtotal = lineItems.reduce(
+    (sum, li) => sum + li.quantity * li.unit_price,
+    0
+  );
+  const vatTotal = lineItems.reduce(
+    (sum, li) => sum + li.quantity * li.unit_price * (li.vat_rate / 100),
+    0
+  );
+  const grossTotal = subtotal + vatTotal;
+
+  const handleLineChange = (
+    id: string,
+    field: keyof LineItemTemplate,
+    value: any
+  ) => {
+    setLineItems((items) =>
+      items.map((li) =>
+        li.id === id
+          ? {
+              ...li,
+              [field]:
+                field === "description" ? value : Number(value),
+            }
+          : li
+      )
+    );
+  };
+
+  const addLine = () =>
+    setLineItems((items) => [...items, createEmptyLine()]);
+
+  const removeLine = (id: string) =>
+    setLineItems((items) => items.filter((li) => li.id !== id));
+
+  const handleSave = async () => {
+    if (!clientId) {
+      alert("Please select a client");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch("/api/recurring-invoices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          templateLineItems: lineItems.map((li) => ({
+            description: li.description,
+            quantity: li.quantity,
+            unit_price: li.unit_price,
+            vat_rate: li.vat_rate,
+          })),
+          templatePaymentInstructions: paymentInstructions,
+          templateNotes: notesToClient,
+          frequencyType,
+          interval,
+          dayOfWeek,
+          dayOfMonth,
+          customRule: customRule || null,
+          startDate,
+          endDate: endDate || null,
+        }),
+      });
+
+      if (!res.ok) {
+        console.error("Failed to create recurring invoice");
+        setSaving(false);
+        return;
+      }
+
+      const data = await res.json();
+      router.push(`/recurring-invoices/${data.recurring.id}`);
+    } catch (err) {
+      console.error(err);
+      setSaving(false);
+    }
+  };
+
+  if (loading || loadingClients) return <div className="p-6">Loading…</div>;
+  if (!user) return <div className="p-6">Please sign in</div>;
+
+  return (
+    <div className="space-y-8 p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">New Recurring Schedule</h1>
+          <p className="text-sm text-gray-500">
+            Design an orbit that automatically generates invoices for this client.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)]">
+        {/* Left: Recurrence designer */}
+        <div className="space-y-6">
+          <div className="rounded-xl border bg-slate-950 text-slate-50 p-6 relative overflow-hidden">
+            <div className="absolute inset-0 pointer-events-none opacity-40">
+              <div className="absolute -top-32 -right-32 h-64 w-64 rounded-full bg-blue-500/20 blur-3xl" />
+              <div className="absolute -bottom-32 -left-32 h-64 w-64 rounded-full bg-emerald-500/20 blur-3xl" />
+            </div>
+
+            <div className="relative flex flex-col gap-6">
+              <div>
+                <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-300">
+                  Recurrence orbit
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Choose how often this schedule fires and how it moves through time.
+                </p>
+              </div>
+
+              <div className="flex flex-col md:flex-row gap-6 items-center">
+                {/* Circular dial */}
+                <div className="relative h-40 w-40 rounded-full border border-slate-700 bg-slate-900 flex items-center justify-center shadow-inner shadow-slate-900/80">
+                  <div className="absolute inset-3 rounded-full bg-slate-950 flex items-center justify-center">
+                    <span className="text-xs uppercase tracking-wide text-slate-400">
+                      {frequencyType}
+                    </span>
+                  </div>
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="grid grid-cols-2 gap-2 text-[10px] text-slate-300">
+                      {(["daily", "weekly", "monthly", "yearly", "custom"] as FrequencyType[]).map(
+                        (f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setFrequencyType(f)}
+                            className={`px-2 py-1 rounded-full border text-[10px] ${
+                              frequencyType === f
+                                ? "border-blue-400 bg-blue-500/20 text-blue-100"
+                                : "border-slate-700/70 bg-slate-900/80 text-slate-300 hover:border-slate-500"
+                            }`}
+                          >
+                            {f}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interval + dates */}
+                <div className="flex-1 space-y-4">
+                  <div>
+                    <label className="text-xs font-medium text-slate-200">
+                      Interval
+                    </label>
+                    <div className="flex items-center gap-3 mt-1">
+                      <input
+                        type="range"
+                        min={1}
+                        max={12}
+                        value={interval}
+                        onChange={(e) => setInterval(Number(e.target.value))}
+                        className="w-full"
+                      />
+                      <span className="text-xs text-slate-200 w-10 text-right">
+                        x{interval}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Every {interval} {frequencyType === "daily"
+                        ? "day(s)"
+                        : frequencyType === "weekly"
+                        ? "week(s)"
+                        : frequencyType === "monthly"
+                        ? "month(s)"
+                        : frequencyType === "yearly"
+                        ? "year(s)"
+                        : "custom interval"}
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-200">
+                        Start date
+                      </label>
+                      <input
+                        type="date"
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-200">
+                        End date (optional)
+                      </label>
+                      <input
+                        type="date"
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  {frequencyType === "weekly" && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-200">
+                        Day of week
+                      </label>
+                      <select
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                        value={dayOfWeek ?? ""}
+                        onChange={(e) =>
+                          setDayOfWeek(
+                            e.target.value === "" ? null : Number(e.target.value)
+                          )
+                        }
+                      >
+                        <option value="">Any</option>
+                        <option value={1}>Monday</option>
+                        <option value={2}>Tuesday</option>
+                        <option value={3}>Wednesday</option>
+                        <option value={4}>Thursday</option>
+                        <option value={5}>Friday</option>
+                        <option value={6}>Saturday</option>
+                        <option value={0}>Sunday</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {frequencyType === "monthly" && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-200">
+                        Day of month
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={31}
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                        value={dayOfMonth ?? ""}
+                        onChange={(e) =>
+                          setDayOfMonth(
+                            e.target.value === "" ? null : Number(e.target.value)
+                          )
+                        }
+                      />
+                    </div>
+                  )}
+
+                  {frequencyType === "custom" && (
+                    <div>
+                      <label className="text-xs font-medium text-slate-200">
+                        Custom rule (description)
+                      </label>
+                      <input
+                        className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                        placeholder="e.g. Last business day of each quarter"
+                        value={customRule}
+                        onChange={(e) => setCustomRule(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Next run preview */}
+              <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-900/80 px-4 py-3 text-xs flex items-center justify-between">
+                <div>
+                  <div className="text-slate-300 font-medium">
+                    Next run projection
+                  </div>
+                  <div className="text-slate-400">
+                    First invoice will generate on{" "}
+                    <span className="text-slate-100">{nextRunPreview}</span>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  Actual scheduling is handled by the recurring engine.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Client selector */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Client</label>
+            <select
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+            >
+              <option value="">Select client…</option>
+              {externalClients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.contact_name ||
+                    c.business_name ||
+                    c.trading_name ||
+                    "Unnamed client"}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Right: Template builder */}
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-sm font-semibold uppercase text-gray-500">
+              Invoice template
+            </h2>
+            <p className="text-xs text-gray-500">
+              These line items and instructions will be used for each generated invoice.
+            </p>
+          </div>
+
+          {/* Line items */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-semibold uppercase text-gray-500">
+                Line items
+              </h3>
+              <button
+                type="button"
+                className="text-xs text-blue-600 hover:underline"
+                onClick={addLine}
+              >
+                Add line
+              </button>
+            </div>
+
+            <div className="overflow-hidden rounded-md border">
+              <table className="min-w-full text-xs">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Description</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Unit</th>
+                    <th className="px-3 py-2 text-right">VAT %</th>
+                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {lineItems.map((li) => {
+                    const lineTotal =
+                      li.quantity * li.unit_price * (1 + li.vat_rate / 100);
+
+                    return (
+                      <tr key={li.id}>
+                        <td className="px-3 py-2">
+                          <input
+                            className="w-full rounded-md border px-2 py-1 text-xs"
+                            value={li.description}
+                            onChange={(e) =>
+                              handleLineChange(
+                                li.id,
+                                "description",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Description"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            className="w-16 rounded-md border px-2 py-1 text-xs text-right"
+                            value={li.quantity}
+                            onChange={(e) =>
+                              handleLineChange(
+                                li.id,
+                                "quantity",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="w-20 rounded-md border px-2 py-1 text-xs text-right"
+                            value={li.unit_price}
+                            onChange={(e) =>
+                              handleLineChange(
+                                li.id,
+                                "unit_price",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input
+                            type="number"
+                            className="w-16 rounded-md border px-2 py-1 text-xs text-right"
+                            value={li.vat_rate}
+                            onChange={(e) =>
+                              handleLineChange(
+                                li.id,
+                                "vat_rate",
+                                e.target.value
+                              )
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          £{lineTotal.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          {lineItems.length > 1 && (
+                            <button
+                              type="button"
+                              className="text-[11px] text-red-600 hover:underline"
+                              onClick={() => removeLine(li.id)}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Payment instructions + notes */}
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Payment instructions</label>
+              <textarea
+                className="w-full rounded-md border px-3 py-2 text-sm"
+                rows={3}
+                value={paymentInstructions}
+                onChange={(e) => setPaymentInstructions(e.target.value)}
+                placeholder="Bank details, reference hints, etc."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Notes to client</label>
+              <textarea
+                className="w-full rounded-md border px-3 py-2 text-sm"
+                rows={3}
+                value={notesToClient}
+                onChange={(e) => setNotesToClient(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Summary + save */}
+          <div className="space-y-3">
+            <div className="rounded-md border p-4 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span>Subtotal</span>
+                <span>£{subtotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>VAT</span>
+                <span>£{vatTotal.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between font-semibold">
+                <span>Per‑invoice total</span>
+                <span>£{grossTotal.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleSave}
+              className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? "Creating schedule…" : "Create schedule"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -440,7 +440,7 @@ export function SidebarMenu() {
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
               >
-                <DollarSign size={16} />
+                <PoundSterling size={16} />
                 <span>Payouts</span>
               </Link>
             </SidebarMenuItem>
@@ -454,7 +454,7 @@ export function SidebarMenu() {
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
               >
-                <DollarSign size={16} />
+                <PoundSterling size={16} />
                 <span>Transactions</span>
               </Link>
             </SidebarMenuItem>
