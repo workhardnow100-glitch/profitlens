@@ -9,14 +9,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   // ⭐ Determine who we are acting for
   const actingFor = session.user.actingAsClientId || session.user.id;
+  const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
 
+  // ============================================================
+  // GET — List recurring schedules for the acting identity
+  // ============================================================
   if (req.method === "GET") {
     try {
-      // ⭐ Correct logic:
-      // - If accountant: fetch by client_id
-      // - If normal user: fetch by user_id
-      const filterColumn = session.user.actingAsClientId ? "client_id" : "user_id";
-
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .select("*")
@@ -35,10 +34,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // ============================================================
+  // POST — Create a new recurring schedule
+  // ============================================================
   if (req.method === "POST") {
     try {
       const {
-        clientId,
         templateLineItems,
         templatePaymentInstructions,
         templateNotes,
@@ -53,11 +54,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const now = new Date().toISOString();
 
+      // ⭐ CRITICAL FIX:
+      // Insert using the SAME identity logic as GET.
+      // This ensures GET will find the row immediately after creation.
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .insert({
-          user_id: session.user.id,          // owner
-          client_id: clientId || actingFor,  // accountant override
+          [filterColumn]: actingFor, // ⭐ MATCHES GET FILTER
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
