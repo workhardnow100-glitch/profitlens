@@ -551,64 +551,68 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* ⭐ PAYMENTS (Stripe Cockpit) */}
-      <SidebarGroup className="mt-4">
-        <button
-          onClick={() => setPaymentsOpen(!paymentsOpen)}
-          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+{/* ⭐ PAYMENTS (Stripe Cockpit) */}
+<SidebarGroup className="mt-4">
+  <button
+    onClick={() => setPaymentsOpen(!paymentsOpen)}
+    className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+  >
+    <span>Payments</span>
+    <ChevronDown size={16} className={`transition-transform ${paymentsOpen ? "rotate-180" : ""}`} />
+  </button>
+
+  <div className={`overflow-hidden transition-all duration-300 ${paymentsOpen ? "max-h-[1000px]" : "max-h-0"}`}>
+    <SidebarGroupContent>
+
+      {/* ⭐ Radar */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments/radar"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/payments/radar"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
         >
-          <span>Payments</span>
-          <ChevronDown size={16} className={`transition-transform ${paymentsOpen ? "rotate-180" : ""}`} />
-        </button>
+          <PoundSterling size={16} />
+          <span>Radar</span>
+        </Link>
+      </SidebarMenuItem>
 
-        <div className={`overflow-hidden transition-all duration-300 ${paymentsOpen ? "max-h-[1000px]" : "max-h-0"}`}>
-          <SidebarGroupContent>
+      {/* Payouts */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments/payouts"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/payments/payouts"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <PoundSterling size={16} />
+          <span>Payouts</span>
+        </Link>
+      </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <Link
-                href="/payments"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/payments"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <PoundSterling size={16} />
-                <span>Payment Radar</span>
-              </Link>
-            </SidebarMenuItem>
+      {/* Transactions */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments/transactions"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/payments/transactions"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <PoundSterling size={16} />
+          <span>Transactions</span>
+        </Link>
+      </SidebarMenuItem>
 
-            <SidebarMenuItem>
-              <Link
-                href="/payments/payouts"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/payments/payouts"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <PoundSterling size={16} />
-                <span>Payouts</span>
-              </Link>
-            </SidebarMenuItem>
+    </SidebarGroupContent>
+  </div>
+</SidebarGroup>
 
-            <SidebarMenuItem>
-              <Link
-                href="/payments/transactions"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/payments/transactions"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <PoundSterling size={16} />
-                <span>Transactions</span>
-              </Link>
-            </SidebarMenuItem>
-
-          </SidebarGroupContent>
-        </div>
-      </SidebarGroup>
 
       {/* ⭐ SETTINGS */}
       <SidebarGroup className="mt-4">

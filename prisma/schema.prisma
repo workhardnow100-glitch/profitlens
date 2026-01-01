@@ -200,3 +200,132 @@ model Reconciliation {
   transactionId Int?
   transaction   Transaction? @relation(fields: [transactionId], references: [id])
 }
+
+// =========================
+// PAYMENTS ENGINE (ISOLATED)
+// =========================
+
+model PaymentCharge {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Stripe identifiers
+  stripeChargeId        String   @unique
+  stripePaymentIntentId String?
+  stripeCustomerId      String?
+
+  // Money (minor units, e.g. pence)
+  currency    String
+  amountGross Int
+  amountFee   Int
+  amountNet   Int
+
+  // Status
+  status         String   // 'pending' | 'succeeded' | 'failed' | 'refunded' | etc.
+  description    String?
+  failureCode    String?
+  failureMessage String?
+
+  // Links (UUIDs only – we do NOT enforce relations to existing Prisma models)
+  userId    String? // maps to app_users.id (uuid) in the real DB
+  clientId  String? // maps to clients.id (uuid)
+  invoiceId String? // maps to invoices.id (uuid)
+
+  // Metadata / context
+  source    String? // 'invoice' | 'link' | 'manual' | etc.
+  reference String? // invoice number, custom ref
+  email     String?
+  metadata  Json?
+
+  // Relations
+  payoutItems  PaymentPayoutItem[]
+  balanceItems PaymentBalanceItem[]
+  matches      PaymentMatch[]
+}
+
+model PaymentPayout {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Stripe identifiers
+  stripePayoutId             String   @unique
+  stripeBalanceTransactionId String?
+
+  // Money
+  currency    String
+  amount      Int      // total payout amount (minor units)
+  arrivalDate DateTime?
+  status      String   // 'pending' | 'paid' | 'in_transit' | 'canceled' | 'failed'
+
+  // Links (UUID only – maps to app_users.id)
+  userId   String?
+  metadata Json?
+
+  // Relations
+  items        PaymentPayoutItem[]
+  balanceItems PaymentBalanceItem[]
+}
+
+model PaymentPayoutItem {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  payoutId String
+  payout   PaymentPayout @relation(fields: [payoutId], references: [id])
+
+  chargeId String?
+  charge   PaymentCharge? @relation(fields: [chargeId], references: [id])
+
+  // Money
+  amount Int // portion of payout from this charge
+}
+
+model PaymentBalanceItem {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  // Stripe identifiers
+  stripeBalanceTransactionId String @unique
+  stripeType                 String // 'charge' | 'payout' | 'fee' | 'adjustment' | etc.
+
+  // Money
+  currency String
+  amount   Int    // signed amount
+  fee      Int?
+  net      Int?
+
+  // Links (UUIDs only)
+  chargeId String?
+  payoutId String?
+  userId   String? // app_users.id
+
+  metadata Json?
+
+  // Relations
+  charge PaymentCharge? @relation(fields: [chargeId], references: [id])
+  payout PaymentPayout? @relation(fields: [payoutId], references: [id])
+}
+
+model PaymentMatch {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chargeId String
+  charge   PaymentCharge @relation(fields: [chargeId], references: [id])
+
+  // Links (UUIDs only – no enforced Prisma relations)
+  invoiceId String? // invoices.id
+  userId    String? // app_users.id
+  clientId  String? // clients.id
+
+  // Matching intelligence
+  method     String  // 'auto' | 'manual'
+  confidence Float?
+  reason     String? // 'amount+ref', 'email+date', etc.
+
+  // Audit (UUID of the actor in app_users)
+  matchedByUserId String?
+}
