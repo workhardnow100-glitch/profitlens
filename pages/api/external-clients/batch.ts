@@ -6,6 +6,9 @@ import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // 🔥 STOP VERCEL FROM CACHING THIS ROUTE
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
   const session = await getServerSession(req, res, authOptions);
 
   if (!session?.user) {
