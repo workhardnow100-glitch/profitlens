@@ -19,7 +19,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const userId = session.user.id as string;
 
   try {
-    const {
+    let {
       contact_name,
       business_name,
       trading_name,
@@ -32,10 +32,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       country,
     } = req.body;
 
+    // Normalize + trim
+    contact_name = contact_name?.trim();
+    business_name = business_name?.trim();
+    trading_name = trading_name?.trim();
+    contact_email = contact_email?.trim()?.toLowerCase();
+    phone = phone?.trim();
+    address_line1 = address_line1?.trim();
+    address_line2 = address_line2?.trim();
+    city = city?.trim();
+    postcode = postcode?.trim();
+    country = country?.trim();
+
+    // Required fields
     if (!contact_email) {
       return res.status(400).json({ error: "Client email is required" });
     }
 
+    if (!contact_name) {
+      return res.status(400).json({ error: "Client name is required" });
+    }
+
+    if (!business_name) {
+      return res.status(400).json({ error: "Business name is required" });
+    }
+
+    // Prevent duplicates
+    const { data: existing } = await supabaseAdmin
+      .from("external_clients")
+      .select("id")
+      .eq("owner_id", userId)
+      .eq("contact_email", contact_email)
+      .maybeSingle();
+
+    if (existing) {
+      return res.status(409).json({
+        error: "A client with this email already exists",
+      });
+    }
+
+    // Insert client
     const { data, error } = await supabaseAdmin
       .from("external_clients")
       .insert({
@@ -50,6 +86,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         city,
         postcode,
         country,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .select()
       .single();

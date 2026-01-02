@@ -1,3 +1,5 @@
+// pages/api/invoices/[id]/index.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -30,9 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "Invoice not found" });
       }
 
-      // Fetch EXTERNAL CLIENT:
-      // - join via invoice.client_id
-      // - enforce owner_id = userId
+      // Fetch EXTERNAL CLIENT
       const { data: externalClient, error: externalClientError } =
         await supabaseAdmin
           .from("external_clients")
@@ -42,12 +42,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .single();
 
       if (externalClientError || !externalClient) {
-        // We don't hard-fail the whole response, but you may prefer 404 here.
-        // For now, mirror your existing behaviour:
         return res.status(404).json({ error: "External client not found" });
       }
 
-      // Fetch line items - ordered by position
+      // Fetch line items
       const { data: lineItems, error: lineError } = await supabaseAdmin
         .from("invoice_line_items")
         .select("*")
@@ -89,17 +87,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch payments" });
       }
 
-      // Derived values (for convenience in the UI)
+      // Derived values
       const paidAmount =
         payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) ?? 0;
-      const balance = Number(invoice.gross_amount || 0) - paidAmount;
+
+      // Use invoice.total (pence)
+      const balance = Number(invoice.total || 0) / 100 - paidAmount;
 
       return res.status(200).json({
         invoice,
         externalClient,
         lineItems: lineItems ?? [],
         payments: payments ?? [],
-        // extra computed values (non-breaking)
         paidAmount,
         balance,
       });
@@ -122,6 +121,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         paymentInstructions,
         notesToClient,
         status,
+        paymentStatus, // NEW
       } = req.body;
 
       const { data: updated, error } = await supabaseAdmin
@@ -134,6 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           payment_instructions: paymentInstructions,
           notes_to_client: notesToClient,
           status,
+          payment_status: paymentStatus ?? undefined, // NEW
           updated_at: new Date().toISOString(),
         })
         .eq("id", invoiceId)
@@ -162,6 +163,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("invoices")
         .update({
           status: "cancelled",
+          payment_status: "cancelled", // NEW
           cancelled_at: new Date().toISOString(),
         })
         .eq("id", invoiceId)

@@ -1,11 +1,12 @@
+// pages/payments/radar.tsx
+
 import { useEffect, useState } from "react";
 
 type RadarResponse = {
-  charges: any[];
-  payouts: any[];
-  balance: any[];
-  matches: any[];
-  unmatched: any[];
+  payments: any[];
+  invoicePayments: any[];
+  transactions: any[];
+  invoices: any[];
 };
 
 export default function PaymentsRadarPage() {
@@ -17,9 +18,7 @@ export default function PaymentsRadarPage() {
     const load = async () => {
       try {
         const res = await fetch("/api/payments/radar");
-        if (!res.ok) {
-          throw new Error(`Radar API error: ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`Radar API error: ${res.status}`);
         const json = await res.json();
         setData(json);
       } catch (err: any) {
@@ -45,11 +44,11 @@ export default function PaymentsRadarPage() {
     return <div className="p-6">No data returned from Payments Radar.</div>;
   }
 
-  const { charges, payouts, balance, unmatched } = data;
+  const { payments, invoicePayments, transactions, invoices } = data;
 
-  const totalChargeGross = sumBy(charges, (c) => c.amountGross || 0);
-  const totalPayouts = sumBy(payouts, (p) => p.amount || 0);
-  const totalBalanceNet = sumBy(balance, (b) => b.net ?? 0);
+  const totalPayments = sumBy(payments, (p) => p.amount || 0);
+  const totalTransactions = sumBy(transactions, (t) => t.amount || 0);
+  const totalInvoices = invoices.length;
 
   return (
     <div className="p-6 space-y-10">
@@ -59,11 +58,11 @@ export default function PaymentsRadarPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-800">Payments Radar</h1>
           <p className="text-slate-500 mt-1">
-            Cockpit view of Stripe charges, payouts, and balance transactions.
+            Cockpit view of Stripe payments, invoice matches, and ledger activity.
           </p>
         </div>
         <div className="text-right text-xs text-slate-400">
-          <div>Stripe Radar · Live data</div>
+          <div>Radar · Live data</div>
           <div>{new Date().toLocaleString()}</div>
         </div>
       </div>
@@ -71,107 +70,97 @@ export default function PaymentsRadarPage() {
       {/* SUMMARY CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <SummaryCard
-          title="Charges"
-          value={charges.length}
-          subtitle={formatAmount(totalChargeGross, inferCurrency(charges))}
+          title="Stripe Payments"
+          value={payments.length}
+          subtitle={formatAmount(totalPayments, "GBP")}
         />
         <SummaryCard
-          title="Payouts"
-          value={payouts.length}
-          subtitle={formatAmount(totalPayouts, inferCurrency(payouts))}
+          title="Invoice Payments"
+          value={invoicePayments.length}
+          subtitle="Reconciled"
         />
         <SummaryCard
-          title="Balance Items"
-          value={balance.length}
-          subtitle={formatAmount(totalBalanceNet, inferCurrency(balance))}
+          title="Transactions"
+          value={transactions.length}
+          subtitle={formatAmount(totalTransactions, "GBP")}
         />
         <SummaryCard
-          title="Unmatched Charges"
-          value={unmatched.length}
-          variant={unmatched.length > 0 ? "warning" : "success"}
-          subtitle={unmatched.length > 0 ? "Needs review" : "All matched (stub)"}
+          title="Invoices"
+          value={totalInvoices}
+          subtitle="Issued"
         />
       </div>
 
-      {/* GRID: CHARGES + PAYOUTS */}
+      {/* GRID: PAYMENTS + INVOICE PAYMENTS */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Section title="Charges">
+        <Section title="Stripe Payments">
           <DataTable
-            columns={["ID", "Amount", "Status", "Email", "Reference"]}
-            rows={charges.map((c) => ({
-              ID: shortId(c.stripeChargeId),
-              Amount: (
-                <AmountPill
-                  amount={c.amountGross}
-                  currency={c.currency}
-                  direction="in"
-                />
-              ),
-              Status: <StatusBadge status={c.status} />,
-              Email: c.email ?? "-",
-              Reference: c.reference ?? "-",
-            }))}
-          />
-        </Section>
-
-        <Section title="Payouts">
-          <DataTable
-            columns={["ID", "Amount", "Status", "Arrival"]}
-            rows={payouts.map((p) => ({
-              ID: shortId(p.stripePayoutId),
+            columns={["ID", "Amount", "Platform Fee", "Intent", "Invoice"]}
+            rows={payments.map((p) => ({
+              ID: shortId(p.id),
               Amount: (
                 <AmountPill
                   amount={p.amount}
-                  currency={p.currency}
-                  direction="out"
+                  currency="GBP"
+                  direction="in"
                 />
               ),
-              Status: <StatusBadge status={p.status} />,
-              Arrival: p.arrivalDate
-                ? new Date(p.arrivalDate).toLocaleDateString()
-                : "-",
+              "Platform Fee": formatAmount(p.platform_fee_amount, "GBP"),
+              Intent: shortId(p.stripe_payment_intent),
+              Invoice: p.invoice_id ?? "-",
+            }))}
+          />
+        </Section>
+
+        <Section title="Invoice Payments (Matched)">
+          <DataTable
+            columns={["Invoice", "Transaction", "Amount", "Confidence"]}
+            rows={invoicePayments.map((ip) => ({
+              Invoice: ip.invoice_id,
+              Transaction: ip.transaction_id,
+              Amount: (
+                <AmountPill
+                  amount={Math.round(ip.amount * 100)}
+                  currency="GBP"
+                  direction="in"
+                />
+              ),
+              Confidence: ip.match_confidence,
             }))}
           />
         </Section>
       </div>
 
-      {/* GRID: BALANCE + UNMATCHED */}
+      {/* GRID: TRANSACTIONS + INVOICES */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        <Section title="Balance Transactions">
+        <Section title="Transactions Ledger">
           <DataTable
-            columns={["ID", "Type", "Amount", "Fee", "Net", "Currency"]}
-            rows={balance.map((b) => ({
-              ID: shortId(b.stripeBalanceTransactionId),
-              Type: b.stripeType,
+            columns={["ID", "Client", "Amount", "Date", "Type"]}
+            rows={transactions.map((t) => ({
+              ID: shortId(t.id),
+              Client: t.client_id,
               Amount: (
                 <AmountPill
-                  amount={b.amount}
-                  currency={b.currency}
-                  direction={b.amount >= 0 ? "in" : "out"}
+                  amount={Math.round(t.amount * 100)}
+                  currency="GBP"
+                  direction={t.type === "income" ? "in" : "out"}
                 />
               ),
-              Fee: b.fee != null ? formatAmount(b.fee, b.currency) : "-",
-              Net: b.net != null ? formatAmount(b.net, b.currency) : "-",
-              Currency: b.currency,
+              Date: new Date(t.date).toLocaleDateString(),
+              Type: t.type,
             }))}
           />
         </Section>
 
-        <Section title="Unmatched Charges">
+        <Section title="Invoices">
           <DataTable
-            columns={["ID", "Amount", "Email", "Reference", "Status"]}
-            rows={unmatched.map((u) => ({
-              ID: shortId(u.stripeChargeId),
-              Amount: (
-                <AmountPill
-                  amount={u.amountGross}
-                  currency={u.currency}
-                  direction="in"
-                />
-              ),
-              Email: u.email ?? "-",
-              Reference: u.reference ?? "-",
-              Status: <StatusBadge status={u.status} />,
+            columns={["ID", "Number", "Total", "Status", "Client"]}
+            rows={invoices.map((inv) => ({
+              ID: shortId(inv.id),
+              Number: inv.invoice_number,
+              Total: formatAmount(inv.total, "GBP"),
+              Status: <StatusBadge status={inv.status} />,
+              Client: inv.client_id,
             }))}
           />
         </Section>
@@ -318,12 +307,6 @@ function formatAmount(amount: number, currency?: string) {
 
 function sumBy<T>(items: T[], fn: (item: T) => number): number {
   return items.reduce((acc, item) => acc + (fn(item) || 0), 0);
-}
-
-function inferCurrency(items: any[]): string {
-  const first = items?.[0];
-  if (!first) return "GBP";
-  return (first.currency || "GBP").toUpperCase();
 }
 
 function shortId(id: string | null | undefined): string {

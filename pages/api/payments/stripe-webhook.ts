@@ -4,106 +4,172 @@ import Stripe from "stripe";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { sendInvoiceEmail } from "../../../lib/emails/sendInvoiceEmail";
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
+
 export const config = {
   api: {
     bodyParser: false,
   },
 };
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
-
-async function buffer(readable: any) {
-  const chunks: any[] = [];
-  for await (const chunk of readable) {
+async function getRawBody(req: NextApiRequest): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) {
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
   }
   return Buffer.concat(chunks);
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") return res.status(405).end();
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-  const sig = req.headers["stripe-signature"] as string;
-  const buf = await buffer(req);
-
+  const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET as string;
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(
-      buf,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET as string
-    );
+    const rawBody = await getRawBody(req);
+    const signature = req.headers["stripe-signature"] as string;
+    event = stripe.webhooks.constructEvent(rawBody, signature, endpointSecret);
   } catch (err: any) {
     console.error("Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object as Stripe.Checkout.Session;
-    const invoiceId = session.metadata?.invoice_id;
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
 
-    if (invoiceId) {
-      // 1. Mark invoice as paid
-      const { data: invoice, error: updateError } = await supabaseAdmin
-        .from("invoices")
-        .update({
-          status: "paid",
-          paid_at: new Date().toISOString(),
-        })
-        .eq("id", invoiceId)
-        .select()
-        .single();
+        const invoiceId = session.metadata?.invoice_id;
+        const userId = session.metadata?.user_id;
 
-      if (updateError) {
-        console.error("Failed to mark invoice paid:", updateError);
-      }
+        if (!invoiceId || !userId) {
+          console.error("Missing metadata on session");
+          break;
+        }
 
-      // 2. Load customer + owner for email
-      const { data: customer } = await supabaseAdmin
-        .from("external_clients")
-        .select("*")
-        .eq("id", invoice.client_id)
-        .maybeSingle();
+        // Fetch invoice
+        const { data: invoice, error: invoiceError } = await supabaseAdmin
+          .from("invoices")
+          .select("*")
+          .eq("id", invoiceId)
+          .single();
 
-      const { data: owner } = await supabaseAdmin
-        .from("users")
-        .select("*")
-        .eq("id", invoice.user_id)
-        .maybeSingle();
+        if (invoiceError || !invoice) {
+          console.error("Invoice not found for webhook:", invoiceError);
+          break;
+        }
 
-      // 3. Send payment receipt email
-      try {
-        await sendInvoiceEmail({
-          invoice,
-          customer,
-          owner,
-        });
-      } catch (emailErr) {
-        console.error("Failed to send payment receipt email:", emailErr);
-      }
+        // Idempotency: if an invoice_payment already exists, skip
+        const { data: existingPayment } = await supabaseAdmin
+          .from("invoice_payments")
+          .select("id")
+          .eq("invoice_id", invoiceId)
+          .maybeSingle();
 
-      // 4. Insert payment record + platform fee
-      try {
-        const paymentIntentId = session.payment_intent as string;
-        const amountPaid = session.amount_total || 0; // pence
+        if (existingPayment) {
+          console.log("Invoice already has a payment record, skipping duplicate processing");
+          break;
+        }
 
-        // Platform fee (2% example)
-        const platformFee = Math.round(amountPaid * 0.02);
+        const amountTotalPence = session.amount_total ?? 0;
+        const amountPaid = amountTotalPence / 100; // store in pounds for transactions
 
-        await supabaseAdmin.from("payments").insert({
-          invoice_id: invoice.id,
-          user_id: invoice.user_id,
-          client_id: invoice.client_id,
+        // 1. Mark invoice as paid
+        await supabaseAdmin
+          .from("invoices")
+          .update({
+            status: "paid",
+            payment_status: "paid",
+            paid_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", invoiceId);
+
+        // 2. Load external client + owner for email + attribution
+        const { data: customer } = await supabaseAdmin
+          .from("external_clients")
+          .select("*")
+          .eq("id", invoice.client_id)
+          .maybeSingle();
+
+        const { data: owner } = await supabaseAdmin
+          .from("users")
+          .select("*")
+          .eq("id", invoice.user_id)
+          .maybeSingle();
+
+        // 3. Create transaction entry (belongs to business owner, client is external client)
+        const { data: transaction, error: txError } = await supabaseAdmin
+          .from("transactions")
+          .insert({
+            user_id: userId,
+            client_id: invoice.client_id,
+            amount: amountPaid,
+            type: "income",
+            description: `Invoice ${invoice.invoice_number} payment`,
+            date: new Date().toISOString(),
+            includedinct: true,
+            includedinsa: true,
+            includedinvat: true,
+          })
+          .select()
+          .single();
+
+        if (txError) {
+          console.error("Failed to create transaction:", txError);
+          break;
+        }
+
+        // 4. Create invoice_payments entry
+        await supabaseAdmin.from("invoice_payments").insert({
+          invoice_id: invoiceId,
+          transaction_id: transaction.id,
           amount: amountPaid,
-          stripe_payment_intent: paymentIntentId,
-          platform_fee_amount: platformFee,
+          match_confidence: "high",
+          source: "auto",
         });
-      } catch (paymentErr) {
-        console.error("Failed to insert payment record:", paymentErr);
-      }
-    }
-  }
 
-  res.status(200).json({ received: true });
+        // 5. Send payment receipt email
+        try {
+          await sendInvoiceEmail({
+            invoice,
+            customer,
+            owner,
+          });
+        } catch (emailErr) {
+          console.error("Failed to send payment receipt email:", emailErr);
+        }
+
+        break;
+      }
+
+      case "payment_intent.payment_failed": {
+        const intent = event.data.object as Stripe.PaymentIntent;
+        const invoiceId = intent.metadata?.invoice_id;
+
+        if (invoiceId) {
+          await supabaseAdmin
+            .from("invoices")
+            .update({
+              payment_status: "failed",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", invoiceId);
+        }
+
+        break;
+      }
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error("Webhook handler error:", err);
+    return res.status(500).json({ error: "Webhook handler failed" });
+  }
 }

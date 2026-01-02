@@ -1,3 +1,5 @@
+// pages/api/external-clients/index.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -16,16 +18,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { data: externalClients, error } = await supabaseAdmin
-    .from("external_clients")
-    .select("*")
-    .eq("owner_id", userId)
-    .order("created_at", { ascending: false });
+  try {
+    const { q } = req.query;
 
-  if (error) {
-    console.error("External clients fetch error:", error);
-    return res.status(500).json({ error: "Failed to fetch external clients" });
+    let query = supabaseAdmin
+      .from("external_clients")
+      .select("*")
+      .eq("owner_id", userId)
+      .neq("deleted", true); // soft-delete safe
+
+    // Optional search
+    if (q && typeof q === "string") {
+      const search = q.trim();
+      if (search.length > 0) {
+        query = query.or(
+          `contact_name.ilike.%${search}%,business_name.ilike.%${search}%,contact_email.ilike.%${search}%`
+        );
+      }
+    }
+
+    // Order by created_at if present, else business_name
+    query = query.order("created_at", { ascending: false }).order("business_name");
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error("External clients fetch error:", error);
+      return res.status(500).json({ error: "Failed to fetch external clients" });
+    }
+
+    return res.status(200).json({ externalClients: data ?? [] });
+  } catch (err) {
+    console.error("External clients list error:", err);
+    return res.status(500).json({ error: "Unexpected error" });
   }
-
-  return res.status(200).json({ externalClients });
 }

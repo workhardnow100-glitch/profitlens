@@ -10,9 +10,9 @@ type MatchType = "full" | "partial" | "overpayment";
 interface InvoiceRow {
   id: string;
   user_id: string;
-  client_id: string; // FIXED
+  client_id: string;
   issue_date: string;
-  gross_amount: number;
+  total: number; // pence
   status: string;
   payment_status: string | null;
   invoice_number: string;
@@ -22,7 +22,7 @@ interface TransactionRow {
   id: string;
   user_id: string;
   client_id: string;
-  amount: number;
+  amount: number; // pounds
   description: string | null;
   date: string;
 }
@@ -78,7 +78,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     //
     // 3) Fetch candidate transactions
-    // Filter by BOTH user_id and client_id
     //
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
@@ -99,12 +98,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     //
     // 4) Scoring logic
     //
+    const invAmount = Number(invoice.total) / 100; // convert pence → pounds
+
     for (const tx of txList) {
+      const txAmount = Number(tx.amount) || 0;
+
       let confidence = 0;
       let match_type: MatchType = "full";
-
-      const txAmount = Number(tx.amount);
-      const invAmount = Number(invoice.gross_amount);
 
       // Rule A: exact amount
       if (txAmount === invAmount) confidence += 70;
@@ -182,6 +182,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .update({
         status: newStatus,
         payment_status: newPaymentStatus,
+        paid_at: newStatus === "paid" ? new Date().toISOString() : null,
         updated_at: new Date().toISOString(),
       })
       .eq("id", invoiceId);

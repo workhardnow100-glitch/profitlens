@@ -1,3 +1,5 @@
+// pages/api/invoices/index.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -20,7 +22,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "POST") {
     try {
       const {
-        clientId,            // FIXED — correct FK
+        clientId,
         invoiceNumber,
         issueDate,
         dueDate,
@@ -35,7 +37,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(400).json({ error: "Missing clientId" });
       }
 
-      // Calculate totals
+      // Calculate totals (in pounds)
       const subtotal = lineItems.reduce(
         (sum: number, li: any) => sum + li.quantity * li.unitPrice,
         0
@@ -49,8 +51,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const grossTotal = subtotal + vatTotal;
 
-      const status = markSent ? "sent" : "draft";
+      // Convert to pence
+      const subtotalPence = Math.round(subtotal * 100);
+      const vatPence = Math.round(vatTotal * 100);
+      const totalPence = Math.round(grossTotal * 100);
 
+      const status = markSent ? "sent" : "draft";
       const finalInvoiceNumber = invoiceNumber || `INV-${Date.now()}`;
 
       //
@@ -60,18 +66,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("invoices")
         .insert({
           user_id: userId,
-          client_id: clientId,                 // FIXED
+          client_id: clientId,
           invoice_number: finalInvoiceNumber,
           status,
+          payment_status: "unpaid",
           issue_date: issueDate,
           due_date: dueDate,
           currency: "GBP",
-          net_amount: subtotal,
-          tax_amount: vatTotal,
-          gross_amount: grossTotal,
+          net_amount: subtotalPence,
+          tax_amount: vatPence,
+          total: totalPence, // NEW — canonical field
           payment_terms: paymentTerms,
           payment_instructions: paymentInstructions ?? {},
           notes_to_client: notesToClient ?? "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         })
         .select()
         .single();
@@ -82,14 +91,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       //
-      // Insert line items
+      // Insert line items (in pence)
       //
       const lineRows = lineItems.map((li: any, index: number) => ({
         invoice_id: invoice.id,
         description: li.description,
         quantity: li.quantity,
-        unit_price: li.unitPrice,
-        line_total: li.quantity * li.unitPrice,
+        unit_price: Math.round(li.unitPrice * 100),
+        line_total: Math.round(li.quantity * li.unitPrice * 100),
         vat_rate: li.vatRate,
         position: index,
         category: li.category ?? null,
@@ -133,7 +142,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         query = query.ilike("invoice_number", `%${q}%`);
       }
 
-      const { data, error } = await query.order("issue_date", {
+      const { data, error } = await query.order("created_at", {
         ascending: false,
       });
 

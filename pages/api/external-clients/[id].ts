@@ -29,6 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .select("*")
         .eq("id", clientId)
         .eq("owner_id", userId)
+        .neq("deleted", true)
         .single();
 
       if (error || !data) {
@@ -47,7 +48,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // ---------------------------------------------------------
   if (req.method === "PUT") {
     try {
-      const {
+      let {
         contact_name,
         business_name,
         trading_name,
@@ -59,6 +60,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         postcode,
         country,
       } = req.body;
+
+      // Normalize + trim
+      contact_name = contact_name?.trim();
+      business_name = business_name?.trim();
+      trading_name = trading_name?.trim();
+      contact_email = contact_email?.trim()?.toLowerCase();
+      phone = phone?.trim();
+      address_line1 = address_line1?.trim();
+      address_line2 = address_line2?.trim();
+      city = city?.trim();
+      postcode = postcode?.trim();
+      country = country?.trim();
+
+      // Required fields
+      if (!contact_name) {
+        return res.status(400).json({ error: "Client name is required" });
+      }
+
+      if (!business_name) {
+        return res.status(400).json({ error: "Business name is required" });
+      }
+
+      if (!contact_email) {
+        return res.status(400).json({ error: "Client email is required" });
+      }
+
+      // Prevent duplicate emails
+      const { data: existing } = await supabaseAdmin
+        .from("external_clients")
+        .select("id")
+        .eq("owner_id", userId)
+        .eq("contact_email", contact_email)
+        .neq("id", clientId)
+        .maybeSingle();
+
+      if (existing) {
+        return res.status(409).json({
+          error: "Another client with this email already exists",
+        });
+      }
 
       const { data, error } = await supabaseAdmin
         .from("external_clients")
@@ -93,13 +134,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // ---------------------------------------------------------
-  // DELETE — Remove external client
+  // DELETE — Soft delete external client
   // ---------------------------------------------------------
   if (req.method === "DELETE") {
     try {
       const { error } = await supabaseAdmin
         .from("external_clients")
-        .delete()
+        .update({
+          deleted: true,
+          updated_at: new Date().toISOString(),
+        })
         .eq("id", clientId)
         .eq("owner_id", userId);
 
