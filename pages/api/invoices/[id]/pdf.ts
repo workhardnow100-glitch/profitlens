@@ -34,16 +34,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "Invoice not found" });
     }
 
-    // 2) Fetch EXTERNAL CLIENT (correct FK + correct owner field)
+    // 2) Fetch EXTERNAL CLIENT (customer)
     const { data: externalClient, error: clientError } = await supabaseAdmin
       .from("external_clients")
       .select("*")
-      .eq("id", invoice.client_id)     // FIXED
-      .eq("owner_id", userId)          // FIXED
+      .eq("id", invoice.client_id)
+      .eq("owner_id", userId)
       .single();
 
     if (clientError) {
       console.error("External client fetch error:", clientError);
+    }
+
+    // 2b) Fetch SENDER BUSINESS PROFILE (the ProfitLens user's business)
+    const { data: senderClient, error: senderError } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("owner_id", userId)
+      .single();
+
+    if (senderError || !senderClient) {
+      console.error("Sender client fetch error:", senderError);
+      return res.status(500).json({ error: "Failed to fetch sender business profile" });
     }
 
     // 3) Fetch line items
@@ -70,11 +82,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const paymentLinkUrl = invoice.stripe_payment_link_url || null;
 
-    // 5) Build PDF buffer
+    // 5) Build PDF buffer (NOW includes senderClient)
     const buffer = await createPdfBuffer((doc) =>
       buildInvoicePdf(doc, {
         invoice,
         externalClient,
+        senderClient, // <-- NEW
         lineItems: lineItems || [],
         payments: payments || [],
         paymentLinkUrl,
@@ -86,7 +99,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const filename = `invoice-${invoice.invoice_number || invoice.id}.pdf`;
 
       await storePdfAndRecord({
-        clientId: invoice.client_id,     // FIXED
+        clientId: invoice.client_id,
         type: "invoice",
         periodStart: invoice.issue_date || null,
         periodEnd: invoice.due_date || null,

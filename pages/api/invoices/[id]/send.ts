@@ -39,15 +39,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Fetch EXTERNAL CLIENT (correct table + correct FK)
+    // 2) Fetch EXTERNAL CLIENT (recipient)
     //
-    const { data: externalClient, error: externalClientError } =
-      await supabaseAdmin
-        .from("external_clients")
-        .select("*")
-        .eq("id", invoice.client_id)       // FIXED
-        .eq("owner_id", userId)
-        .single();
+    const { data: externalClient, error: externalClientError } = await supabaseAdmin
+      .from("external_clients")
+      .select("*")
+      .eq("id", invoice.client_id)
+      .eq("owner_id", userId)
+      .single();
 
     if (externalClientError || !externalClient) {
       return res.status(400).json({ error: "External client not found or missing" });
@@ -58,7 +57,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 3) Fetch line items
+    // 3) Fetch SENDER BUSINESS PROFILE
+    //
+    const { data: senderClient, error: senderError } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("owner_id", userId)
+      .single();
+
+    if (senderError || !senderClient) {
+      console.error("Sender client fetch error:", senderError);
+      return res.status(500).json({ error: "Failed to fetch sender business profile" });
+    }
+
+    //
+    // 4) Fetch line items
     //
     const { data: lineItems, error: lineError } = await supabaseAdmin
       .from("invoice_line_items")
@@ -72,7 +85,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 4) Fetch payments
+    // 5) Fetch payments
     //
     const { data: payments, error: payError } = await supabaseAdmin
       .from("invoice_payments")
@@ -86,12 +99,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const paymentLinkUrl = invoice.stripe_payment_link_url || null;
 
     //
-    // 5) Build PDF buffer
+    // 6) Build PDF buffer
     //
     const pdfBuffer = await createPdfBuffer((doc) =>
       buildInvoicePdf(doc, {
         invoice,
         externalClient,
+        senderClient, // <-- NEW
         lineItems: lineItems || [],
         payments: payments || [],
         paymentLinkUrl,
@@ -101,16 +115,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const filename = `invoice-${invoice.invoice_number || invoice.id}.pdf`;
 
     //
-    // 6) Build email content
+    // 7) Build email content
     //
     const { subject, html, text } = buildInvoiceEmail({
       invoice,
       externalClient,
+      senderClient, // <-- NEW
       paymentLinkUrl,
     });
 
     //
-    // 7) Send email
+    // 8) Send email
     //
     await sendMail({
       to: externalClient.contact_email,
@@ -127,13 +142,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     //
-    // 8) Audit log
+    // 9) Audit log
     //
     try {
       await supabaseAdmin.from("invoice_email_events").insert([
         {
           invoice_id: invoiceId,
-          external_client_id: invoice.client_id, // FIXED
+          external_client_id: invoice.client_id,
           user_id: userId,
           to_email: externalClient.contact_email,
           subject,
