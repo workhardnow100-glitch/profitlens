@@ -20,18 +20,24 @@ export default function ExternalClientsPage() {
   const [clients, setClients] = useState<ExternalClient[]>([]);
   const [loadingClients, setLoadingClients] = useState(true);
 
+  // 🔥 FIXED — no infinite loop
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return; // stable guard
 
     async function load() {
-      const res = await fetch("/api/external-clients");
-      const data = await res.json();
-      setClients(data.externalClients || []);
-      setLoadingClients(false);
+      try {
+        const res = await fetch("/api/external-clients");
+        const data = await res.json();
+        setClients(data.externalClients || []);
+      } catch (err) {
+        console.error("Failed to load clients:", err);
+      } finally {
+        setLoadingClients(false);
+      }
     }
 
     load();
-  }, [user]);
+  }, [user?.id]); // ❗ user removed, only user.id is stable
 
   if (loading || loadingClients) {
     return <div className="p-6">Loading clients…</div>;
