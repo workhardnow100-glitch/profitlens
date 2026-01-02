@@ -19,28 +19,27 @@ export default function RecurringInvoicesPage() {
   const [items, setItems] = useState<RecurringInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+useEffect(() => {
+  if (!user?.id) return;
 
-  useEffect(() => {
-    if (!user) return;
-
-    async function load() {
-      try {
-        const res = await fetch("/api/recurring-invoices");
-        if (!res.ok) {
-          throw new Error(`Failed to load recurring invoices (${res.status})`);
-        }
-        const data = await res.json();
-        setItems(data.recurring || []);
-      } catch (err: any) {
-        console.error("Failed to load recurring invoices", err);
-        setError(err?.message || "Failed to load recurring invoices");
-      } finally {
-        setLoading(false);
+  async function load() {
+    try {
+      const res = await fetch("/api/recurring-invoices");
+      if (!res.ok) {
+        throw new Error(`Failed to load recurring invoices (${res.status})`);
       }
+      const data = await res.json();
+      setItems(data.recurring || []);
+    } catch (err: any) {
+      console.error("Failed to load recurring invoices", err);
+      setError(err?.message || "Failed to load recurring invoices");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    load();
-  }, [user]);
+  load();
+}, [user?.id]); // 🔥 stable dependency
 
   return (
     <div className="p-6">
