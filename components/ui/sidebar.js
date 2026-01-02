@@ -9,6 +9,7 @@ import {
   PoundSterling,
   History,
   ChevronDown,
+  ShieldCheck,
 } from "lucide-react";
 
 import { useUser } from "../../hooks/useUser";
