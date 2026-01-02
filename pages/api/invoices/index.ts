@@ -62,28 +62,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       //
       // Insert invoice
       //
-      const { data: invoice, error } = await supabaseAdmin
-        .from("invoices")
-        .insert({
-          user_id: userId,
-          client_id: clientId,
-          invoice_number: finalInvoiceNumber,
-          status,
-          payment_status: "unpaid",
-          issue_date: issueDate,
-          due_date: dueDate,
-          currency: "GBP",
-          net_amount: subtotalPence,
-          tax_amount: vatPence,
-          total: totalPence, // NEW — canonical field
-          payment_terms: paymentTerms,
-          payment_instructions: paymentInstructions ?? {},
-          notes_to_client: notesToClient ?? "",
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+     const { data: invoice, error } = await supabaseAdmin
+  .from("invoices")
+  .insert({
+    user_id: userId,
+    client_id: clientId,
+    invoice_number: finalInvoiceNumber,
+    status,
+    payment_status: "unpaid",
+    issue_date: issueDate,
+    due_date: dueDate,
+    currency: "GBP",
+    net_amount: subtotalPence,
+    tax_amount: vatPence,
+    gross_amount: totalPence,   // ✅ FIXED
+    payment_terms: paymentTerms,
+    payment_instructions: paymentInstructions ?? {},
+    notes_to_client: notesToClient ?? "",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  })
+  .select()
+  .single();
+
 
       if (error || !invoice) {
         console.error(error);
