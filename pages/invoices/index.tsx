@@ -1,4 +1,5 @@
-// pages/invoices/index.tsx   /// selection page of invoices//before invoice creator 
+// pages/invoices/index.tsx   /// selection page of invoices
+
 import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useUser } from "../../hooks/useUser";
@@ -31,7 +32,7 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
 
-  // 🔥 Debounced search
+  // Debounced search
   const [search, setSearch] = useState("");
   const searchRef = useRef<NodeJS.Timeout | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -40,17 +41,20 @@ export default function InvoicesPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
 
-  // 🔥 Debounce search input
+  // Debounce search input
   useEffect(() => {
     if (searchRef.current) clearTimeout(searchRef.current);
     searchRef.current = setTimeout(() => {
       setDebouncedSearch(search);
     }, 300);
+    return () => {
+      if (searchRef.current) clearTimeout(searchRef.current);
+    };
   }, [search]);
 
-  // 🔥 Load invoices
+  // Load invoices (fixed — no infinite loop)
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return; // stable guard
 
     const load = async () => {
       const params = new URLSearchParams();
@@ -103,7 +107,7 @@ export default function InvoicesPage() {
         };
       });
 
-      // 🔥 Persist selections across refresh
+      // Persist selections across refresh
       setSelectedIds((prev) =>
         prev.filter((id) => mapped.some((inv) => inv.id === id))
       );
@@ -112,7 +116,7 @@ export default function InvoicesPage() {
     };
 
     load();
-  }, [user, statusFilter, debouncedSearch]);
+  }, [statusFilter, debouncedSearch, user?.id]);
 
   const allSelected = useMemo(
     () => invoices.length > 0 && selectedIds.length === invoices.length,
@@ -216,7 +220,7 @@ export default function InvoicesPage() {
         };
       });
 
-      // 🔥 Persist selections across refresh
+      // Persist selections across refresh
       setSelectedIds((prev) =>
         prev.filter((id) => mapped.some((inv) => inv.id === id))
       );
