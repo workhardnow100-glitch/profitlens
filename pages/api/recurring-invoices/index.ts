@@ -1,26 +1,29 @@
+// pages/api/recurring-invoices/index.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // 🔥 STOP VERCEL FROM CACHING THIS ROUTE
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
   // ⭐ Who owns the business?
-  // If accountant is acting for a business → use that business ID
-  // If normal user → use their own user ID
   const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
   // ============================================================
-  // GET — List recurring schedules for the business owner
+  // GET — List recurring schedules
   // ============================================================
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .select("*")
-        .eq("user_id", businessOwnerId)   // ⭐ Always filter by business owner
+        .eq("user_id", businessOwnerId)
         .order("created_at", { ascending: false });
 
       if (error) {
@@ -41,7 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "POST") {
     try {
       const {
-        clientId,                       // ⭐ This is the CUSTOMER
+        clientId,
         templateLineItems,
         templatePaymentInstructions,
         templateNotes,
@@ -56,14 +59,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const now = new Date().toISOString();
 
-      // ⭐ CRITICAL FIX:
-      // user_id = business owner
-      // client_id = customer
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .insert({
-          user_id: businessOwnerId,           // ⭐ Always the business owner
-          client_id: clientId,                // ⭐ Always the customer
+          user_id: businessOwnerId,
+          client_id: clientId,
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,

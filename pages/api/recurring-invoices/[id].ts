@@ -1,9 +1,14 @@
+// pages/api/recurring-invoices/[id].ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // 🔥 STOP VERCEL FROM CACHING THIS ROUTE
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
@@ -24,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("recurring_invoices")
         .select("*")
         .eq("id", id)
-        .eq("user_id", businessOwnerId)   // ⭐ Always filter by business owner
+        .eq("user_id", businessOwnerId)
         .maybeSingle();
 
       if (error) {
@@ -83,7 +88,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           updated_at: now,
         })
         .eq("id", id)
-        .eq("user_id", businessOwnerId)   // ⭐ Accountant-aware filter
+        .eq("user_id", businessOwnerId)
         .select()
         .single();
 
@@ -108,7 +113,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("recurring_invoices")
         .delete()
         .eq("id", id)
-        .eq("user_id", businessOwnerId);   // ⭐ Accountant-aware filter
+        .eq("user_id", businessOwnerId);
 
       if (error) {
         console.error("Supabase delete error:", error);
@@ -122,8 +127,5 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // ============================================================
-  // Unsupported method
-  // ============================================================
   return res.status(405).json({ error: "Method not allowed" });
 }
