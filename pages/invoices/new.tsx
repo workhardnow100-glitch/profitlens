@@ -25,9 +25,9 @@ export default function NewInvoicePage() {
   const { user, loading } = useUser();
   const router = useRouter();
 
-  // Prevent defaults from loading twice
-  const defaultsLoaded = useRef(false);
-
+  // -----------------------------
+  // State
+  // -----------------------------
   const [settings, setSettings] = useState<InvoiceSettings | null>(null);
 
   const [externalClientId, setExternalClientId] = useState<string>("");
@@ -54,6 +54,9 @@ export default function NewInvoicePage() {
   const [saving, setSaving] = useState(false);
   const [loadingDefaults, setLoadingDefaults] = useState(true);
 
+  // prevent defaults from re-applying and resetting fields
+  const defaultsLoaded = useRef(false);
+
   // -----------------------------
   // Load external clients
   // -----------------------------
@@ -76,7 +79,7 @@ export default function NewInvoicePage() {
   }, [user]);
 
   // -----------------------------
-  // Load invoice defaults (ONLY ONCE)
+  // Load invoice defaults
   // -----------------------------
   useEffect(() => {
     if (!user || defaultsLoaded.current) return;
@@ -88,7 +91,7 @@ export default function NewInvoicePage() {
         const s: InvoiceSettings = data.settings;
         setSettings(s);
 
-        // Pre-seed fields ONCE
+        // Pre-seed fields
         setPaymentTerms(s.default_payment_terms || "Payment due within 14 days.");
         setNotesToClient(s.default_notes || "");
         setReferenceHint(
@@ -103,15 +106,17 @@ export default function NewInvoicePage() {
             setAccountName(parsed.account_name || "");
             setSortCode(parsed.sort_code || "");
             setAccountNumber(parsed.account_number || "");
-          } catch {}
+          } catch {
+            // ignore malformed JSON
+          }
         }
 
         // VAT rate for new line items
         const defaultVat = s.default_vat_rate ?? 20;
         setLineItems([createEmptyLine(defaultVat)]);
 
-        // Invoice prefix — apply only once
-        if (s.default_invoice_prefix) {
+        // Invoice prefix — only apply if user hasn't typed yet
+        if (s.default_invoice_prefix && invoiceNumber === "") {
           setInvoiceNumber(s.default_invoice_prefix);
         }
 
@@ -124,7 +129,7 @@ export default function NewInvoicePage() {
     }
 
     loadDefaults();
-  }, [user]);
+  }, [user, invoiceNumber]);
 
   if (loading || loadingDefaults || loadingClients) return <div>Loading…</div>;
   if (!user) return <div>Please sign in</div>;
@@ -179,7 +184,7 @@ export default function NewInvoicePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: externalClientId,
+          clientId: externalClientId, // correct FK
           invoiceNumber: invoiceNumber || undefined,
           issueDate,
           dueDate,
@@ -203,8 +208,7 @@ export default function NewInvoicePage() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || "Failed to save invoice");
+        console.error("Failed to save invoice");
         setSaving(false);
         return;
       }
@@ -222,7 +226,6 @@ export default function NewInvoicePage() {
   // -----------------------------
   return (
     <div className="space-y-6">
-      {/* HEADER */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">New Invoice</h1>
@@ -232,9 +235,9 @@ export default function NewInvoicePage() {
         </div>
       </div>
 
-      {/* FORM */}
+      {/* Header */}
       <div className="grid gap-4 md:grid-cols-3">
-        {/* Client */}
+        {/* External client selector */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Client</label>
           <select
@@ -254,7 +257,6 @@ export default function NewInvoicePage() {
           </select>
         </div>
 
-        {/* Invoice number */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Invoice number</label>
           <input
@@ -265,7 +267,6 @@ export default function NewInvoicePage() {
           />
         </div>
 
-        {/* Payment terms */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Payment terms</label>
           <input
@@ -275,7 +276,6 @@ export default function NewInvoicePage() {
           />
         </div>
 
-        {/* Issue date */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Issue date</label>
           <input
@@ -286,7 +286,6 @@ export default function NewInvoicePage() {
           />
         </div>
 
-        {/* Due date */}
         <div className="space-y-2">
           <label className="text-sm font-medium">Due date</label>
           <input
@@ -298,11 +297,217 @@ export default function NewInvoicePage() {
         </div>
       </div>
 
-      {/* LINE ITEMS */}
-      {/* (unchanged — your existing code here) */}
+      {/* Line items */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold uppercase text-gray-500">
+            Line items
+          </h2>
+          <button
+            type="button"
+            className="text-sm text-blue-600 hover:underline"
+            onClick={addLine}
+          >
+            Add line
+          </button>
+        </div>
 
-      {/* PAYMENT + SUMMARY */}
-      {/* (unchanged — your existing code here) */}
+        <div className="overflow-hidden rounded-md border">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-3 py-2 text-left">Description</th>
+                <th className="px-3 py-2 text-right">Qty</th>
+                <th className="px-3 py-2 text-right">Unit price</th>
+                <th className="px-3 py-2 text-right">VAT %</th>
+                <th className="px-3 py-2 text-right">Line total</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+
+            <tbody className="divide-y">
+              {lineItems.map((li) => {
+                const lineTotal =
+                  li.quantity * li.unitPrice * (1 + li.vatRate / 100);
+
+                return (
+                  <tr key={li.id}>
+                    <td className="px-3 py-2">
+                      <input
+                        className="w-full rounded-md border px-2 py-1 text-sm"
+                        value={li.description}
+                        onChange={(e) =>
+                          handleLineChange(li.id, "description", e.target.value)
+                        }
+                        placeholder="Description"
+                      />
+                    </td>
+
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        type="number"
+                        className="w-20 rounded-md border px-2 py-1 text-sm text-right"
+                        value={li.quantity}
+                        onChange={(e) =>
+                          handleLineChange(li.id, "quantity", e.target.value)
+                        }
+                      />
+                    </td>
+
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="w-24 rounded-md border px-2 py-1 text-sm text-right"
+                        value={li.unitPrice}
+                        onChange={(e) =>
+                          handleLineChange(li.id, "unitPrice", e.target.value)
+                        }
+                      />
+                    </td>
+
+                    <td className="px-3 py-2 text-right">
+                      <input
+                        type="number"
+                        className="w-20 rounded-md border px-2 py-1 text-sm text-right"
+                        value={li.vatRate}
+                        onChange={(e) =>
+                          handleLineChange(li.id, "vatRate", e.target.value)
+                        }
+                      />
+                    </td>
+
+                    <td className="px-3 py-2 text-right">
+                      £{lineTotal.toFixed(2)}
+                    </td>
+
+                    <td className="px-3 py-2 text-center">
+                      {lineItems.length > 1 && (
+                        <button
+                          type="button"
+                          className="text-xs text-red-600 hover:underline"
+                          onClick={() => removeLine(li.id)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Summary + payment section */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <div className="space-y-3">
+          <h2 className="text-sm font-semibold uppercase text-gray-500">
+            How to pay
+          </h2>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Bank name</label>
+            <input
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              value={bankName}
+              onChange={(e) => setBankName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Account name</label>
+            <input
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Sort code</label>
+              <input
+                className="w-full rounded-md border px-3 py-2 text-sm"
+                value={sortCode}
+                onChange={(e) => setSortCode(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Account number</label>
+              <input
+                className="w-full rounded-md border px-3 py-2 text-sm"
+                value={accountNumber}
+                onChange={(e) => setAccountNumber(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Reference hint</label>
+            <input
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              value={referenceHint}
+              onChange={(e) => setReferenceHint(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Notes to client</label>
+            <textarea
+              className="w-full rounded-md border px-3 py-2 text-sm"
+              rows={4}
+              value={notesToClient}
+              onChange={(e) => setNotesToClient(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-4 md:justify-self-end md:w-80">
+          <h2 className="text-sm font-semibold uppercase text-gray-500">
+            Summary
+          </h2>
+
+          <div className="space-y-2 rounded-md border p-4 text-sm">
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>£{subtotal.toFixed(2)}</span>
+            </div>
+
+            <div className="flex justify-between">
+              <span>VAT</span>
+              <span>£{vatTotal.toFixed(2)}</span>
+            </div>
+
+            <div className="flex justify-between font-semibold">
+              <span>Total</span>
+              <span>£{grossTotal.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className="flex-1 rounded-md border px-4 py-2 text-sm font-medium"
+              disabled={saving}
+              onClick={() => handleSave(false)}
+            >
+              Save draft
+            </button>
+
+            <button
+              type="button"
+              className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              disabled={saving}
+              onClick={() => handleSave(true)}
+            >
+              Save & mark as sent
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
