@@ -1,3 +1,5 @@
+// pages/invoices/new.tsx // standard invoice creation page
+
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
 import { useUser } from "../../hooks/useUser";
@@ -35,6 +37,11 @@ export default function NewInvoicePage() {
   const [loadingClients, setLoadingClients] = useState(true);
 
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
+  const [invoiceNumberError, setInvoiceNumberError] = useState<string | null>(
+    null
+  );
+  const [checkingInvoiceNumber, setCheckingInvoiceNumber] = useState(false);
+
   const [issueDate, setIssueDate] = useState<string>("");
   const [dueDate, setDueDate] = useState<string>("");
 
@@ -56,12 +63,13 @@ export default function NewInvoicePage() {
 
   // prevent defaults from re-applying and resetting fields
   const defaultsLoaded = useRef(false);
+  const invoiceNumberDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // -----------------------------
   // Load external clients
   // -----------------------------
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
 
     async function loadClients() {
       try {
@@ -76,13 +84,13 @@ export default function NewInvoicePage() {
     }
 
     loadClients();
-  }, [user]);
+  }, [user?.id]);
 
   // -----------------------------
   // Load invoice defaults
   // -----------------------------
   useEffect(() => {
-    if (!user || defaultsLoaded.current) return;
+    if (!user?.id || defaultsLoaded.current) return;
 
     async function loadDefaults() {
       try {
@@ -92,10 +100,13 @@ export default function NewInvoicePage() {
         setSettings(s);
 
         // Pre-seed fields
-        setPaymentTerms(s.default_payment_terms || "Payment due within 14 days.");
+        setPaymentTerms(
+          s.default_payment_terms || "Payment due within 14 days."
+        );
         setNotesToClient(s.default_notes || "");
         setReferenceHint(
-          s.default_payment_instructions || "Please use invoice number as reference"
+          s.default_payment_instructions ||
+            "Please use invoice number as reference"
         );
 
         // Payment instructions (bank details)
@@ -115,11 +126,6 @@ export default function NewInvoicePage() {
         const defaultVat = s.default_vat_rate ?? 20;
         setLineItems([createEmptyLine(defaultVat)]);
 
-        // Invoice prefix — only apply if user hasn't typed yet
-        if (s.default_invoice_prefix && invoiceNumber === "") {
-          setInvoiceNumber(s.default_invoice_prefix);
-        }
-
         defaultsLoaded.current = true;
         setLoadingDefaults(false);
       } catch (err) {
@@ -129,7 +135,83 @@ export default function NewInvoicePage() {
     }
 
     loadDefaults();
-  }, [user, invoiceNumber]);
+  }, [user?.id]);
+
+  // -----------------------------
+  // Fetch next available invoice number
+  // -----------------------------
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!defaultsLoaded.current) return;
+    if (invoiceNumber) return;
+
+    async function fetchNextNumber() {
+      try {
+        const res = await fetch("/api/invoices/next-number");
+        if (!res.ok) {
+          console.error("Failed to fetch next invoice number");
+          return;
+        }
+        const data = await res.json();
+        if (data.nextNumber && !invoiceNumber) {
+          setInvoiceNumber(data.nextNumber);
+        }
+      } catch (err) {
+        console.error("Error fetching next invoice number:", err);
+      }
+    }
+
+    fetchNextNumber();
+  }, [user?.id, invoiceNumber]);
+
+  // -----------------------------
+  // Live duplicate invoice number check (debounced)
+  // -----------------------------
+  useEffect(() => {
+    if (!user?.id) return;
+
+    if (invoiceNumberDebounceRef.current) {
+      clearTimeout(invoiceNumberDebounceRef.current);
+    }
+
+    if (!invoiceNumber) {
+      setInvoiceNumberError(null);
+      setCheckingInvoiceNumber(false);
+      return;
+    }
+
+    invoiceNumberDebounceRef.current = setTimeout(async () => {
+      try {
+        setCheckingInvoiceNumber(true);
+        const res = await fetch(
+          `/api/invoices/check-number?invoiceNumber=${encodeURIComponent(
+            invoiceNumber
+          )}`
+        );
+        if (!res.ok) {
+          console.error("Failed to check invoice number");
+          setCheckingInvoiceNumber(false);
+          return;
+        }
+        const data = await res.json();
+        if (data.exists) {
+          setInvoiceNumberError("This invoice number is already in use.");
+        } else {
+          setInvoiceNumberError(null);
+        }
+      } catch (err) {
+        console.error("Error checking invoice number:", err);
+      } finally {
+        setCheckingInvoiceNumber(false);
+      }
+    }, 300);
+
+    return () => {
+      if (invoiceNumberDebounceRef.current) {
+        clearTimeout(invoiceNumberDebounceRef.current);
+      }
+    };
+  }, [user?.id, invoiceNumber]);
 
   if (loading || loadingDefaults || loadingClients) return <div>Loading…</div>;
   if (!user) return <div>Please sign in</div>;
@@ -178,6 +260,16 @@ export default function NewInvoicePage() {
       return;
     }
 
+    if (checkingInvoiceNumber) {
+      alert("Please wait while we validate the invoice number.");
+      return;
+    }
+
+    if (invoiceNumberError) {
+      alert("Please fix the invoice number before saving.");
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetch("/api/invoices", {
@@ -206,6 +298,31 @@ export default function NewInvoicePage() {
           markSent,
         }),
       });
+
+      if (res.status === 409) {
+        // Duplicate invoice number – fetch next available and inform user
+        try {
+          const nextRes = await fetch("/api/invoices/next-number");
+          const nextData = await nextRes.json();
+          if (nextData.nextNumber) {
+            setInvoiceNumber(nextData.nextNumber);
+            alert(
+              "That invoice number was already used. We've updated it to the next available number."
+            );
+          } else {
+            alert(
+              "That invoice number was already used. Please choose a different number."
+            );
+          }
+        } catch (err) {
+          console.error("Failed to fetch next invoice number after conflict:", err);
+          alert(
+            "That invoice number was already used, and we couldn't fetch the next one automatically. Please choose a different number."
+          );
+        }
+        setSaving(false);
+        return;
+      }
 
       if (!res.ok) {
         console.error("Failed to save invoice");
@@ -261,10 +378,16 @@ export default function NewInvoicePage() {
           <label className="text-sm font-medium">Invoice number</label>
           <input
             className="w-full rounded-md border px-3 py-2 text-sm"
-            placeholder="Auto-generate if blank"
+            placeholder="Auto-generated if blank"
             value={invoiceNumber}
             onChange={(e) => setInvoiceNumber(e.target.value)}
           />
+          {checkingInvoiceNumber && (
+            <p className="text-xs text-gray-500">Checking invoice number…</p>
+          )}
+          {invoiceNumberError && (
+            <p className="text-xs text-red-600">{invoiceNumberError}</p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -491,7 +614,7 @@ export default function NewInvoicePage() {
             <button
               type="button"
               className="flex-1 rounded-md border px-4 py-2 text-sm font-medium"
-              disabled={saving}
+              disabled={saving || !!invoiceNumberError || checkingInvoiceNumber}
               onClick={() => handleSave(false)}
             >
               Save draft
@@ -500,7 +623,7 @@ export default function NewInvoicePage() {
             <button
               type="button"
               className="flex-1 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-              disabled={saving}
+              disabled={saving || !!invoiceNumberError || checkingInvoiceNumber}
               onClick={() => handleSave(true)}
             >
               Save & mark as sent
