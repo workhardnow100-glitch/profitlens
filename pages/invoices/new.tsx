@@ -112,10 +112,11 @@ export default function NewInvoicePage() {
         const defaultVat = s.default_vat_rate ?? 20;
         setLineItems([createEmptyLine(defaultVat)]);
 
-        // Invoice prefix
-        if (s.default_invoice_prefix) {
-          setInvoiceNumber(s.default_invoice_prefix);
-        }
+        // Invoice prefix — apply only once
+if (s.default_invoice_prefix && invoiceNumber === "") {
+  setInvoiceNumber(s.default_invoice_prefix);
+}
+
 
         setLoadingDefaults(false);
       } catch (err) {
