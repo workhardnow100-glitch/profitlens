@@ -9,7 +9,7 @@ import { useUser } from "../../../hooks/useUser";
 interface Invoice {
   id: string;
   invoice_number: string;
-  client_id: string; // FIXED
+  client_id: string;
   issue_date: string;
   due_date: string;
   status: string;
@@ -29,7 +29,7 @@ interface ExternalClient {
   business_name?: string;
   trading_name?: string;
   contact_email?: string;
-  phone?: string; // FIXED
+  phone?: string;
   address_line1?: string;
   address_line2?: string;
   city?: string;
@@ -70,7 +70,6 @@ export default function InvoiceViewPage() {
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingInvoice, setLoadingInvoice] = useState(true);
-  const [creatingPaymentLink, setCreatingPaymentLink] = useState(false);
   const [matchResult, setMatchResult] = useState<any>(null);
   const [sendingEmail, setSendingEmail] = useState(false);
 
@@ -121,24 +120,6 @@ export default function InvoiceViewPage() {
   // -----------------------------
   // Actions
   // -----------------------------
-  const createPaymentLink = async () => {
-    setCreatingPaymentLink(true);
-    const res = await fetch("/api/invoices/create-payment-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ invoiceId: invoice.id }),
-    });
-
-    const data = await res.json();
-    setCreatingPaymentLink(false);
-
-    if (data.url) {
-      setInvoice((prev) =>
-        prev ? { ...prev, stripe_payment_link_url: data.url } : prev
-      );
-    }
-  };
-
   const runMatchingEngine = async () => {
     const res = await fetch(`/api/invoices/${invoice.id}/match`, {
       method: "POST",
@@ -286,6 +267,74 @@ export default function InvoiceViewPage() {
         </span>
       </div>
 
+      {/* Payment Panel */}
+      <div className="rounded-md border p-6 space-y-4 bg-gray-50">
+        <h2 className="text-lg font-semibold">Payment</h2>
+
+        {/* Payment Status + Balance */}
+        <div className="flex items-center justify-between">
+          <div className="space-y-1">
+            <div className="text-sm text-gray-600">Status</div>
+            <div
+              className={`text-sm font-medium ${
+                balance <= 0
+                  ? "text-green-600"
+                  : invoice.stripe_payment_link_url
+                  ? "text-blue-600"
+                  : "text-red-600"
+              }`}
+            >
+              {balance <= 0
+                ? "Paid"
+                : invoice.stripe_payment_link_url
+                ? "Card payments enabled"
+                : "Payment link missing"}
+            </div>
+          </div>
+
+          <div className="space-y-1 text-right">
+            <div className="text-sm text-gray-600">Balance due</div>
+            <div className="text-sm font-medium">
+              £{balance.toFixed(2)}
+            </div>
+          </div>
+        </div>
+
+        {/* Payment Link Actions */}
+        {invoice.stripe_payment_link_url ? (
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(invoice.stripe_payment_link_url!);
+              }}
+              className="rounded-md border px-3 py-1 text-sm"
+            >
+              Copy payment link
+            </button>
+
+            <a
+              href={invoice.stripe_payment_link_url}
+              target="_blank"
+              className="rounded-md border px-3 py-1 text-sm"
+            >
+              Open link
+            </a>
+          </div>
+        ) : (
+          <p className="text-sm text-red-600">
+            ⚠️ Payment link missing — this should not happen. The invoice API
+            may have failed to generate a link.
+          </p>
+        )}
+
+        {/* Paid / Balance summary */}
+        <div className="text-sm text-gray-600">
+          Paid: £{paidAmount.toFixed(2)}
+          <br />
+          Balance: £{balance.toFixed(2)}
+        </div>
+      </div>
+
       {/* External Client details */}
       <div className="rounded-md border p-6 space-y-2">
         <h2 className="text-lg font-semibold">Client details</h2>
@@ -324,40 +373,6 @@ export default function InvoiceViewPage() {
         ) : (
           <p className="text-sm text-gray-500">Loading client details…</p>
         )}
-      </div>
-
-      {/* Payment section */}
-      <div className="rounded-md border p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Payment</h2>
-
-        {invoice.stripe_payment_link_url ? (
-          <div className="space-y-3">
-            <a
-              href={invoice.stripe_payment_link_url}
-              target="_blank"
-              className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Pay Now
-            </a>
-            <p className="text-sm text-gray-500">
-              Share this link with your client to accept card payments.
-            </p>
-          </div>
-        ) : (
-          <button
-            onClick={createPaymentLink}
-            disabled={creatingPaymentLink}
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {creatingPaymentLink ? "Creating…" : "Enable Card Payments"}
-          </button>
-        )}
-
-        <div className="text-sm text-gray-600">
-          Paid: £{paidAmount.toFixed(2)}
-          <br />
-          Balance: £{balance.toFixed(2)}
-        </div>
       </div>
 
       {/* Matching Engine Panel */}

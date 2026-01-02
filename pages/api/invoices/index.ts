@@ -4,6 +4,11 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  // apiVersion can be pinned if you want, e.g. "2024-06-20"
+});
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const session = await getServerSession(req, res, authOptions);
@@ -16,7 +21,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   //
   // ---------------------------------------------------------
-  // POST — CREATE INVOICE
+  // POST — CREATE INVOICE (with automatic Stripe Payment Link)
   // ---------------------------------------------------------
   //
   if (req.method === "POST") {
@@ -35,6 +40,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!clientId) {
         return res.status(400).json({ error: "Missing clientId" });
+      }
+
+      if (!Array.isArray(lineItems) || lineItems.length === 0) {
+        return res.status(400).json({ error: "Missing line items" });
       }
 
       // Calculate totals (in pounds)
@@ -60,31 +69,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const finalInvoiceNumber = invoiceNumber || `INV-${Date.now()}`;
 
       //
-      // Insert invoice
+      // 1) Insert invoice
       //
-     const { data: invoice, error } = await supabaseAdmin
-  .from("invoices")
-  .insert({
-    user_id: userId,
-    client_id: clientId,
-    invoice_number: finalInvoiceNumber,
-    status,
-    payment_status: "unpaid",
-    issue_date: issueDate,
-    due_date: dueDate,
-    currency: "GBP",
-    net_amount: subtotalPence,
-    tax_amount: vatPence,
-    gross_amount: totalPence,   // ✅ FIXED
-    payment_terms: paymentTerms,
-    payment_instructions: paymentInstructions ?? {},
-    notes_to_client: notesToClient ?? "",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  })
-  .select()
-  .single();
-
+      const { data: invoice, error } = await supabaseAdmin
+        .from("invoices")
+        .insert({
+          user_id: userId,
+          client_id: clientId,
+          invoice_number: finalInvoiceNumber,
+          status,
+          payment_status: "unpaid",
+          issue_date: issueDate,
+          due_date: dueDate,
+          currency: "GBP",
+          net_amount: subtotalPence,
+          tax_amount: vatPence,
+          gross_amount: totalPence,
+          payment_terms: paymentTerms,
+          payment_instructions: paymentInstructions ?? {},
+          notes_to_client: notesToClient ?? "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
 
       if (error || !invoice) {
         console.error(error);
@@ -92,7 +100,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       //
-      // Insert line items (in pence)
+      // 2) Insert line items (in pence)
       //
       const lineRows = lineItems.map((li: any, index: number) => ({
         invoice_id: invoice.id,
@@ -114,7 +122,90 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to create line items" });
       }
 
-      return res.status(201).json({ invoice });
+      //
+      // 3) (Optional but recommended) Fetch external client for metadata / future use
+      //
+      const { data: externalClient, error: externalClientError } =
+        await supabaseAdmin
+          .from("external_clients")
+          .select("*")
+          .eq("id", clientId)
+          .eq("owner_id", userId)
+          .single();
+
+      if (externalClientError || !externalClient) {
+        console.error("External client not found or error:", externalClientError);
+        // We still proceed with invoice + payment link, but without relying on email here.
+      }
+
+      //
+      // 4) Create Stripe Product + Price + Payment Link
+      //    This is the automatic Payments Engine: every invoice is payment-ready.
+      //
+      const metadata = {
+        invoice_id: String(invoice.id),
+        invoice_number: String(finalInvoiceNumber),
+        user_id: String(userId),
+        client_id: String(clientId),
+      };
+
+      // 4a) Create Product for this invoice
+      const product = await stripe.products.create({
+        name: `Invoice ${finalInvoiceNumber}`,
+        metadata,
+      });
+
+      // 4b) Create Price for the invoice total (gross, in pence)
+      const price = await stripe.prices.create({
+        currency: "gbp",
+        unit_amount: totalPence,
+        product: product.id,
+        metadata,
+      });
+
+      // 4c) Create Payment Link
+      const paymentLink = await stripe.paymentLinks.create({
+        line_items: [
+          {
+            price: price.id,
+            quantity: 1,
+          },
+        ],
+        metadata,
+        // Optional: after completion, redirect back to the invoice page
+        after_completion: {
+          type: "redirect",
+          redirect: {
+            url: `${process.env.NEXT_PUBLIC_APP_URL}/invoices/${invoice.id}?paid=1`,
+          },
+        },
+      });
+
+      //
+      // 5) Store payment link URL on the invoice
+      //    (We reuse the existing stripe_payment_link_url column.)
+      //
+      const { data: updatedInvoice, error: updateError } = await supabaseAdmin
+        .from("invoices")
+        .update({
+          stripe_payment_link_url: paymentLink.url,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", invoice.id)
+        .select()
+        .single();
+
+      if (updateError || !updatedInvoice) {
+        console.error("Failed to update invoice with payment link:", updateError);
+        return res
+          .status(500)
+          .json({ error: "Invoice created but failed to attach payment link" });
+      }
+
+      //
+      // 6) Return the fully payment-ready invoice
+      //
+      return res.status(201).json({ invoice: updatedInvoice });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: "Unexpected error" });

@@ -12,7 +12,9 @@ export function generateInvoiceHtml({ invoice, customer, owner }) {
 
   const customerName = customer?.name || "Customer";
   const totalFormatted = (invoice.total / 100).toFixed(2);
-  const payUrl = `${process.env.NEXT_PUBLIC_APP_URL}/pay/invoice/${invoice.id}`;
+
+  // ⭐ Use Stripe Payment Link (automatically generated)
+  const payUrl = invoice.stripe_payment_link_url;
 
   return `
   <div style="background:#f5f7fa; padding:40px 0; font-family:Arial, sans-serif;">

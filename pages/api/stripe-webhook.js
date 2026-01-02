@@ -1,4 +1,4 @@
-// pages/api/stripe-webhook.js
+// pages/api/stripe-webhook.js /// subcription webhook 
 import { buffer } from "micro";
 import Stripe from "stripe";
 import { supabaseAdmin } from "../../lib/supabase-admin";
