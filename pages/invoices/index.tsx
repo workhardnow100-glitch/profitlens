@@ -1,5 +1,5 @@
-// pages/invoices/index.tsx
-import { useEffect, useState, useMemo } from "react";
+// pages/invoices/index.tsx   /// selection page of invoices//before invoice creator 
+import { useEffect, useState, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useUser } from "../../hooks/useUser";
 
@@ -27,21 +27,35 @@ type BulkAction = "send" | "mark_paid" | "cancel";
 
 export default function InvoicesPage() {
   const { user, loading } = useUser();
+
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | "all">("all");
+
+  // 🔥 Debounced search
   const [search, setSearch] = useState("");
+  const searchRef = useRef<NodeJS.Timeout | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
 
+  // 🔥 Debounce search input
+  useEffect(() => {
+    if (searchRef.current) clearTimeout(searchRef.current);
+    searchRef.current = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+  }, [search]);
+
+  // 🔥 Load invoices
   useEffect(() => {
     if (!user) return;
 
     const load = async () => {
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
-      if (search) params.set("q", search);
+      if (debouncedSearch) params.set("q", debouncedSearch);
 
       const invRes = await fetch(`/api/invoices?${params.toString()}`);
       const invJson = await invRes.json();
@@ -89,12 +103,16 @@ export default function InvoicesPage() {
         };
       });
 
+      // 🔥 Persist selections across refresh
+      setSelectedIds((prev) =>
+        prev.filter((id) => mapped.some((inv) => inv.id === id))
+      );
+
       setInvoices(mapped);
-      setSelectedIds([]);
     };
 
     load();
-  }, [user, statusFilter, search]);
+  }, [user, statusFilter, debouncedSearch]);
 
   const allSelected = useMemo(
     () => invoices.length > 0 && selectedIds.length === invoices.length,
@@ -156,18 +174,11 @@ export default function InvoicesPage() {
       // Refresh invoices
       const params = new URLSearchParams();
       if (statusFilter !== "all") params.set("status", statusFilter);
-      if (search) params.set("q", search);
+      if (debouncedSearch) params.set("q", debouncedSearch);
 
       const invRes = await fetch(`/api/invoices?${params.toString()}`);
       const invJson = await invRes.json();
       const rawInvoices = invJson.invoices || [];
-
-      if (rawInvoices.length === 0) {
-        setInvoices([]);
-        setSelectedIds([]);
-        setBulkLoading(false);
-        return;
-      }
 
       const clientIds = rawInvoices.map((i: any) => i.client_id);
 
@@ -205,8 +216,12 @@ export default function InvoicesPage() {
         };
       });
 
+      // 🔥 Persist selections across refresh
+      setSelectedIds((prev) =>
+        prev.filter((id) => mapped.some((inv) => inv.id === id))
+      );
+
       setInvoices(mapped);
-      setSelectedIds([]);
       setBulkLoading(false);
     } catch (err) {
       console.error(err);
@@ -244,6 +259,7 @@ export default function InvoicesPage() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+
         <select
           className="border rounded-md px-3 py-2 text-sm"
           value={statusFilter}
@@ -264,22 +280,15 @@ export default function InvoicesPage() {
           <thead className="bg-gray-50">
             <tr>
               <th className="px-3 py-2 text-left w-10">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleSelectAll();
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected && !allSelected;
                   }}
-                  className="h-4 w-4 rounded border flex items-center justify-center bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  role="checkbox"
-                  aria-checked={allSelected}
-                >
-                  {allSelected ? (
-                    <span className="block h-3 w-3 rounded bg-blue-600" />
-                  ) : someSelected ? (
-                    <span className="block h-0.5 w-3 bg-blue-600" />
-                  ) : null}
-                </button>
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 cursor-pointer"
+                />
               </th>
 
               <th className="px-4 py-2 text-left">Invoice #</th>
@@ -305,22 +314,12 @@ export default function InvoicesPage() {
                   }`}
                 >
                   <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleSelectOne(inv.id);
-                      }}
-                      className={`h-4 w-4 rounded border flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        isSelected ? "border-blue-600 bg-blue-600" : "bg-white"
-                      }`}
-                      role="checkbox"
-                      aria-checked={isSelected}
-                    >
-                      {isSelected && (
-                        <span className="block h-3 w-3 rounded bg-white" />
-                      )}
-                    </button>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelectOne(inv.id)}
+                      className="h-4 w-4 cursor-pointer"
+                    />
                   </td>
 
                   <td className="px-4 py-2">
