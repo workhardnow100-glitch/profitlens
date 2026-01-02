@@ -49,18 +49,19 @@ export default function NewRecurringInvoicePage() {
 
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
+ useEffect(() => {
+  if (!user?.id) return; // stable guard
 
-    async function loadClients() {
-      const res = await fetch("/api/external-clients");
-      const data = await res.json();
-      setExternalClients(data.externalClients || []);
-      setLoadingClients(false);
-    }
+  async function loadClients() {
+    const res = await fetch("/api/external-clients");
+    const data = await res.json();
+    setExternalClients(data.externalClients || []);
+    setLoadingClients(false);
+  }
 
-    loadClients();
-  }, [user]);
+  loadClients();
+}, [user?.id]); // 🔥 stable dependency
+
 
   const nextRunPreview = useMemo(() => {
     // For now, preview is just startDate; real engine uses run.ts logic
