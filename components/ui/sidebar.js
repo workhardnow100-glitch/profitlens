@@ -584,7 +584,7 @@ export function SidebarMenu() {
         <Link
           href="/payments/payouts"
           className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-            router.pathname === "/payments/payouts"
+            router.pathname === "/payments/index"
               ? "bg-blue-50 text-blue-700 font-semibold"
               : "text-slate-700 hover:bg-slate-100"
           }`}
