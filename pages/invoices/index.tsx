@@ -107,11 +107,7 @@ export default function InvoicesPage() {
   );
 
   const toggleSelectAll = () => {
-    if (allSelected) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(invoices.map((inv) => inv.id));
-    }
+    setSelectedIds(allSelected ? [] : invoices.map((inv) => inv.id));
   };
 
   const toggleSelectOne = (id: string) => {
@@ -269,9 +265,14 @@ export default function InvoicesPage() {
             <tr>
               <th className="px-3 py-2 text-left w-10">
                 <button
-                  onClick={toggleSelectAll}
-                  className="h-4 w-4 rounded border flex items-center justify-center bg-white"
-                  aria-pressed={allSelected}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleSelectAll();
+                  }}
+                  className="h-4 w-4 rounded border flex items-center justify-center bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  role="checkbox"
+                  aria-checked={allSelected}
                 >
                   {allSelected ? (
                     <span className="block h-3 w-3 rounded bg-blue-600" />
@@ -280,6 +281,7 @@ export default function InvoicesPage() {
                   ) : null}
                 </button>
               </th>
+
               <th className="px-4 py-2 text-left">Invoice #</th>
               <th className="px-4 py-2 text-left">Client</th>
               <th className="px-4 py-2 text-left">Issue</th>
@@ -289,6 +291,7 @@ export default function InvoicesPage() {
               <th className="px-4 py-2 text-center">Payments</th>
             </tr>
           </thead>
+
           <tbody className="divide-y">
             {invoices.map((inv) => {
               const balance = inv.grossAmount - inv.paidAmount;
@@ -303,16 +306,23 @@ export default function InvoicesPage() {
                 >
                   <td className="px-3 py-2">
                     <button
-                      onClick={() => toggleSelectOne(inv.id)}
-                      className={`h-4 w-4 rounded border flex items-center justify-center ${
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectOne(inv.id);
+                      }}
+                      className={`h-4 w-4 rounded border flex items-center justify-center cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                         isSelected ? "border-blue-600 bg-blue-600" : "bg-white"
                       }`}
+                      role="checkbox"
+                      aria-checked={isSelected}
                     >
                       {isSelected && (
                         <span className="block h-3 w-3 rounded bg-white" />
                       )}
                     </button>
                   </td>
+
                   <td className="px-4 py-2">
                     <Link
                       href={`/invoices/${inv.id}`}
@@ -321,9 +331,11 @@ export default function InvoicesPage() {
                       {inv.invoiceNumber}
                     </Link>
                   </td>
+
                   <td className="px-4 py-2">{inv.clientName}</td>
                   <td className="px-4 py-2">{inv.issueDate}</td>
                   <td className="px-4 py-2">{inv.dueDate}</td>
+
                   <td className="px-4 py-2">
                     <span
                       className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
@@ -341,6 +353,7 @@ export default function InvoicesPage() {
                       {inv.status.replace("_", " ")}
                     </span>
                   </td>
+
                   <td className="px-4 py-2 text-right">
                     £{inv.paidAmount.toFixed(2)} / £{inv.grossAmount.toFixed(2)}
                     {balance > 0 && (
@@ -349,6 +362,7 @@ export default function InvoicesPage() {
                       </div>
                     )}
                   </td>
+
                   <td className="px-4 py-2 text-center">
                     {inv.hasPaymentLink ? (
                       <span className="inline-flex items-center rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">
@@ -363,6 +377,7 @@ export default function InvoicesPage() {
                 </tr>
               );
             })}
+
             {invoices.length === 0 && (
               <tr>
                 <td
@@ -384,6 +399,7 @@ export default function InvoicesPage() {
               <span className="inline-flex h-6 min-w-[2.5rem] items-center justify-center rounded-full bg-blue-500/20 text-xs font-semibold text-blue-200 border border-blue-400/40">
                 {selectedCount} selected
               </span>
+
               {bulkLoading ? (
                 <span className="text-xs text-slate-300">Running command…</span>
               ) : (
@@ -401,6 +417,7 @@ export default function InvoicesPage() {
               >
                 Send
               </button>
+
               <button
                 disabled={bulkLoading}
                 onClick={() => runBulkAction("mark_paid")}
@@ -408,6 +425,7 @@ export default function InvoicesPage() {
               >
                 Mark as paid
               </button>
+
               <button
                 disabled={bulkLoading}
                 onClick={() => runBulkAction("cancel")}
