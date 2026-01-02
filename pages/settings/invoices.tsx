@@ -10,18 +10,19 @@ export default function InvoiceSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [loadingSettings, setLoadingSettings] = useState(true);
 
-  useEffect(() => {
-    if (!user) return;
+ useEffect(() => {
+  if (!user?.id) return; // stable guard
 
-    async function loadSettings() {
-      const res = await fetch("/api/invoices/settings");
-      const data = await res.json();
-      setSettings(data.settings);
-      setLoadingSettings(false);
-    }
+  async function loadSettings() {
+    const res = await fetch("/api/invoices/settings");
+    const data = await res.json();
+    setSettings(data.settings);
+    setLoadingSettings(false);
+  }
 
-    loadSettings();
-  }, [user]);
+  loadSettings();
+}, [user?.id]); // 🔥 stable dependency
+
 
   const handleChange = (field: keyof InvoiceSettings, value: string) => {
     if (!settings) return;
