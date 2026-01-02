@@ -1,3 +1,5 @@
+//// page/payments/index.tsx
+
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useUser } from "../../hooks/useUser";
