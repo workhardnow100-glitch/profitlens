@@ -1,5 +1,4 @@
 // pages/api/payments/radar.ts
-
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
@@ -66,9 +65,40 @@ export default async function handler(
     }
 
     //
-    // 5. Build Radar response
+    // 5. Build summary for Payments Cockpit
+    //
+    const stripePaymentsCount = payments?.length ?? 0;
+    const stripePaymentsAmount = formatAmount(
+      sumAmounts(payments, "amount")
+    );
+
+    const invoicePaymentsCount = invoicePayments?.length ?? 0;
+    const invoicePaymentsAmount = formatAmount(
+      sumAmounts(invoicePayments, "amount")
+    );
+
+    const transactionsCount = transactions?.length ?? 0;
+    const transactionsAmount = formatAmount(
+      sumAmounts(transactions, "amount")
+    );
+
+    const invoicesCount = invoices?.length ?? 0;
+
+    const summary = {
+      stripePaymentsCount,
+      stripePaymentsAmount,
+      invoicePaymentsCount,
+      invoicePaymentsAmount,
+      transactionsCount,
+      transactionsAmount,
+      invoicesCount,
+    };
+
+    //
+    // 6. Return full Radar response + summary
     //
     return res.status(200).json({
+      summary,
       payments,
       invoicePayments,
       transactions,
@@ -78,4 +108,16 @@ export default async function handler(
     console.error("Radar API error:", err);
     return res.status(500).json({ error: "Radar failed" });
   }
+}
+
+//
+// Helpers
+//
+function sumAmounts(data: any[] | null, key: string) {
+  if (!data) return 0;
+  return data.reduce((sum, item) => sum + (item[key] ?? 0), 0);
+}
+
+function formatAmount(pence: number) {
+  return `£${(pence / 100).toFixed(2)}`;
 }
