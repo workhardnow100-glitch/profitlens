@@ -579,59 +579,75 @@ export function SidebarMenu() {
         </div>
       </SidebarGroup>
 
-      {/* ⭐ PAYMENTS */}
-      <SidebarGroup className="mt-4">
-        <button
-          onClick={() => setPaymentsOpen(!paymentsOpen)}
-          className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
-        >
-          <span>Payments</span>
-          <ChevronDown
-            size={16}
-            className={`transition-transform ${paymentsOpen ? "rotate-180" : ""}`}
-          />
-        </button>
+     {/* ⭐ PAYMENTS */}
+<SidebarGroup className="mt-4">
+  <button
+    onClick={() => setPaymentsOpen(!paymentsOpen)}
+    className="w-full flex items-center justify-between px-4 py-2 text-slate-500 uppercase text-xs font-semibold hover:bg-slate-100 rounded"
+  >
+    <span>Payments</span>
+    <ChevronDown
+      size={16}
+      className={`transition-transform ${paymentsOpen ? "rotate-180" : ""}`}
+    />
+  </button>
 
-        <div
-          className={`overflow-hidden transition-all duration-300 ${
-            paymentsOpen ? "max-h-[1000px]" : "max-h-0"
+  <div
+    className={`overflow-hidden transition-all duration-300 ${
+      paymentsOpen ? "max-h-[1000px]" : "max-h-0"
+    }`}
+  >
+    <SidebarGroupContent>
+
+      {/* Payouts */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname === "/payments"
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
           }`}
         >
-          <SidebarGroupContent>
+          <PoundSterling size={16} />
+          <span>Payouts</span>
+        </Link>
+      </SidebarMenuItem>
 
-            {/* Payouts */}
-            <SidebarMenuItem>
-              <Link
-                href="/payments"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/payments"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <PoundSterling size={16} />
-                <span>Payouts</span>
-              </Link>
-            </SidebarMenuItem>
+      {/* Payment Transactions */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments/transactions"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname.startsWith("/payments/transactions")
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <History size={16} />
+          <span>Transactions</span>
+        </Link>
+      </SidebarMenuItem>
 
-            {/* Payment Transactions */}
-            <SidebarMenuItem>
-              <Link
-                href="/payments/transactions"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname.startsWith("/payments/transactions")
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <History size={16} />
-                <span>Transactions</span>
-              </Link>
-            </SidebarMenuItem>
+      {/* ⭐ Radar (Fraud & Risk) */}
+      <SidebarMenuItem>
+        <Link
+          href="/payments/radar"
+          className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+            router.pathname.startsWith("/payments/radar")
+              ? "bg-blue-50 text-blue-700 font-semibold"
+              : "text-slate-700 hover:bg-slate-100"
+          }`}
+        >
+          <ShieldCheck size={16} />
+          <span>Radar</span>
+        </Link>
+      </SidebarMenuItem>
 
-          </SidebarGroupContent>
-        </div>
-      </SidebarGroup>
+    </SidebarGroupContent>
+  </div>
+</SidebarGroup>
+
 
       {/* ⭐ SETTINGS */}
       <SidebarGroup className="mt-4">
