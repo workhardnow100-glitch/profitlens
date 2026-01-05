@@ -20,7 +20,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     // ============================================================
-    // 1. FETCH CHARGES FOR THIS CLIENT
+    // 1. FETCH CHARGES FOR THIS INTERNAL BUSINESS
     // ============================================================
     const { data: charges, error: chargesError } = await supabaseAdmin
       .from("payment_charges")
@@ -36,13 +36,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const chargeIds = (charges || []).map((c) => c.id);
 
     // ============================================================
-    // 2. FETCH BALANCE ITEMS (fees, net, adjustments)
+    // 2. FETCH BALANCE ITEMS
     // ============================================================
     const { data: balanceItems, error: balanceError } = await supabaseAdmin
       .from("payment_balance_items")
       .select("*")
-      .in("charge_id", chargeIds.length ? chargeIds : ["00000000-0000-0000-0000-000000000000"])
-      .order("created_at", { ascending: false });
+      .in("charge_id", chargeIds.length ? chargeIds : ["00000000-0000-0000-0000-000000000000"]);
 
     if (balanceError) {
       console.error("balanceError", balanceError);
@@ -50,7 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ============================================================
-    // 3. FETCH MATCHES (invoice matching intelligence)
+    // 3. FETCH MATCHES (THE BRIDGE BETWEEN CHARGES & INVOICES)
     // ============================================================
     const { data: matches, error: matchesError } = await supabaseAdmin
       .from("payment_matches")
@@ -65,12 +64,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const matchMap = new Map((matches || []).map((m: any) => [m.charge_id, m]));
 
     // ============================================================
-    // 4. FETCH INVOICES FOR THIS CLIENT
+    // 4. FETCH INVOICES BY MATCH (NOT BY INTERNAL CLIENT)
     // ============================================================
+    const invoiceIds = (matches || [])
+      .map((m: any) => m.invoice_id)
+      .filter(Boolean);
+
     const { data: invoices, error: invoicesError } = await supabaseAdmin
       .from("invoices")
       .select("*")
-      .eq("client_id", activeClientId);
+      .in("id", invoiceIds.length ? invoiceIds : ["00000000-0000-0000-0000-000000000000"]);
 
     if (invoicesError) {
       console.error("invoicesError", invoicesError);
@@ -80,21 +83,33 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const invoiceMap = new Map((invoices || []).map((inv: any) => [inv.id, inv]));
 
     // ============================================================
-    // 5. FETCH EXTERNAL CLIENT (for name/email/address)
+    // 5. FETCH ALL EXTERNAL CLIENTS REFERENCED BY INVOICES
     // ============================================================
-    const { data: externalClient } = await supabaseAdmin
+    const externalClientIds = (invoices || [])
+      .map((inv: any) => inv.client_id)
+      .filter(Boolean);
+
+    const { data: externalClients } = await supabaseAdmin
       .from("external_clients")
       .select("*")
-      .eq("id", activeClientId)
-      .single();
+      .in(
+        "id",
+        externalClientIds.length
+          ? externalClientIds
+          : ["00000000-0000-0000-0000-000000000000"]
+      );
+
+    const externalClientMap = new Map(
+      (externalClients || []).map((ec: any) => [ec.id, ec])
+    );
 
     // ============================================================
-    // 6. FETCH PAYOUTS FOR THIS CLIENT
+    // 6. FETCH PAYOUTS (LINKED TO USER, NOT CLIENT)
     // ============================================================
     const { data: payouts, error: payoutError } = await supabaseAdmin
       .from("payment_payouts")
       .select("*")
-      .eq("user_id", session.user.id) // payouts are linked to user, not client
+      .eq("user_id", session.user.id)
       .order("created_at", { ascending: false });
 
     if (payoutError) {
@@ -105,12 +120,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const payoutIds = (payouts || []).map((p) => p.id);
 
     // ============================================================
-    // 7. FETCH PAYOUT ITEMS (charge → payout mapping)
+    // 7. FETCH PAYOUT ITEMS
     // ============================================================
     const { data: payoutItems, error: payoutItemsError } = await supabaseAdmin
       .from("payment_payout_items")
       .select("*")
-      .in("payout_id", payoutIds.length ? payoutIds : ["00000000-0000-0000-0000-000000000000"]);
+      .in(
+        "payout_id",
+        payoutIds.length ? payoutIds : ["00000000-0000-0000-0000-000000000000"]
+      );
 
     if (payoutItemsError) {
       console.error("payoutItemsError", payoutItemsError);
@@ -125,7 +143,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     // ============================================================
-    // 8. BUILD UNIFIED LEDGER
+    // 8. BUILD UNIFIED LEDGER (CORRECT JOIN LOGIC)
     // ============================================================
     const balanceByCharge = new Map<string, any[]>();
     (balanceItems || []).forEach((b: any) => {
@@ -137,7 +155,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const unified = (charges || []).map((charge: any) => {
       const relatedBalance = balanceByCharge.get(charge.id) || [];
       const match = matchMap.get(charge.id) || null;
-      const invoice = charge.invoice_id ? invoiceMap.get(charge.invoice_id) : null;
+      const invoice = match?.invoice_id ? invoiceMap.get(match.invoice_id) : null;
+      const externalClient = invoice ? externalClientMap.get(invoice.client_id) : null;
       const payoutLinks = payoutItemsByCharge.get(charge.id) || [];
 
       const netFromBalance =
@@ -176,12 +195,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const payoutEntries = (payouts || []).map((p: any) => ({
       id: p.id,
       type: "payout",
-      amount: -(p.amount / 100), // payouts are money leaving Stripe
+      amount: -(p.amount / 100),
       currency: p.currency,
       createdAt: p.created_at,
-      clientName: externalClient?.business_name || null,
-      clientEmail: externalClient?.contact_email || null,
-      clientAddress: externalClient?.address_line1 || null,
+      clientName: null,
+      clientEmail: null,
+      clientAddress: null,
       invoiceId: null,
       invoiceNumber: null,
       invoiceStatus: null,
@@ -206,3 +225,4 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
+
