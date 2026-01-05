@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useUser } from "../../hooks/useUser";
 
 type PaymentSettingsResponse = {
   stripeAccountId: string | null;
@@ -28,6 +29,8 @@ type PaymentSettingsResponse = {
 };
 
 export default function PaymentSettingsPage() {
+  const { user, isFounder, isAdmin } = useUser();
+
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [savingMethods, setSavingMethods] = useState(false);
@@ -298,67 +301,73 @@ export default function PaymentSettingsPage() {
         </div>
       </section>
 
-      {/* Platform Fees */}
-      <section className="border rounded-xl p-6 space-y-4 bg-white">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Platform Fees</h2>
-          <button
-            onClick={handleSaveFees}
-            disabled={savingFees}
-            className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {savingFees ? "Saving…" : "Save Fees"}
-          </button>
-        </div>
-        <p className="text-sm text-slate-700">
-          If you choose to charge a platform fee on payments processed through ProfitLens, it will
-          be automatically deducted before funds reach your bank account.
-        </p>
-        <div className="grid gap-3 md:grid-cols-3 text-sm">
-          <div>
-            <label className="block text-xs text-slate-600 mb-1">Fee %</label>
-            <input
-              type="number"
-              step="0.1"
-              value={data.platformFeePercent ?? ""}
-              onChange={(e) =>
-                setData((prev) =>
-                  prev ? { ...prev, platformFeePercent: Number(e.target.value) } : prev
-                )
-              }
-              className="w-full border rounded-md px-2 py-1 text-sm"
-            />
+      {/* Platform Fees — Founder/Admin Only */}
+      {(isFounder || isAdmin) && (
+        <section className="border rounded-xl p-6 space-y-4 bg-white">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Platform Fees</h2>
+            <button
+              onClick={handleSaveFees}
+              disabled={savingFees}
+              className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {savingFees ? "Saving…" : "Save Fees"}
+            </button>
           </div>
-          <div>
-            <label className="block text-xs text-slate-600 mb-1">Min fee (£)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={data.platformFeeMin ?? ""}
-              onChange={(e) =>
-                setData((prev) =>
-                  prev ? { ...prev, platformFeeMin: Number(e.target.value) } : prev
-                )
-              }
-              className="w-full border rounded-md px-2 py-1 text-sm"
-            />
+
+          <p className="text-sm text-slate-700">
+            If you choose to charge a platform fee on payments processed through ProfitLens,
+            it will be automatically deducted before funds reach your bank account.
+          </p>
+
+          <div className="grid gap-3 md:grid-cols-3 text-sm">
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Fee %</label>
+              <input
+                type="number"
+                step="0.1"
+                value={data.platformFeePercent ?? ""}
+                onChange={(e) =>
+                  setData((prev) =>
+                    prev ? { ...prev, platformFeePercent: Number(e.target.value) } : prev
+                  )
+                }
+                className="w-full border rounded-md px-2 py-1 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Min fee (£)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={data.platformFeeMin ?? ""}
+                onChange={(e) =>
+                  setData((prev) =>
+                    prev ? { ...prev, platformFeeMin: Number(e.target.value) } : prev
+                  )
+                }
+                className="w-full border rounded-md px-2 py-1 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs text-slate-600 mb-1">Max fee (£)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={data.platformFeeMax ?? ""}
+                onChange={(e) =>
+                  setData((prev) =>
+                    prev ? { ...prev, platformFeeMax: Number(e.target.value) } : prev
+                  )
+                }
+                className="w-full border rounded-md px-2 py-1 text-sm"
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-xs text-slate-600 mb-1">Max fee (£)</label>
-            <input
-              type="number"
-              step="0.01"
-              value={data.platformFeeMax ?? ""}
-              onChange={(e) =>
-                setData((prev) =>
-                  prev ? { ...prev, platformFeeMax: Number(e.target.value) } : prev
-                )
-              }
-              className="w-full border rounded-md px-2 py-1 text-sm"
-            />
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       {/* Webhook Health */}
       <section className="border rounded-xl p-6 space-y-3 bg-slate-50">
