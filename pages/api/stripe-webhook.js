@@ -1,4 +1,34 @@
-// pages/api/stripe-webhook.js /// subcription webhook 
+// pages/api/stripe-webhook.js /// subcription webhook // pages/api/stripe-webhook.js
+// -------------------------------------------------------------
+// PURPOSE:
+// This is the PROFITLENS SUBSCRIPTION WEBHOOK.
+//
+// It handles Stripe events related to ProfitLens' own billing:
+// - New user subscriptions (basic/pro)
+// - Subscription upgrades/downgrades
+// - Subscription cancellations
+// - Customer detail updates
+//
+// Responsibilities:
+// - Create new app_users + clients on first subscription
+// - Upsert subscriptions table
+// - Sync subscription_status to app_users
+// - Store Stripe customer + subscription IDs
+// - Send welcome emails
+// - Write audit logs
+//
+// IMPORTANT:
+// This webhook does NOT handle:
+// - Invoice payments from external clients
+// - Stripe Connect onboarding
+// - Payouts
+// - Balance transactions
+// - Webhook health
+// - payment_settings updates
+//
+// Those belong to separate webhooks.
+// -------------------------------------------------------------
+
 import { buffer } from "micro";
 import Stripe from "stripe";
 import { supabaseAdmin } from "../../lib/supabase-admin";

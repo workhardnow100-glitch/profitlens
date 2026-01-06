@@ -1,4 +1,25 @@
-// pages/api/payments/create-checkout-session.ts
+// pages/api/payments/create-checkout-session.ts // pages/api/payments/create-checkout-session.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// This endpoint creates a Stripe Checkout Session for EXTERNAL
+// CLIENTS to pay an invoice.
+//
+// Responsibilities:
+// - Fetch invoice + external client
+// - Create Stripe Checkout Session
+// - Attach metadata (invoice_id, user_id)
+// - Apply platform fee (via application_fee_amount)
+// - Return the Checkout URL to the frontend
+//
+// IMPORTANT:
+// This endpoint does NOT process payments. All payment success
+// and failure handling is done in the invoice payment webhook
+// (stripe-webhook.ts).
+//
+// This endpoint also does NOT handle Stripe Connect onboarding,
+// payouts, or webhook health.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { supabaseAdmin } from "../../../lib/supabase-admin";

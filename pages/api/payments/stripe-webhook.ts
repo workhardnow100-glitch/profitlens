@@ -1,4 +1,25 @@
-// pages/api/payments/stripe-webhook.ts /// webhook for external clients 
+// pages/api/payments/stripe-webhook.ts /// webhook for external clients // pages/api/payments/stripe-webhook.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// This is the INVOICE PAYMENT WEBHOOK.
+//
+// It handles payments made by EXTERNAL CLIENTS via Stripe
+// (Payment Links, Checkout Sessions, Payment Intents, Charges).
+//
+// Responsibilities:
+// - Mark invoices as paid
+// - Create ledger transactions
+// - Create invoice_payments entries
+// - Send receipt emails
+// - Handle payment failures
+// - Ensure idempotency
+//
+// IMPORTANT:
+// This webhook does NOT handle Stripe Connect onboarding,
+// payouts, balance transactions, webhook health, or updates
+// to payment_settings. Those belong in a separate webhook.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { supabaseAdmin } from "../../../lib/supabase-admin";

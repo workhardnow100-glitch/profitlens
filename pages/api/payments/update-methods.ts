@@ -1,4 +1,4 @@
-// pages/api/payments/update-methods.ts
+// pages/api/payments/update-methods.ts /// payment methods from payment setting page 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";

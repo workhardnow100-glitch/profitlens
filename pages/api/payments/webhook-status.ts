@@ -1,4 +1,17 @@
 // pages/api/payments/webhook-status.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// This endpoint is used by the Payment Settings page to display
+// webhook health information (last event, last error, error count).
+//
+// It DOES NOT receive Stripe webhooks.
+// It only reads from the payment_webhook_log table and returns
+// summary stats for the UI.
+//
+// This endpoint is purely informational and does not process
+// payments, payouts, Connect events, or invoices.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -11,21 +24,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // 🔹 OPTIONAL: If you have a webhook_logs table, load real data
+    // Load the last 50 webhook log entries
     const { data: logs, error } = await supabaseAdmin
-      .from("webhook_logs")
+      .from("payment_webhook_log")
       .select("*")
-      .order("created_at", { ascending: false })
-      .limit(20);
+      .order("received_at", { ascending: false })
+      .limit(50);
 
     if (error) {
       console.error("webhook-status error:", error);
     }
 
-    // 🔹 If table doesn't exist yet, return mock values
-    const lastEventAt = logs?.find((l: any) => l.status === "success")?.created_at || null;
-    const lastErrorAt = logs?.find((l: any) => l.status === "error")?.created_at || null;
-    const errorCount = logs?.filter((l: any) => l.status === "error").length || 0;
+    // Compute summary values
+    const lastEventAt =
+      logs?.find((l: any) => !l.error)?.received_at || null;
+
+    const lastErrorAt =
+      logs?.find((l: any) => l.error)?.received_at || null;
+
+    const errorCount =
+      logs?.filter((l: any) => l.error).length || 0;
 
     return res.status(200).json({
       lastEventAt,
