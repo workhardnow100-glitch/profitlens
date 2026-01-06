@@ -10,17 +10,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorised" });
   }
 
+  // Founder/Admin only
+if (session.user.role !== "FOUNDER" && session.user.role !== "ADMIN") {
+  return res.status(403).json({ error: "Forbidden" });
+}
+
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
-  }
-
-  const actingAsClientId =
-    (session.user as any).actingAsClientId ||
-    (session.user as any).clientId ||
-    null;
-
-  if (!actingAsClientId) {
-    return res.status(400).json({ error: "No active client selected" });
   }
 
   try {
@@ -30,19 +27,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       platformFeeMax
     } = req.body;
 
-    // Store settings in the same "payment_settings" table
     const { error } = await supabaseAdmin
       .from("payment_settings")
-      .upsert(
-        {
-          client_id: actingAsClientId,
-          platform_fee_percent: platformFeePercent,
-          platform_fee_min: platformFeeMin,
-          platform_fee_max: platformFeeMax,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "client_id" }
-      );
+      .update({
+        platform_fee_percent: platformFeePercent,
+        platform_fee_min: platformFeeMin,
+        platform_fee_max: platformFeeMax,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", session.user.id);
 
     if (error) {
       console.error("update-fees error:", error);
