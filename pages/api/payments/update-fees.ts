@@ -1,4 +1,21 @@
 // pages/api/payments/update-fees.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// Updates the platform fee configuration for the founder/admin.
+//
+// Responsibilities:
+// - Validate authenticated user
+// - Restrict access to FOUNDER or ADMIN only
+// - Update platform_fee_percent, platform_fee_min, platform_fee_max
+// - Ensure values are numeric and safe
+//
+// IMPORTANT:
+// This endpoint does NOT:
+// - Calculate fees (done in create-checkout-session)
+// - Process payments
+// - Handle Stripe Connect onboarding
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -10,23 +27,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ error: "Unauthorised" });
   }
 
+  // -------------------------------------------------------------
   // Founder/Admin only
-if (session.user.role !== "FOUNDER" && session.user.role !== "ADMIN") {
-  return res.status(403).json({ error: "Forbidden" });
-}
-
+  // -------------------------------------------------------------
+  if (session.user.role !== "FOUNDER" && session.user.role !== "ADMIN") {
+    return res.status(403).json({ error: "Forbidden" });
+  }
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const {
+    let {
       platformFeePercent,
       platformFeeMin,
       platformFeeMax
     } = req.body;
 
+    // -------------------------------------------------------------
+    // Validate numeric inputs
+    // -------------------------------------------------------------
+    platformFeePercent = Number(platformFeePercent);
+    platformFeeMin = platformFeeMin !== null ? Number(platformFeeMin) : null;
+    platformFeeMax = platformFeeMax !== null ? Number(platformFeeMax) : null;
+
+    if (isNaN(platformFeePercent)) {
+      return res.status(400).json({ error: "Invalid platformFeePercent" });
+    }
+
+    if (platformFeeMin !== null && isNaN(platformFeeMin)) {
+      return res.status(400).json({ error: "Invalid platformFeeMin" });
+    }
+
+    if (platformFeeMax !== null && isNaN(platformFeeMax)) {
+      return res.status(400).json({ error: "Invalid platformFeeMax" });
+    }
+
+    // -------------------------------------------------------------
+    // Update DB
+    // -------------------------------------------------------------
     const { error } = await supabaseAdmin
       .from("payment_settings")
       .update({

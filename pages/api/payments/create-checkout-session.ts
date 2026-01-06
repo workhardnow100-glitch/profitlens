@@ -1,23 +1,22 @@
-// pages/api/payments/create-checkout-session.ts // pages/api/payments/create-checkout-session.ts
+// pages/api/payments/create-checkout-session.ts
 // -------------------------------------------------------------
 // PURPOSE:
-// This endpoint creates a Stripe Checkout Session for EXTERNAL
-// CLIENTS to pay an invoice.
+// Creates a Stripe Checkout Session for EXTERNAL CLIENTS to pay
+// an invoice. Applies dynamic platform fees and routes funds to
+// the user's connected Stripe account.
 //
 // Responsibilities:
 // - Fetch invoice + external client
-// - Create Stripe Checkout Session
-// - Attach metadata (invoice_id, user_id)
-// - Apply platform fee (via application_fee_amount)
-// - Return the Checkout URL to the frontend
+// - Load payment_settings (platform fees + stripe_account_id)
+// - Validate Stripe Connect onboarding
+// - Calculate platform fee (percent + min + max)
+// - Create Checkout Session with transfer_data.destination
+// - Attach metadata (invoice_id, user_id, client_id)
+// - Return Checkout URL
 //
 // IMPORTANT:
 // This endpoint does NOT process payments. All payment success
-// and failure handling is done in the invoice payment webhook
-// (stripe-webhook.ts).
-//
-// This endpoint also does NOT handle Stripe Connect onboarding,
-// payouts, or webhook health.
+// and failure handling is done in the invoice payment webhook.
 // -------------------------------------------------------------
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -34,31 +33,74 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!invoiceId)
     return res.status(400).json({ error: "Missing invoiceId" });
 
-  // Fetch invoice
-  const { data: invoice, error } = await supabaseAdmin
+  // -------------------------------------------------------------
+  // 1. Fetch invoice
+  // -------------------------------------------------------------
+  const { data: invoice, error: invoiceError } = await supabaseAdmin
     .from("invoices")
     .select("*")
     .eq("id", invoiceId)
     .maybeSingle();
 
-  if (error || !invoice)
+  if (invoiceError || !invoice)
     return res.status(404).json({ error: "Invoice not found" });
 
-  // Optional: fetch external client for email
+  // -------------------------------------------------------------
+  // 2. Fetch external client (for email)
+  // -------------------------------------------------------------
   const { data: externalClient } = await supabaseAdmin
     .from("external_clients")
     .select("*")
     .eq("id", invoice.client_id)
     .maybeSingle();
 
+  // -------------------------------------------------------------
+  // 3. Load payment_settings for the invoice owner
+  // -------------------------------------------------------------
+  const { data: settings, error: settingsError } = await supabaseAdmin
+    .from("payment_settings")
+    .select("*")
+    .eq("user_id", invoice.user_id)
+    .maybeSingle();
+
+  if (settingsError || !settings)
+    return res.status(400).json({ error: "Payment settings not found" });
+
+  // -------------------------------------------------------------
+  // 4. Validate Stripe Connect onboarding
+  // -------------------------------------------------------------
+  if (!settings.stripe_account_id || settings.stripe_status !== "verified") {
+    return res.status(400).json({
+      error: "Stripe Connect account not fully onboarded",
+    });
+  }
+
+  // -------------------------------------------------------------
+  // 5. Calculate platform fee
+  // -------------------------------------------------------------
+  const subtotal = invoice.total; // already in pence
+
+  let fee = Math.round(
+    subtotal * (settings.platform_fee_percent / 100)
+  );
+
+  if (settings.platform_fee_min !== null)
+    fee = Math.max(fee, settings.platform_fee_min);
+
+  if (settings.platform_fee_max !== null)
+    fee = Math.min(fee, settings.platform_fee_max);
+
+  // -------------------------------------------------------------
+  // 6. Create Checkout Session
+  // -------------------------------------------------------------
   try {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/pay/invoice/${invoiceId}?status=success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/pay/invoice/${invoiceId}?status=cancelled`,
 
       customer_email: externalClient?.email || undefined,
-
       billing_address_collection: "required",
       allow_promotion_codes: false,
       automatic_tax: { enabled: false },
@@ -70,7 +112,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             product_data: {
               name: `Invoice ${invoice.invoice_number || invoiceId}`,
             },
-            unit_amount: invoice.total,
+            unit_amount: subtotal,
           },
           quantity: 1,
         },
@@ -79,14 +121,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       metadata: {
         invoice_id: invoiceId,
         user_id: invoice.user_id,
+        client_id: invoice.client_id,
       },
 
       payment_intent_data: {
         metadata: {
           invoice_id: invoiceId,
           user_id: invoice.user_id,
+          client_id: invoice.client_id,
         },
-        application_fee_amount: Math.round(invoice.total * 0.02), // 2% platform fee
+        application_fee_amount: fee,
+        transfer_data: {
+          destination: settings.stripe_account_id,
+        },
       },
     });
 
