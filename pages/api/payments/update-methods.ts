@@ -14,36 +14,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const actingAsClientId =
-    (session.user as any).actingAsClientId ||
-    (session.user as any).clientId ||
-    null;
-
-  if (!actingAsClientId) {
-    return res.status(400).json({ error: "No active client selected" });
-  }
-
   try {
     const { card, applePay, googlePay, bankTransfer, payByLink } = req.body;
 
-    // Store settings in a table called "payment_settings"
-    // If you don't have this table yet, we can create it next.
     const { error } = await supabaseAdmin
       .from("payment_settings")
-      .upsert(
-        {
-          client_id: actingAsClientId,
-          payment_methods: {
-            card,
-            applePay,
-            googlePay,
-            bankTransfer,
-            payByLink,
-          },
-          updated_at: new Date().toISOString(),
+      .update({
+        payment_methods: {
+          card,
+          applePay,
+          googlePay,
+          bankTransfer,
+          payByLink,
         },
-        { onConflict: "client_id" }
-      );
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", session.user.id);
 
     if (error) {
       console.error("update-methods error:", error);
