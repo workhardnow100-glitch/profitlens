@@ -1,9 +1,8 @@
 // pages/api/invoices/[id]/match.ts
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
+import { requireRole } from "../../../../lib/rbac";
 
 type MatchType = "full" | "partial" | "overpayment";
 
@@ -12,7 +11,7 @@ interface InvoiceRow {
   user_id: string;
   client_id: string;
   issue_date: string;
-  total: number; // pence
+  total: number;
   status: string;
   payment_status: string | null;
   invoice_number: string;
@@ -22,7 +21,7 @@ interface TransactionRow {
   id: string;
   user_id: string;
   client_id: string;
-  amount: number; // pounds
+  amount: number;
   description: string | null;
   date: string;
 }
@@ -34,12 +33,11 @@ interface MatchResult {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  // RBAC: Founder, Accountant, User
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  const userId = session.user.id as string;
+  const { userId, role, accessibleClients } = guard;
   const invoiceId = req.query.id as string;
 
   if (req.method !== "POST") {
@@ -48,13 +46,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     //
-    // 1) Fetch invoice
+    // 1) Fetch invoice (no user filter yet)
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")
       .select("*")
       .eq("id", invoiceId)
-      .eq("user_id", userId)
       .single<InvoiceRow>();
 
     if (invoiceError || !invoice) {
@@ -62,7 +59,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Prevent duplicate matching
+    // 2) ACCESS CONTROL
+    //
+    if (role === "USER" && invoice.user_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (role === "ACCOUNTANT" && !accessibleClients.includes(invoice.client_id)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    //
+    // 3) Prevent duplicate matching
     //
     const { data: existingPayments } = await supabaseAdmin
       .from("invoice_payments")
@@ -77,12 +85,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 3) Fetch candidate transactions
+    // 4) Fetch candidate transactions
     //
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("*")
-      .eq("user_id", userId)
       .eq("client_id", invoice.client_id)
       .gte("date", invoice.issue_date)
       .order("date", { ascending: true });
@@ -96,9 +103,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const matches: MatchResult[] = [];
 
     //
-    // 4) Scoring logic
+    // 5) Scoring logic
     //
-    const invAmount = Number(invoice.total) / 100; // convert pence → pounds
+    const invAmount = Number(invoice.total) / 100;
 
     for (const tx of txList) {
       const txAmount = Number(tx.amount) || 0;
@@ -106,30 +113,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let confidence = 0;
       let match_type: MatchType = "full";
 
-      // Rule A: exact amount
       if (txAmount === invAmount) confidence += 70;
-
-      // Rule B: near amount (±£1)
       if (Math.abs(txAmount - invAmount) <= 1) confidence += 60;
 
-      // Rule C: partial
       if (txAmount < invAmount) {
         confidence += 40;
         match_type = "partial";
       }
 
-      // Rule D: overpayment
       if (txAmount > invAmount) {
         confidence += 40;
         match_type = "overpayment";
       }
 
-      // Rule E: description contains invoice number
       if (tx.description && tx.description.includes(invoice.invoice_number)) {
         confidence += 50;
       }
 
-      // Rule F: date proximity (±7 days)
       const txDate = new Date(tx.date).getTime();
       const issueDate = new Date(invoice.issue_date).getTime();
       const daysDiff = Math.abs(txDate - issueDate) / (1000 * 60 * 60 * 24);
@@ -140,7 +140,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 5) Pick best match
+    // 6) Pick best match
     //
     matches.sort((a, b) => b.confidence - a.confidence);
     const best = matches[0];
@@ -154,7 +154,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 6) Create invoice_payments row
+    // 7) Create invoice_payments row
     //
     const { error: payError } = await supabaseAdmin
       .from("invoice_payments")
@@ -172,7 +172,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 7) Update invoice status
+    // 8) Update invoice status
     //
     const newStatus = best.match_type === "full" ? "paid" : "part_paid";
     const newPaymentStatus = best.match_type === "full" ? "paid" : "processing";

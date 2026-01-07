@@ -1,9 +1,15 @@
-// /pages/api/invoices/check-number.ts
-
+// pages/api/invoices/check-number.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../../lib/supabase-client";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // RBAC: Users, Accountants, and Founder can check invoice numbers
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
+
+  const { userId, role, accessibleClients } = guard;
+
   const invoiceNumber = req.query.invoiceNumber as string;
 
   if (!invoiceNumber) {
@@ -11,9 +17,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { data, error } = await supabase
+    // Fetch invoice by number
+    const { data, error } = await supabaseAdmin
       .from("invoices")
-      .select("id")
+      .select("id, user_id, client_id")
       .eq("invoice_number", invoiceNumber)
       .limit(1);
 
@@ -23,6 +30,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const exists = data && data.length > 0;
+
+    // If invoice exists, enforce access control
+    if (exists) {
+      const inv = data[0];
+
+      // USER → must own the invoice
+      if (role === "USER" && inv.user_id !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // ACCOUNTANT → must have access to the client
+      if (role === "ACCOUNTANT" && !accessibleClients.includes(inv.client_id)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
 
     return res.status(200).json({ exists });
   } catch (err) {

@@ -16,23 +16,20 @@
 // - Handle Stripe Connect onboarding
 // -------------------------------------------------------------
 
+// pages/api/payments/update-fees.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// Updates the platform fee configuration for the founder/admin.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
-
-  // -------------------------------------------------------------
-  // Founder/Admin only
-  // -------------------------------------------------------------
-  if (session.user.role !== "FOUNDER" && session.user.role !== "ADMIN") {
-    return res.status(403).json({ error: "Forbidden" });
-  }
+  // RBAC: Only FOUNDER or ADMIN can update platform fees
+  const guard = await requireRole(req, res, ["FOUNDER", "ADMIN"]);
+  if (!guard.ok) return;
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -75,7 +72,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         platform_fee_max: platformFeeMax,
         updated_at: new Date().toISOString(),
       })
-      .eq("user_id", session.user.id);
+      .eq("user_id", guard.userId);
 
     if (error) {
       console.error("update-fees error:", error);

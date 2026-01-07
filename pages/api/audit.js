@@ -9,21 +9,36 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isFounder = session.user.role === "admin";
+  // ⭐ Normalize role
+  const role = (session.user.role || "").toUpperCase();
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  // ⭐ Subscription gating (accountants + founders bypass)
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  const clientId = session.user.clientId;
+  // ⭐ Accountant-aware client ID
+  const clientId = isAccountant
+    ? session.user.actingAsClientId
+    : session.user.clientId;
+
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
+  /* -------------------------------------------------------
+     ⭐ POST — Create audit entry (business owners only)
+  ------------------------------------------------------- */
   if (req.method === "POST") {
+    if (isAccountant) {
+      return res.status(403).json({ error: "Accountants cannot create audit entries" });
+    }
+
     const { action, details } = req.body;
 
     if (!action) {
@@ -31,14 +46,14 @@ export default async function handler(req, res) {
     }
 
     const entry = {
-      id: crypto.randomUUID(),              // UUID for row
-      client_id: clientId,                  // UUID
-      actor_email: session.user.email,      // text column
+      id: crypto.randomUUID(),
+      client_id: clientId,
+      actor_email: session.user.email,
       action,
       details: details || "",
-      timestamp: new Date().toISOString(),  // timestamptz
-      user: null,                           // UUID column, force null
-      user_id: null                         // UUID column, force null
+      timestamp: new Date().toISOString(),
+      user: null,
+      user_id: null,
     };
 
     const { error } = await supabaseAdmin.from("audit").insert([entry]);
@@ -51,7 +66,21 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, entry });
   }
 
+  /* -------------------------------------------------------
+     ⭐ GET — Fetch audit logs (all roles)
+  ------------------------------------------------------- */
   if (req.method === "GET") {
+    // ⭐ Log the view itself
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant ? "ACCOUNTANT_VIEW_AUDIT" : "VIEW_AUDIT",
+        details: "Viewed audit log",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
     const { data, error } = await supabaseAdmin
       .from("audit")
       .select("*")

@@ -1,11 +1,16 @@
 // pages/api/payments/radar.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // RBAC: Only the FOUNDER can view the full payments radar
+  const guard = await requireRole(req, res, ["FOUNDER"]);
+  if (!guard.ok) return;
+
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }

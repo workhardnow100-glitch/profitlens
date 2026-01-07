@@ -1,23 +1,23 @@
-// pages/api/payments/stripe-webhook.ts /// webhook for external clients // pages/api/payments/stripe-webhook.ts
+// pages/api/payments/stripe-webhook.ts
 // -------------------------------------------------------------
 // PURPOSE:
-// This is the INVOICE PAYMENT WEBHOOK.
+// INVOICE PAYMENT WEBHOOK for EXTERNAL CLIENTS.
 //
-// It handles payments made by EXTERNAL CLIENTS via Stripe
+// Handles payments made by external clients via Stripe
 // (Payment Links, Checkout Sessions, Payment Intents, Charges).
 //
 // Responsibilities:
+// - Verify Stripe signature
+// - Prevent replay attacks (event ID dedupe)
 // - Mark invoices as paid
 // - Create ledger transactions
 // - Create invoice_payments entries
+// - (Hook) Write audit logs
 // - Send receipt emails
-// - Handle payment failures
-// - Ensure idempotency
 //
-// IMPORTANT:
-// This webhook does NOT handle Stripe Connect onboarding,
-// payouts, balance transactions, webhook health, or updates
-// to payment_settings. Those belong in a separate webhook.
+// NOTE:
+// Stripe Connect onboarding, payouts, balance transactions,
+// and payment_settings updates belong in a separate webhook.
 // -------------------------------------------------------------
 
 import type { NextApiRequest, NextApiResponse } from "next";
@@ -56,7 +56,37 @@ function extractMetadata(obj: any) {
 }
 
 // -------------------------------------------------------------
-// Helper: Process a successful invoice payment (idempotent)
+// Helper: Record Stripe event for replay protection
+// -------------------------------------------------------------
+async function recordStripeEvent(eventId: string) {
+  const { data: existing, error: selectError } = await supabaseAdmin
+    .from("stripe_events")
+    .select("id")
+    .eq("event_id", eventId)
+    .maybeSingle();
+
+  if (selectError) {
+    console.error("❌ Failed to check stripe_events:", selectError);
+  }
+
+  if (existing) {
+    console.log("⏭️ Stripe event already processed:", eventId);
+    return false;
+  }
+
+  const { error: insertError } = await supabaseAdmin
+    .from("stripe_events")
+    .insert({ event_id: eventId });
+
+  if (insertError) {
+    console.error("❌ Failed to insert stripe_event:", insertError);
+  }
+
+  return true;
+}
+
+// -------------------------------------------------------------
+// Helper: Process a successful invoice payment (RPC + idempotency)
 // -------------------------------------------------------------
 async function processInvoicePayment(
   amountPence: number,
@@ -65,80 +95,43 @@ async function processInvoicePayment(
   const { invoiceId, userId, clientId } = metadata;
 
   if (!invoiceId || !userId) {
-    console.error("❌ Missing metadata — cannot match invoice");
-    return;
-  }
-
-  // Fetch invoice
-  const { data: invoice } = await supabaseAdmin
-    .from("invoices")
-    .select("*")
-    .eq("id", invoiceId)
-    .single();
-
-  if (!invoice) {
-    console.error("❌ Invoice not found:", invoiceId);
-    return;
-  }
-
-  // Idempotency check
-  const { data: existing } = await supabaseAdmin
-    .from("invoice_payments")
-    .select("id")
-    .eq("invoice_id", invoiceId)
-    .maybeSingle();
-
-  if (existing) {
-    console.log("⏭️ Payment already processed — skipping");
+    console.error("❌ Missing metadata — cannot match invoice", { invoiceId, userId, clientId });
     return;
   }
 
   const amountPaid = amountPence / 100;
 
-  // 1. Mark invoice as paid
-  await supabaseAdmin
-    .from("invoices")
-    .update({
-      status: "paid",
-      payment_status: "paid",
-      paid_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", invoiceId);
+  // Business-level idempotency key
+  const idempotencyKey = `invoice:${invoiceId}:user:${userId}:amount:${amountPaid}`;
 
-  // 2. Create transaction
-  const { data: transaction, error: txError } = await supabaseAdmin
-    .from("transactions")
-    .insert({
-      user_id: userId,
-      client_id: clientId,
-      amount: amountPaid,
-      type: "income",
-      description: `Invoice ${invoice.invoice_number} payment`,
-      date: new Date().toISOString(),
-      includedinct: true,
-      includedinsa: true,
-      includedinvat: true,
-    })
-    .select()
-    .single();
+  // Call transactional RPC
+  const { error } = await supabaseAdmin.rpc("process_invoice_payment", {
+    p_invoice_id: invoiceId,
+    p_user_id: userId,
+    p_client_id: clientId,
+    p_amount: amountPaid,
+    p_idempotency_key: idempotencyKey,
+    p_source: "stripe",
+  });
 
-  if (txError) {
-    console.error("❌ Failed to create transaction:", txError);
+  if (error) {
+    console.error("❌ process_invoice_payment RPC failed:", error);
     return;
   }
 
-  // 3. Create invoice_payments entry
-  await supabaseAdmin.from("invoice_payments").insert({
-    invoice_id: invoiceId,
-    transaction_id: transaction.id,
-    amount: amountPaid,
-    match_confidence: "high",
-    source: "stripe",
-  });
-
-  // 4. Send receipt email
+  // Best-effort: fetch invoice + send email (outside transaction)
   try {
+    const { data: invoice } = await supabaseAdmin
+      .from("invoices")
+      .select("*")
+      .eq("id", invoiceId)
+      .single();
+
+    if (!invoice) {
+      console.error("❌ Invoice not found after RPC:", invoiceId);
+      return;
+    }
+
     const { data: customer } = await supabaseAdmin
       .from("external_clients")
       .select("*")
@@ -156,7 +149,7 @@ async function processInvoicePayment(
     console.error("⚠️ Failed to send receipt email:", err);
   }
 
-  console.log("✅ Invoice payment processed:", invoiceId);
+  console.log("✅ Invoice payment processed via RPC:", invoiceId);
 }
 
 // -------------------------------------------------------------
@@ -165,12 +158,17 @@ async function processInvoicePayment(
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") return res.status(405).end();
 
-  const signature = req.headers["stripe-signature"] as string;
-  const rawBody = await getRawBody(req);
-
   let event: Stripe.Event;
 
   try {
+    const signature = req.headers["stripe-signature"] as string;
+    if (!signature) {
+      console.error("❌ Missing Stripe signature header");
+      return res.status(400).send("Missing Stripe signature");
+    }
+
+    const rawBody = await getRawBody(req);
+
     event = stripe.webhooks.constructEvent(
       rawBody,
       signature,
@@ -181,11 +179,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
+  // Replay protection
+  const shouldProcess = await recordStripeEvent(event.id);
+  if (!shouldProcess) {
+    return res.status(200).json({ received: true, duplicate: true });
+  }
+
   try {
     switch (event.type) {
-      // ---------------------------------------------------------
-      // Payment Link → Checkout Session completed
-      // ---------------------------------------------------------
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const metadata = extractMetadata(session);
@@ -194,9 +195,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         break;
       }
 
-      // ---------------------------------------------------------
-      // Payment Intent succeeded (backup)
-      // ---------------------------------------------------------
       case "payment_intent.succeeded": {
         const intent = event.data.object as Stripe.PaymentIntent;
         const metadata = extractMetadata(intent);
@@ -205,9 +203,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         break;
       }
 
-      // ---------------------------------------------------------
-      // Charge succeeded (final fallback)
-      // ---------------------------------------------------------
       case "charge.succeeded": {
         const charge = event.data.object as Stripe.Charge;
         const metadata = extractMetadata(charge);
@@ -216,33 +211,34 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         break;
       }
 
-      // ---------------------------------------------------------
-      // Payment failed
-      // ---------------------------------------------------------
       case "payment_intent.payment_failed": {
         const intent = event.data.object as Stripe.PaymentIntent;
         const invoiceId = intent.metadata?.invoice_id;
 
         if (invoiceId) {
-          await supabaseAdmin
+          const { error: updateError } = await supabaseAdmin
             .from("invoices")
             .update({
               payment_status: "failed",
               updated_at: new Date().toISOString(),
             })
             .eq("id", invoiceId);
+
+          if (updateError) {
+            console.error("❌ Failed to mark invoice as failed:", updateError);
+          }
         }
 
         break;
       }
 
       default:
-        console.log("ℹ️ Unhandled event:", event.type);
+        console.log("ℹ️ Unhandled Stripe event type:", event.type);
     }
 
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error("❌ Webhook handler error:", err);
-    return res.status(500).json({ error: "Webhook handler failed" });
+    return res.status(200).json({ received: true, error: "internal_error" });
   }
 }

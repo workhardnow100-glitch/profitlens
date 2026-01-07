@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Audit (accountant only)
+    // ⭐ AUDIT LOG — Accountant viewing VAT obligations
     if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
@@ -49,10 +49,15 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // Create HMRC client for this clientId
+    // ⭐ Create HMRC client for this clientId
     const mtd = await createClient(clientId);
 
-    // Fetch obligations from HMRC
+    // ⭐ Guard: no MTD connection
+    if (!mtd) {
+      return res.status(400).json({ error: "MTD not connected" });
+    }
+
+    // ⭐ Fetch obligations from HMRC
     const obligations = await mtd.getVATObligations();
 
     return res.status(200).json({

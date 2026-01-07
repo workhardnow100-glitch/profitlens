@@ -1,20 +1,21 @@
 // pages/api/invoices/bulk-update.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 type BulkAction = "send" | "mark_paid" | "cancel";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
+  // RBAC: Users, Accountants, and Founder can bulk update invoices
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const userId = session.user.id as string;
+  const { userId, role, accessibleClients } = guard;
+
   const { invoiceIds, action } = req.body as {
     invoiceIds: string[];
     action: BulkAction;
@@ -29,12 +30,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // Fetch invoices to ensure ownership + current state
+    // Fetch invoices
     const { data: invoices, error: invError } = await supabaseAdmin
       .from("invoices")
       .select("*")
-      .in("id", invoiceIds)
-      .eq("user_id", userId);
+      .in("id", invoiceIds);
 
     if (invError) {
       console.error(invError);
@@ -45,11 +45,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(404).json({ error: "No invoices found" });
     }
 
-    const results: {
-      id: string;
-      success: boolean;
-      message?: string;
-    }[] = [];
+    // -------------------------------------------------------------
+    // ACCESS CONTROL: Ensure user can modify these invoices
+    // -------------------------------------------------------------
+    for (const inv of invoices) {
+      // USER → must own the invoice
+      if (role === "USER" && inv.user_id !== userId) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // ACCOUNTANT → must have access to the client
+      if (role === "ACCOUNTANT" && !accessibleClients.includes(inv.client_id)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
+    const results: { id: string; success: boolean; message?: string }[] = [];
 
     // Process each invoice
     for (const inv of invoices) {
@@ -62,8 +73,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               cancelled_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             })
-            .eq("id", inv.id)
-            .eq("user_id", userId);
+            .eq("id", inv.id);
 
           if (error) throw error;
 
@@ -78,8 +88,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
               payment_status: "paid",
               updated_at: new Date().toISOString(),
             })
-            .eq("id", inv.id)
-            .eq("user_id", userId);
+            .eq("id", inv.id);
 
           if (error) throw error;
 
@@ -87,16 +96,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
 
         if (action === "send") {
-          // Reuse existing send endpoint logic via RPC-style call
-          // or inline minimal behaviour: mark as sent + updated_at
           const { error } = await supabaseAdmin
             .from("invoices")
             .update({
               status: "sent",
               updated_at: new Date().toISOString(),
             })
-            .eq("id", inv.id)
-            .eq("user_id", userId);
+            .eq("id", inv.id);
 
           if (error) throw error;
 

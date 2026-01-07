@@ -5,6 +5,8 @@ import path from "path";
 import crypto from "crypto";
 import { parse as parseCsv } from "csv-parse/sync";
 import * as XLSX from "xlsx";
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { classifyFromRaw } from "../../../lib/category/Engine.js";
 
@@ -121,13 +123,9 @@ function inferCategory(type = "", description = "") {
   const desc = description?.trim() || "";
 
   const rules = [
+    { regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i, category: "Groceries" },
     {
-      regex: /\bTESCO|SAINSBURY|MORRISONS|ASDA|ALDI|LIDL|WAITROSE\b/i,
-      category: "Groceries",
-    },
-    {
-      regex:
-        /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO\b/i,
+      regex: /\bJUST\s*EAT|DELIVEROO|UBER\s*EATS|DOMINOS|MCDONALDS|KFC|SUBWAY|NANDO\b/i,
       category: "Dining & Takeaway",
     },
     { regex: /\bAMAZON|EBAY|ARGOS|ETSY\b/i, category: "Shopping" },
@@ -148,41 +146,22 @@ function inferCategory(type = "", description = "") {
       category: "Mobile & Internet",
     },
     {
-      regex:
-        /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i,
+      regex: /\bEON|EDF|SCOTTISH\s*POWER|NPOWER|OCTOPUS\s*ENERGY|BRITISH\s*GAS\b/i,
       category: "Utilities",
     },
     {
-      regex:
-        /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i,
+      regex: /\bNETFLIX|SPOTIFY|DISNEY|APPLE\s*MUSIC|AMAZON\s*PRIME|NOW\s*TV|YOUTUBE\s*PREMIUM\b/i,
       category: "Subscriptions",
     },
     {
-      regex:
-        /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i,
+      regex: /\bFACEBK|META\s*ADS|GOOGLE\s*ADS|LINKEDIN\s*ADS|TWITTER\s*ADS\b/i,
       category: "Advertising",
     },
-    {
-      regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i,
-      category: "Tax Payment",
-    },
-    {
-      regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i,
-      category: "Healthcare",
-    },
-    {
-      regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i,
-      category: "Insurance Premium",
-    },
-    {
-      regex:
-        /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i,
-      category: "Entertainment",
-    },
-    {
-      regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i,
-      category: "Fitness",
-    },
+    { regex: /\bHMRC|TAX|VAT|COMPANIES\s*HOUSE\b/i, category: "Tax Payment" },
+    { regex: /\bBOOTS|SUPERDRUG|PHARMACY|NHS\b/i, category: "Healthcare" },
+    { regex: /\bAVIVA|AXA|DIRECT\s*LINE|LV=|INSURANCE\b/i, category: "Insurance Premium" },
+    { regex: /\bCINEMA|ODEON|VUE|THEATRE|TICKETMASTER|EVENTBRITE\b/i, category: "Entertainment" },
+    { regex: /\bGYM|PUREGYM|DAVID\s*LLOYD|FITNESS\b/i, category: "Fitness" },
     { regex: /\bSAVETHECHANGE\b/i, category: "Savings Deposit" },
     { regex: /\bRETURNED\s*DD\b/i, category: "Returned DD" },
     { regex: /\bREFUND|REIMBURSEMENT\b/i, category: "Refund" },
@@ -272,14 +251,13 @@ function normalizeRow(row, i, clientId, userId, nowIso, reversalPairs) {
     credit_amount: credit ?? null,
     balance: balance ?? null,
 
-  // ✅ Auto-classify only when null (always null at ingestion)
-business_category: classifyFromRaw({
-  raw_category,
-  type,
-  description,
-  amount,
-}),
-
+    // ✅ Auto-classify only when null (always null at ingestion)
+    business_category: classifyFromRaw({
+      raw_category,
+      type,
+      description,
+      amount,
+    }),
 
     // ✅ Suggestion engine: raw category preserved
     raw_category,
@@ -310,62 +288,54 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const form = formidable({ multiples: true });
+  // ⭐ Session-based auth (no raw email)
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const role = (session.user.role || "").toUpperCase();
+
+  // ⭐ Subscription gating
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Accountant-aware client resolution
+  let clientId = null;
+  if (role === "ACCOUNTANT") {
+    clientId = session.user.actingAsClientId;
+  } else {
+    clientId = session.user.clientId || session.user.defaultClientId;
+  }
+
+  if (!clientId) {
+    return res.status(400).json({ error: "No client associated with user" });
+  }
+
+  const userId = session.user.id;
+
+  const form = formidable({
+    multiples: true,
+    maxFileSize: 10 * 1024 * 1024, // 10MB per file
+  });
 
   form.parse(req, async (err, fields, files) => {
     if (err) {
+      console.error("Form parse failed:", err);
       return res.status(400).json({ error: "Form parse failed" });
     }
 
     try {
-      const email = Array.isArray(fields.email) ? fields.email[0] : fields.email;
-      if (!email) return res.status(400).json({ error: "Missing email" });
-
-      const rawClientId = Array.isArray(fields.clientId)
-        ? fields.clientId[0]
-        : fields.clientId || null;
-
-      // ✅ Fetch user with role + default client
-      const { data: user, error: userErr } = await supabaseAdmin
-        .from("app_users")
-        .select("id, default_client_id, role")
-        .eq("email", email)
-        .single();
-
-      if (userErr || !user) {
-        return res.status(404).json({ error: "User not found" });
-      }
-
-      const userId = user.id;
-      const role = user.role || "user";
-
-      let clientId = user.default_client_id;
-
-      // ✅ Accountant-aware: validate clientId against user_clients
-      if (role === "accountant" && rawClientId) {
-        const { data: links, error: linkErr } = await supabaseAdmin
-          .from("user_clients")
-          .select("client_id")
-          .eq("user_id", userId)
-          .eq("client_id", rawClientId);
-
-        if (linkErr) {
-          console.warn(
-            "user_clients lookup failed (non-fatal):",
-            linkErr.message
-          );
-        } else if (links && links.length > 0) {
-          clientId = rawClientId;
-        }
-      }
-
-      if (!clientId) {
-        return res.status(400).json({ error: "No client associated with user" });
-      }
-
       const uploaded = Array.isArray(files.files)
         ? files.files
         : [files.files].filter(Boolean);
+
       if (!uploaded.length) {
         return res.status(400).json({ error: "No files uploaded" });
       }
@@ -378,6 +348,13 @@ export default async function handler(req, res) {
           const buffer = fs.readFileSync(file.filepath);
           const originalName =
             file.originalFilename || file.newFilename || "upload";
+          const ext = path.extname(originalName).toLowerCase();
+
+          // ⭐ Enforce allowed file types
+          if (![".csv", ".xlsx"].includes(ext)) {
+            throw new Error("Unsupported file type. Use CSV or XLSX.");
+          }
+
           const contentType = file.mimetype || "application/octet-stream";
           const objectName = `${uuid()}-${originalName}`;
           const storagePath = `statements/${clientId}/${objectName}`;
@@ -391,6 +368,12 @@ export default async function handler(req, res) {
           }
 
           const rows = parseFileBuffer(originalName, buffer);
+
+          // ⭐ Optional: row limit to prevent abuse
+          if (rows.length > 20000) {
+            throw new Error("File too large: more than 20,000 rows");
+          }
+
           const reversalPairs = detectReversalPairs(rows);
           const nowIso = new Date().toISOString();
 
@@ -464,7 +447,7 @@ export default async function handler(req, res) {
           const periodStart = sortedDates[0] || null;
           const periodEnd = sortedDates[sortedDates.length - 1] || null;
 
-          // ✅ Insert into reports (no category breakdown — unified engine handles categories later)
+          // ✅ Insert into reports
           await supabaseAdmin.from("reports").insert({
             client_id: clientId,
             user_id: userId,
@@ -476,7 +459,7 @@ export default async function handler(req, res) {
               revenue,
               expenses,
               net_profit: netProfit,
-              category_breakdown: {}, // unified APIs compute categories
+              category_breakdown: {},
               file_path: storagePath,
               account_number: accountNumber,
               sort_code: sortCode,
@@ -485,7 +468,7 @@ export default async function handler(req, res) {
             created_at: nowIso,
           });
 
-          // ✅ Forecast stub (unchanged behaviour)
+          // ✅ Forecast stub
           const nextQuarter = quarterFromDateStr(
             periodEnd || toISODate(new Date())
           );
@@ -524,11 +507,12 @@ export default async function handler(req, res) {
             .update({ status: txPayload.length ? "complete" : "empty" })
             .eq("id", statement.id);
 
-          // ✅ Audit log
+          // ✅ Audit log (accountant-aware)
           await supabaseAdmin.from("audit").insert([
             {
               client_id: clientId,
               user_id: userId,
+              actor_email: session.user.email,
               action: "UPLOAD_STATEMENT",
               details: `File: ${originalName}, Transactions: ${txPayload.length}, Revenue: ${revenue}, Expenses: ${expenses}, Net: ${netProfit}`,
               created_at: nowIso,
@@ -558,7 +542,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // ✅ Final response
       return res.status(200).json({
         message: "Upload and ingestion complete",
         results,

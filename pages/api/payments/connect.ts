@@ -1,15 +1,11 @@
 // pages/api/payments/connect.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
-import { supabaseAdmin } from "../../../lib/supabase-admin";
-// import stripe from "../../../lib/stripe"; // when you're ready
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  // RBAC: Only the FOUNDER can initiate Stripe Connect onboarding
+  const guard = await requireRole(req, res, ["FOUNDER"]);
+  if (!guard.ok) return;
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });

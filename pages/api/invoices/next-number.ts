@@ -1,16 +1,34 @@
-// /pages/api/invoices/next-number.ts
-
+// pages/api/invoices/next-number.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../../lib/supabase-client";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // RBAC: Users, Accountants, and Founder can generate next invoice number
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
+
+  const { userId, role, accessibleClients } = guard;
+
   try {
-    // Fetch highest invoice number
-    const { data, error } = await supabase
+    // -------------------------------------------------------------
+    // Fetch invoice numbers with correct access control
+    // -------------------------------------------------------------
+    let query = supabaseAdmin
       .from("invoices")
-      .select("invoice_number")
+      .select("invoice_number, user_id, client_id")
       .order("invoice_number", { ascending: false })
-      .limit(50); // limit for safety
+      .limit(50);
+
+    if (role === "USER") {
+      query = query.eq("user_id", userId);
+    }
+
+    if (role === "ACCOUNTANT") {
+      query = query.in("client_id", accessibleClients);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       console.error("Error fetching invoice numbers:", error);
@@ -25,7 +43,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ nextNumber: "INV-001" });
     }
 
+    // -------------------------------------------------------------
     // Find the highest numeric tail
+    // -------------------------------------------------------------
     let best = "";
     let bestNum = -1;
     let bestPadding = 0;
@@ -46,7 +66,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (bestNum === -1) {
-      // No numeric tail found in any invoice number
       return res.status(200).json({ nextNumber: "INV-001" });
     }
 

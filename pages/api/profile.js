@@ -1,3 +1,4 @@
+// pages/api/profile.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -18,27 +19,49 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  // Accountant-aware client ID
-  const clientId =
-    session.user.actingAsClientId || session.user.clientId;
+  const role = (session.user.role || "").toUpperCase();
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
 
-  if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
+  // ⭐ Accountants + founders bypass subscription checks
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Accountant-aware client ID
+  const clientId = isAccountant
+    ? session.user.actingAsClientId
+    : session.user.clientId;
+
+  if (!clientId || clientId === "unknown-client") {
+    return res.status(400).json({ error: "Invalid client ID" });
+  }
 
   try {
-    // AUDIT LOG — Accountant viewing profile
-    if (session.user.role === "accountant" && req.method === "GET") {
+    // ⭐ AUDIT LOG — View profile (all roles)
+    if (req.method === "GET") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_PROFILE",
+          action: isAccountant ? "ACCOUNTANT_VIEW_PROFILE" : "VIEW_PROFILE",
           details: "Viewed client profile and transaction summary",
+          timestamp: new Date().toISOString(),
         },
       ]);
     }
 
-    // ⭐ POST — Update client identity fields
+    // ⭐ POST — Update client identity fields (business owner only)
     if (req.method === "POST" && req.body.updateClient) {
+      if (isAccountant) {
+        return res
+          .status(403)
+          .json({ error: "Accountants cannot modify client identity" });
+      }
+
       const updateFields = { ...req.body };
       delete updateFields.updateClient;
 
@@ -49,23 +72,27 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
-      // Accountant audit log
-      if (session.user.role === "accountant") {
-        await supabaseAdmin.from("audit").insert([
-          {
-            client_id: clientId,
-            actor_email: session.user.email,
-            action: "ACCOUNTANT_UPDATE_CLIENT_PROFILE",
-            details: `Updated client identity fields: ${Object.keys(updateFields).join(", ")}`,
-          },
-        ]);
-      }
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "UPDATE_CLIENT_PROFILE",
+          details: `Updated client identity fields: ${Object.keys(updateFields).join(", ")}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
       return res.status(200).json({ success: true });
     }
 
-    // ⭐ POST — Update transaction category (existing behaviour)
+    // ⭐ POST — Update transaction category (business owner only)
     if (req.method === "POST" && !req.body.updateClient) {
+      if (isAccountant) {
+        return res
+          .status(403)
+          .json({ error: "Accountants cannot modify transaction categories" });
+      }
+
       const { transactionId, newCategory } = req.body;
 
       if (!transactionId || !newCategory) {
@@ -90,17 +117,17 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
-      if (session.user.role === "accountant") {
-        await supabaseAdmin.from("audit").insert([
-          {
-            client_id: clientId,
-            actor_email: session.user.email,
-            action: "ACCOUNTANT_UPDATE_CATEGORY",
-            details: `Updated category for transaction ${transactionId} → ${category}`,
-          },
-        ]);
-      }
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "UPDATE_CATEGORY",
+          details: `Updated category for transaction ${transactionId} → ${category}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
+      // After update, fall through to GET to return fresh data
       req.method = "GET";
     }
 
@@ -136,7 +163,7 @@ export default async function handler(req, res) {
 
       if (accError && accError.code !== "PGRST116") throw accError;
 
-      // ⭐ Fetch FULL client identity block
+      // Fetch FULL client identity block
       const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
         .select(`
@@ -165,7 +192,6 @@ export default async function handler(req, res) {
 
       if (clientError) throw clientError;
 
-      // Build summary
       const businessType = client?.business_type || "sole_trader";
 
       const totalsByType = {

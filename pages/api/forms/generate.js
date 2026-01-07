@@ -1,4 +1,6 @@
 // pages/api/forms/generate.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { v4 as uuidv4 } from "uuid";
 
@@ -19,12 +21,38 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { clientId, formCode, periodStart, periodEnd } = req.body || {};
+    // ✅ Session + RBAC
+    const session = await getServerSession(req, res, authOptions);
+    if (!session?.user) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Unauthorized" });
+    }
 
-    if (!clientId || !formCode || !periodStart || !periodEnd) {
+    const role = (session.user.role || "").toUpperCase();
+    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const isAccountant = role === "ACCOUNTANT";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      session.user.subscriptionStatus
+    );
+
+    if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
+      return res
+        .status(403)
+        .json({ success: false, message: "Upgrade required" });
+    }
+
+    // ✅ Accountant-aware client ID — ignore clientId from body for security
+    const resolvedClientId = isAccountant
+      ? session.user.actingAsClientId
+      : session.user.clientId || session.user.defaultClientId;
+
+    const { formCode, periodStart, periodEnd } = req.body || {};
+
+    if (!resolvedClientId || !formCode || !periodStart || !periodEnd) {
       return res.status(400).json({
         success: false,
-        message: "Missing clientId, formCode, or period range.",
+        message: "Missing client, formCode, or period range.",
       });
     }
 
@@ -40,11 +68,24 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Invalid period start or end date." });
     }
 
+    // ✅ Audit log — form generation
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: resolvedClientId,
+        actor_email: session.user.email,
+        action: isAccountant
+          ? "ACCOUNTANT_GENERATE_FORM"
+          : "GENERATE_FORM",
+        details: `Generated form ${formCode} for ${periodStart} → ${periodEnd}`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
     // 1. Load client
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
-      .eq("id", clientId)
+      .eq("id", resolvedClientId)
       .single();
 
     if (clientError || !client) {
@@ -57,7 +98,7 @@ export default async function handler(req, res) {
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("*")
-      .eq("client_id", clientId)
+      .eq("client_id", resolvedClientId)
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
@@ -78,7 +119,7 @@ export default async function handler(req, res) {
         formCode,
         client,
         transactions || [],
-        clientId,
+        resolvedClientId,
         periodStart,
         periodEnd
       );
@@ -87,7 +128,7 @@ export default async function handler(req, res) {
         formCode,
         client,
         transactions || [],
-        clientId,
+        resolvedClientId,
         periodStart,
         periodEnd
       );
@@ -96,7 +137,7 @@ export default async function handler(req, res) {
         formCode,
         client,
         transactions || [],
-        clientId,
+        resolvedClientId,
         periodStart,
         periodEnd
       );
@@ -113,13 +154,13 @@ export default async function handler(req, res) {
     const record = await generatePdfForForm({
       formCode,
       client,
-      clientId,
+      clientId: resolvedClientId,
       periodStart,
       periodEnd,
       year,
       taxYear,
       filename,
-      createdBy: "system",
+      createdBy: session.user.email || "system",
       formData,
     });
 

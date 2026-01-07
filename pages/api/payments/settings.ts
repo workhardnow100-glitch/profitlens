@@ -16,16 +16,22 @@
 // It returns the exact shape expected by the Payment Settings UI.
 // -------------------------------------------------------------
 
+// pages/api/payments/settings.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// Loads all Payment Settings data for the cockpit.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
+  // RBAC: Only the FOUNDER or the USER themselves can view payment settings
+  const guard = await requireRole(req, res, ["FOUNDER", "USER"]);
+  if (!guard.ok) return;
 
-  const userId = session.user.id;
+  const userId = guard.userId;
 
   // -------------------------------------------------------------
   // 1. Ensure payment_settings row exists

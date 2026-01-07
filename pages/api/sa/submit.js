@@ -1,6 +1,6 @@
 // pages/api/sa/submit.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -39,6 +39,22 @@ export default async function handler(req, res) {
   if (!periodStart || !periodEnd)
     return res.status(400).json({ error: "Missing required fields" });
 
+  // ⭐ Extra guard: prevent absurd ranges for accountants
+  if (role === "ACCOUNTANT") {
+    const startYear = Number(String(periodStart).split("-")[0]);
+    const endYear = Number(String(periodEnd).split("-")[0]);
+
+    if (
+      Number.isNaN(startYear) ||
+      Number.isNaN(endYear) ||
+      startYear < 2000 ||
+      endYear > 2100 ||
+      endYear < startYear
+    ) {
+      return res.status(400).json({ error: "Invalid period range" });
+    }
+  }
+
   try {
     // ⭐ AUDIT LOG — Accountant submitting SA
     if (role === "ACCOUNTANT") {
@@ -53,19 +69,19 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ⭐ Lock SA transactions
+    // ⭐ Lock SA transactions (correct field: business_category)
     const { error: lockError } = await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
-      .eq("category", "self_assessment")
+      .eq("business_category", "self_assessment")
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
     if (lockError) throw lockError;
 
     // ⭐ Create submission record
-    const { error: subError } = await supabaseAdmin
+    const { data: submission, error: subError } = await supabaseAdmin
       .from("sa_submissions")
       .insert([
         {
@@ -74,11 +90,13 @@ export default async function handler(req, res) {
           period_end: periodEnd,
           created_at: new Date().toISOString(),
         },
-      ]);
+      ])
+      .select()
+      .single();
 
     if (subError) throw subError;
 
-    return res.status(200).json({ success: true });
+    return res.status(200).json({ success: true, submission });
 
   } catch (err) {
     console.error("SA submit error:", err);

@@ -1,20 +1,31 @@
 // pages/api/mtd/sa/get-receipt.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
+import { supabaseAdmin } from "../../../../lib/supabase-admin";
 import { createClient } from "../../../../lib/mtd-client";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  // Validate session
+  // ⭐ Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = (session.user.role || "").toUpperCase();
 
-  // Determine clientId (accountant‑aware)
+  // ⭐ Subscription gating (required for all MTD endpoints)
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Determine clientId (accountant‑aware)
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
@@ -33,8 +44,26 @@ export default async function handler(req, res) {
   try {
     const mtd = await createClient(clientId);
 
+    // ⭐ Guard: no MTD ITSA connection
+    if (!mtd || !mtd.mtditid) {
+      return res.status(400).json({ error: "MTD not connected" });
+    }
+
+    // ⭐ AUDIT LOG — Accountant viewing SA MTD receipt
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_MTD_SA_RECEIPT",
+          details: `Viewed SA MTD receipt for submissionId ${submissionId}`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+
     // ⭐ HMRC does not provide a dedicated SA receipt endpoint.
-    // Instead, we fetch the SA return details and extract the receipt info.
+    // We fetch SA returns and extract the matching submission.
     const returnsData = await mtd.getSAReturns();
 
     const match = returnsData?.returns?.find(
@@ -43,13 +72,13 @@ export default async function handler(req, res) {
 
     if (!match) {
       return res.status(404).json({
-        error: "Receipt not found for this submissionId"
+        error: "Receipt not found for this submissionId",
       });
     }
 
     return res.status(200).json({
       success: true,
-      receipt: match
+      receipt: match,
     });
 
   } catch (err) {

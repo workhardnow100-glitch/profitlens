@@ -1,12 +1,10 @@
 // pages/api/ct/summary.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { CT_MAP } from "../../../lib/constants/ctMap";
 
-console.log("🔥 CT SUMMARY ROUTE EXECUTED — COMPETITOR-GRADE BUILD 🔥");
-
-// ✅ Marginal relief calculator
+// Marginal relief calculator
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
 
@@ -30,7 +28,7 @@ function calculateCorporationTax(profit) {
   };
 }
 
-// ✅ Build lowercase sets for exact classification
+// Build lowercase sets for classification
 const MAP = {
   income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
   allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
@@ -43,59 +41,57 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // ✅ Session validation
+  // Session validation
   const session = await getServerSession(req, res, authOptions);
-  if (!session?.user)
+  if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
+  }
 
+  // Normalize role
   const role = (session.user.role || "").toUpperCase();
-
-  const isFounder = session.user.role === "admin";
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  // Subscription gating (accountants + founders bypass)
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID (strict)
-  let clientId = null;
-  if (role === "ACCOUNTANT") {
-    clientId = session.user.actingAsClientId;
-  } else {
-    clientId = session.user.clientId || session.user.defaultClientId;
-  }
+  // Accountant-aware client ID
+  const clientId = isAccountant
+    ? session.user.actingAsClientId
+    : session.user.clientId || session.user.defaultClientId;
 
   if (!clientId) {
     return res.status(400).json({ error: "No client selected" });
   }
 
   const { periodStart, periodEnd } = req.body;
-
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
   try {
-    // ✅ AUDIT LOG — Accountant viewing CT summary
-    if (role === "ACCOUNTANT") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_CT_SUMMARY",
-          details: `Viewed CT summary for ${periodStart} → ${periodEnd}`,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
+    // Audit log — all roles
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant
+          ? "ACCOUNTANT_VIEW_CT_SUMMARY"
+          : "VIEW_CT_SUMMARY",
+        details: `Viewed CT summary for ${periodStart} → ${periodEnd}`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
-    // ✅ 1. Fetch transactions, including CT flag + asset disposal fields
+    // 1. Fetch transactions
     const { data: txs, error: fetchError } = await supabaseAdmin
       .from("transactions")
-      .select(
-        `
+      .select(`
         id,
         date,
         amount,
@@ -105,8 +101,7 @@ export default async function handler(req, res) {
         includedinct,
         assetbalancingcharge,
         assetbalancingallowance
-      `
-      )
+      `)
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd)
@@ -120,7 +115,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ 2. Filter to CT‑included transactions only
+    // 2. Filter CT-included transactions
     const ctTxs = txs.filter((tx) => tx.includedinct === true);
 
     if (ctTxs.length === 0) {
@@ -138,29 +133,27 @@ export default async function handler(req, res) {
         effectiveRate: 0,
         locked,
         breakdown: [],
-        transactions: txs, // full set, for context if needed
+        transactions: txs,
       });
     }
 
-    // ✅ 3. Totals
+    // 3. Totals
     let income = 0;
     let allowable = 0;
     let disallowable = 0;
 
-    // ✅ Asset disposal contributions
     let totalBalancingCharges = 0;
     let totalBalancingAllowances = 0;
 
     const breakdown = [];
 
-    // ✅ 4. Classify CT‑included transactions using EXACT CT_MAP categories
+    // 4. Classification
     ctTxs.forEach((tx) => {
       const cat = (tx.business_category || "Uncategorised").trim();
       const key = cat.toLowerCase();
       const amount = Number(tx.amount || 0);
 
       let ctType = "ignore";
-
       if (MAP.income.has(key)) ctType = "income";
       else if (MAP.allowable.has(key)) ctType = "allowable";
       else if (MAP.disallowable.has(key)) ctType = "disallowable";
@@ -177,42 +170,20 @@ export default async function handler(req, res) {
       });
 
       if (ctType === "income" && amount > 0) income += amount;
+      if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
+      if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
 
-      if (ctType === "allowable" && amount < 0) {
-        // store as positive expense
-        allowable += Math.abs(amount);
-      }
+      const bc = Number(tx.assetbalancingcharge || 0);
+      const ba = Number(tx.assetbalancingallowance || 0);
 
-      if (ctType === "disallowable" && amount < 0) {
-        // store as positive add‑back
-        disallowable += Math.abs(amount);
-      }
-
-      // ✅ Asset disposal: balancing charges/allowances affect CT
-      const bc = tx.assetbalancingcharge
-        ? Number(tx.assetbalancingcharge)
-        : 0;
-      const ba = tx.assetbalancingallowance
-        ? Number(tx.assetbalancingallowance)
-        : 0;
-
-      if (!Number.isNaN(bc) && bc !== 0) {
-        totalBalancingCharges += bc;
-      }
-
-      if (!Number.isNaN(ba) && ba !== 0) {
-        totalBalancingAllowances += ba;
-      }
+      if (!Number.isNaN(bc) && bc !== 0) totalBalancingCharges += bc;
+      if (!Number.isNaN(ba) && ba !== 0) totalBalancingAllowances += ba;
     });
 
-    // ✅ 5. Profit calculations
-    // Base trading profit
+    // 5. Profit calculations
     const profit = income - allowable;
-
-    // Adjusted profit before disposals: add back disallowable
     let adjustedProfit = profit + disallowable;
 
-    // ✅ Apply balancing charges (increase profit) and allowances (reduce profit)
     adjustedProfit += totalBalancingCharges;
     adjustedProfit -= totalBalancingAllowances;
 
@@ -221,7 +192,7 @@ export default async function handler(req, res) {
 
     const locked = txs.some((tx) => tx.tax_locked === true);
 
-    // ✅ 6. Return aligned CT summary
+    // 6. Return summary
     return res.status(200).json({
       success: true,
       periodStart,
@@ -235,7 +206,7 @@ export default async function handler(req, res) {
       effectiveRate,
       locked,
       breakdown,
-      transactions: txs, // full set in case UI wants it
+      transactions: txs,
     });
   } catch (err) {
     console.error("CT summary error:", err);

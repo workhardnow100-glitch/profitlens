@@ -2,13 +2,59 @@ import { supabaseAdmin } from "../supabase-admin";
 import { createInvoiceFromSchedule } from "../invoices/createInvoiceFromSchedule";
 
 export async function processRecurringSchedule(schedule: any) {
-  const { id: scheduleId, user_id, client_id, frequency_type, interval, next_run_date } = schedule;
+  const {
+    id: scheduleId,
+    user_id,
+    client_id,
+    frequency_type,
+    interval,
+    next_run_date,
+  } = schedule;
 
-  // 1. Create invoice from schedule
-  const invoice = await createInvoiceFromSchedule(schedule);
-
-  // 2. Log run history
   const now = new Date().toISOString();
+
+  // ⭐ 1. Validate schedule fields
+  if (!client_id || !user_id || !frequency_type || !interval || !next_run_date) {
+    await logFailure(scheduleId, client_id, user_id, "Invalid schedule fields");
+    return;
+  }
+
+  // ⭐ 2. Validate client exists + subscription status
+  const { data: client, error: clientErr } = await supabaseAdmin
+    .from("clients")
+    .select("id, subscription_status")
+    .eq("id", client_id)
+    .single();
+
+  if (clientErr || !client) {
+    await logFailure(scheduleId, client_id, user_id, "Client not found");
+    return;
+  }
+
+  const isSubscribed = ["basic", "pro", "trialing"].includes(
+    client.subscription_status
+  );
+
+  if (!isSubscribed) {
+    await logFailure(scheduleId, client_id, user_id, "Client not subscribed");
+    return;
+  }
+
+  // ⭐ 3. Create invoice (with error capture)
+  let invoice;
+  try {
+    invoice = await createInvoiceFromSchedule(schedule);
+  } catch (err: any) {
+    await logFailure(
+      scheduleId,
+      client_id,
+      user_id,
+      `Invoice creation failed: ${err?.message || err}`
+    );
+    return;
+  }
+
+  // ⭐ 4. Log successful run
   await supabaseAdmin.from("recurring_invoice_runs").insert({
     recurring_invoice_id: scheduleId,
     user_id,
@@ -18,30 +64,80 @@ export async function processRecurringSchedule(schedule: any) {
     error_message: null,
   });
 
-  // 3. Compute next_run_date
-  const nextRun = computeNextRunDate(next_run_date, frequency_type, interval);
+  // ⭐ 5. Compute next run date safely
+  const nextRun = safeComputeNextRunDate(
+    next_run_date,
+    frequency_type,
+    interval
+  );
 
-  // 4. Update schedule
+  // ⭐ 6. Update schedule
   await supabaseAdmin
     .from("recurring_invoices")
     .update({
       next_run_date: nextRun,
       updated_at: now,
+      processing: false,
     })
-    .eq("id", scheduleId)
-    .eq("user_id", user_id);
+    .eq("id", scheduleId);
 }
 
-function computeNextRunDate(current: string, frequencyType: string, interval: number) {
-  const d = new Date(current);
+async function logFailure(
+  scheduleId: string,
+  clientId: string,
+  userId: string,
+  message: string
+) {
+  const now = new Date().toISOString();
 
-  if (frequencyType === "daily") {
-    d.setDate(d.getDate() + interval);
-  } else if (frequencyType === "weekly") {
-    d.setDate(d.getDate() + 7 * interval);
-  } else if (frequencyType === "monthly") {
-    d.setMonth(d.getMonth() + interval);
+  await supabaseAdmin.from("recurring_invoice_runs").insert({
+    recurring_invoice_id: scheduleId,
+    user_id: userId,
+    invoice_id: null,
+    run_at: now,
+    status: "error",
+    error_message: message,
+  });
+
+  await supabaseAdmin.from("audit").insert([
+    {
+      client_id: clientId,
+      user_id: userId,
+      action: "RECURRING_INVOICE_ERROR",
+      details: message,
+      timestamp: now,
+    },
+  ]);
+
+  // Unlock schedule
+  await supabaseAdmin
+    .from("recurring_invoices")
+    .update({ processing: false })
+    .eq("id", scheduleId);
+}
+
+function safeComputeNextRunDate(
+  current: string,
+  frequencyType: string,
+  interval: number
+) {
+  const d = new Date(current);
+  if (isNaN(d.getTime())) return current;
+
+  switch (frequencyType) {
+    case "daily":
+      d.setDate(d.getDate() + interval);
+      break;
+    case "weekly":
+      d.setDate(d.getDate() + 7 * interval);
+      break;
+    case "monthly":
+      d.setMonth(d.getMonth() + interval);
+      break;
+    default:
+      return current;
   }
 
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
+  return d.toISOString().slice(0, 10);
 }
+ 

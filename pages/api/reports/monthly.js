@@ -10,14 +10,23 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isFounder = session.user.role === "admin";
-  const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+  const role = (session.user.role || "").toUpperCase();
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
 
-  if (!(isFounder || isSubscribed)) {
+  // ⭐ Accountants + founders bypass subscription checks
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  const clientId = session.user.clientId;
+  // ⭐ Accountant-aware client ID
+  const clientId = isAccountant
+    ? session.user.actingAsClientId
+    : session.user.clientId;
+
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -25,8 +34,8 @@ export default async function handler(req, res) {
   try {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
-      .select("date, amount, category")
-      .eq("client_id", clientId); // ✅ strict scoping
+      .select("date, amount, business_category")
+      .eq("client_id", clientId);
 
     if (error) {
       console.error("Supabase fetch error:", error.message);
@@ -37,12 +46,13 @@ export default async function handler(req, res) {
 
     for (const tx of transactions) {
       const month = format(new Date(tx.date), "MMMM yyyy");
+
       if (!monthlyMap[month]) {
         monthlyMap[month] = { revenue: 0, expenses: 0, categories: {} };
       }
 
       const amount = parseFloat(tx.amount) || 0;
-      const category = tx.category || "Uncategorized";
+      const category = tx.business_category || "Uncategorised";
 
       if (!monthlyMap[month].categories[category]) {
         monthlyMap[month].categories[category] = 0;
@@ -52,7 +62,7 @@ export default async function handler(req, res) {
       if (amount > 0) {
         monthlyMap[month].revenue += amount;
       } else {
-        monthlyMap[month].expenses += -amount; // ✅ accumulate as positive
+        monthlyMap[month].expenses += -amount;
       }
     }
 
@@ -67,14 +77,18 @@ export default async function handler(req, res) {
       })),
     }));
 
-    // ✅ Audit log
-    await supabaseAdmin.from("audit").insert([{
-      client_id: clientId,
-      user: session.user.email,
-      action: "FETCH_MONTHLY_REPORTS",
-      details: `Returned ${transactions.length} transactions`,
-      timestamp: new Date().toISOString(),
-    }]);
+    // ⭐ Audit log (accountant-aware)
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant
+          ? "ACCOUNTANT_FETCH_MONTHLY_REPORTS"
+          : "FETCH_MONTHLY_REPORTS",
+        details: `Returned ${transactions.length} transactions`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
     res.status(200).json({ monthlyReports });
   } catch (err) {

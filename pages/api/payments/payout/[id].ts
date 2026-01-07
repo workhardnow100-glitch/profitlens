@@ -1,6 +1,13 @@
+// pages/api/payments/payout/[id].ts
+import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
+import { requireRole } from "../../../../lib/rbac";
 
-export default async function handler(req, res) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // RBAC: Only the FOUNDER can view payout drilldowns
+  const guard = await requireRole(req, res, ["FOUNDER"]);
+  if (!guard.ok) return;
+
   const { id } = req.query;
 
   if (!id || typeof id !== "string") {

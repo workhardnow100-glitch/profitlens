@@ -42,6 +42,22 @@ export default async function handler(req, res) {
   if (!periodStart || !periodEnd)
     return res.status(400).json({ error: "Missing required fields" });
 
+  // ⭐ Extra guard: prevent absurd ranges for accountants
+  if (role === "ACCOUNTANT") {
+    const startYear = Number(String(periodStart).split("-")[0]);
+    const endYear = Number(String(periodEnd).split("-")[0]);
+
+    if (
+      Number.isNaN(startYear) ||
+      Number.isNaN(endYear) ||
+      startYear < 2000 ||
+      endYear > 2100 ||
+      endYear < startYear
+    ) {
+      return res.status(400).json({ error: "Invalid period range" });
+    }
+  }
+
   try {
     // ⭐ AUDIT LOG — Accountant viewing SA analytics
     if (role === "ACCOUNTANT") {

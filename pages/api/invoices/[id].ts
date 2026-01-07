@@ -1,44 +1,53 @@
-// pages/api/invoices/[id]/index.ts
+// pages/api/invoices/[id].ts
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Users, Accountants, and Founder can access invoice details
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
-
-  const userId = session.user.id as string;
+  const { userId, role, accessibleClients } = guard;
   const invoiceId = req.query.id as string;
 
-  // -----------------------------
+  // -------------------------------------------------------------
+  // Fetch invoice first (for access control)
+  // -------------------------------------------------------------
+  const { data: invoice, error: invoiceError } = await supabaseAdmin
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .single();
+
+  if (invoiceError || !invoice) {
+    return res.status(404).json({ error: "Invoice not found" });
+  }
+
+  // -------------------------------------------------------------
+  // ACCESS CONTROL
+  // -------------------------------------------------------------
+  if (role === "USER" && invoice.user_id !== userId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (role === "ACCOUNTANT" && !accessibleClients.includes(invoice.client_id)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  // -------------------------------------------------------------
   // GET — Fetch full invoice
-  // -----------------------------
+  // -------------------------------------------------------------
   if (req.method === "GET") {
     try {
-      // Fetch invoice - must belong to this user
-      const { data: invoice, error: invoiceError } = await supabaseAdmin
-        .from("invoices")
-        .select("*")
-        .eq("id", invoiceId)
-        .eq("user_id", userId)
-        .single();
-
-      if (invoiceError || !invoice) {
-        return res.status(404).json({ error: "Invoice not found" });
-      }
-
       // Fetch EXTERNAL CLIENT
       const { data: externalClient, error: externalClientError } =
         await supabaseAdmin
           .from("external_clients")
           .select("*")
           .eq("id", invoice.client_id)
-          .eq("owner_id", userId)
+          .eq("owner_id", invoice.user_id)
           .single();
 
       if (externalClientError || !externalClient) {
@@ -57,7 +66,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch line items" });
       }
 
-      // Fetch matched payments with joined transactions
+      // Fetch matched payments
       const { data: payments, error: payError } = await supabaseAdmin
         .from("invoice_payments")
         .select(
@@ -87,11 +96,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch payments" });
       }
 
-      // Derived values
       const paidAmount =
         payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) ?? 0;
 
-      // Use invoice.total (pence)
       const balance = Number(invoice.total || 0) / 100 - paidAmount;
 
       return res.status(200).json({
@@ -108,9 +115,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // -----------------------------
+  // -------------------------------------------------------------
   // PUT — Update invoice
-  // -----------------------------
+  // -------------------------------------------------------------
   if (req.method === "PUT") {
     try {
       const {
@@ -121,7 +128,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         paymentInstructions,
         notesToClient,
         status,
-        paymentStatus, // NEW
+        paymentStatus,
       } = req.body;
 
       const { data: updated, error } = await supabaseAdmin
@@ -134,11 +141,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           payment_instructions: paymentInstructions,
           notes_to_client: notesToClient,
           status,
-          payment_status: paymentStatus ?? undefined, // NEW
+          payment_status: paymentStatus ?? undefined,
           updated_at: new Date().toISOString(),
         })
         .eq("id", invoiceId)
-        .eq("user_id", userId)
         .select()
         .single();
 
@@ -154,20 +160,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // -----------------------------
+  // -------------------------------------------------------------
   // DELETE — Cancel invoice
-  // -----------------------------
+  // -------------------------------------------------------------
   if (req.method === "DELETE") {
     try {
       const { error } = await supabaseAdmin
         .from("invoices")
         .update({
           status: "cancelled",
-          payment_status: "cancelled", // NEW
+          payment_status: "cancelled",
           cancelled_at: new Date().toISOString(),
         })
-        .eq("id", invoiceId)
-        .eq("user_id", userId);
+        .eq("id", invoiceId);
 
       if (error) {
         console.error(error);

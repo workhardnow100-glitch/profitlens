@@ -4,42 +4,49 @@ import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
+  if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
+  }
 
-  // ⭐ SESSION REQUIRED
+  // ⭐ Session required
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
+  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isAccountant = role === "ACCOUNTANT";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
 
-  // ⭐ Resolve clientId safely
-  let clientId = null;
-  if (role === "ACCOUNTANT") {
-    clientId = session.user.actingAsClientId;
-  } else {
-    clientId = session.user.clientId || session.user.defaultClientId;
+  // ⭐ Subscription gating (accountants + founders bypass)
+  if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
+    return res.status(403).json({ error: "Upgrade required" });
   }
 
-  if (!clientId) {
+  // ⭐ Accountant-aware client ID
+  const clientId = isAccountant
+    ? session.user.actingAsClientId
+    : session.user.clientId || session.user.defaultClientId;
+
+  if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "No client selected" });
   }
 
   try {
-    // ⭐ AUDIT LOG — Accountant viewing CT history
-    if (role === "ACCOUNTANT") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_CT_HISTORY",
-          details: "Viewed Corporation Tax history",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
+    // ⭐ Audit log — all roles
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant ? "ACCOUNTANT_VIEW_CT_HISTORY" : "VIEW_CT_HISTORY",
+        details: "Viewed Corporation Tax history",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
     // ⭐ Load submissions
     const { data: submissions, error: subError } = await supabaseAdmin

@@ -1,83 +1,85 @@
-// pages/api/ct/add-payment.js
+// pages/api/cis/add-repayment.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  }
 
-  // 🔐 SESSION REQUIRED
+  // 🔐 Session required
   const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
+  if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
-  }
 
   const role = (session.user.role || "").toUpperCase();
-
-  // 🔐 Subscription gating (same as VAT endpoints)
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
-
-  if (!(isFounder || isSubscribedOrTrial)) {
+  if (!(isFounder || isSubscribedOrTrial))
     return res.status(403).json({ error: "Upgrade required" });
-  }
 
-  // 🔐 Resolve clientId safely (accountant-aware)
+  // 🔐 Accountant-aware clientId
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
   } else {
     clientId = session.user.clientId || session.user.defaultClientId;
   }
-
-  if (!clientId) {
+  if (!clientId)
     return res.status(400).json({ error: "No client selected" });
-  }
 
-  const { paymentDate, amount, direction, reference, clientId: bodyClientId } =
-    req.body;
+  const {
+    paymentDate,
+    amount,
+    direction = "refund",
+    reference,
+    clientId: bodyClientId,
+  } = req.body;
 
   // 🔐 Prevent accountants from spoofing clientId
   if (role === "ACCOUNTANT" && bodyClientId && bodyClientId !== clientId) {
     return res.status(403).json({
-      error: "Accountants cannot add CT payments for unauthorized clients",
+      error: "Accountants cannot add CIS repayments for unauthorized clients",
     });
   }
 
-  // ⭐ Basic validation
   if (!paymentDate || !amount) {
     return res.status(400).json({
       error: "Missing required fields: paymentDate, amount",
     });
   }
 
+  if (!["payment", "refund"].includes(direction)) {
+    return res.status(400).json({
+      error: "Invalid direction. Must be 'payment' or 'refund'.",
+    });
+  }
+
   try {
-    // ⭐ AUDIT LOG — Accountant adding CT payment
+    // 📝 Audit log — Accountant adding CIS repayment/payment
     if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "ACCOUNTANT_ADD_CT_PAYMENT",
-          details: `Added CT payment: ${direction || "payment"} £${amount} on ${paymentDate}`,
+          action: "ACCOUNTANT_ADD_CIS_PAYMENT",
+          details: `Added CIS ${direction}: £${amount} on ${paymentDate}`,
           timestamp: new Date().toISOString(),
         },
       ]);
     }
 
-    // ⭐ Insert CT payment
+    // Insert CIS payment/repayment
     const { data: payment, error: insertError } = await supabaseAdmin
-      .from("ct_payments")
+      .from("cis_payments")
       .insert([
         {
           client_id: clientId,
           payment_date: paymentDate,
           amount: Number(amount),
-          direction: direction || "payment",
+          direction,
           reference: reference || null,
         },
       ])
@@ -86,22 +88,19 @@ export default async function handler(req, res) {
 
     if (insertError) throw new Error(insertError.message);
 
-    // ⭐ Fetch updated totals
+    // Fetch updated payments
     const { data: payments, error: fetchError } = await supabaseAdmin
-      .from("ct_payments")
+      .from("cis_payments")
       .select("*")
       .eq("client_id", clientId)
       .order("payment_date", { ascending: true });
 
     if (fetchError) throw new Error(fetchError.message);
 
-    // ⭐ Compute totals
     let totalPaid = 0;
-    let totalRefunded = 0;
-
-    payments.forEach((p) => {
+    (payments || []).forEach((p) => {
       if (p.direction === "payment") totalPaid += Number(p.amount);
-      if (p.direction === "refund") totalRefunded += Number(p.amount);
+      if (p.direction === "refund") totalPaid -= Number(p.amount);
     });
 
     return res.status(200).json({
@@ -109,15 +108,10 @@ export default async function handler(req, res) {
       payment,
       totals: {
         totalPaid,
-        totalRefunded,
-        netPaid: totalPaid - totalRefunded,
       },
     });
   } catch (err) {
-    console.error("CT payment error:", err);
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+    console.error("CIS add repayment error:", err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 }

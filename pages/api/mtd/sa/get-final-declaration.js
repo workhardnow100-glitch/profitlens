@@ -1,20 +1,31 @@
 // pages/api/mtd/sa/get-final-declaration.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
+import { supabaseAdmin } from "../../../../lib/supabase-admin";
 import { createClient } from "../../../../lib/mtd-client";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  // Validate session
+  // ⭐ Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = (session.user.role || "").toUpperCase();
 
-  // Determine clientId (accountant‑aware)
+  // ⭐ Subscription gating (required for all MTD endpoints)
+  const isFounder = session.user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return res.status(403).json({ error: "Upgrade required" });
+  }
+
+  // ⭐ Determine clientId (accountant‑aware)
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
@@ -28,12 +39,30 @@ export default async function handler(req, res) {
   try {
     const mtd = await createClient(clientId);
 
+    // ⭐ Guard: no MTD ITSA connection
+    if (!mtd || !mtd.mtditid) {
+      return res.status(400).json({ error: "MTD not connected" });
+    }
+
+    // ⭐ AUDIT LOG — Accountant viewing SA Final Declaration
+    if (role === "ACCOUNTANT") {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_VIEW_MTD_SA_FINAL_DECLARATION",
+          details: "Viewed SA MTD Final Declaration status",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+
     // ⭐ Fetch Final Declaration status from HMRC
     const declaration = await mtd.getFinalDeclaration();
 
     return res.status(200).json({
       success: true,
-      declaration
+      declaration,
     });
 
   } catch (err) {

@@ -1,6 +1,12 @@
+import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
-export default async function handler(req, res) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // RBAC: Only the FOUNDER can view payouts
+  const guard = await requireRole(req, res, ["FOUNDER"]);
+  if (!guard.ok) return;
+
   try {
     // 1. Fetch payouts
     const { data: payouts, error } = await supabaseAdmin
@@ -21,12 +27,12 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to load payouts" });
     }
 
-    // 2. Fetch payout item counts (optional but useful)
+    // 2. Fetch payout item counts
     const { data: items } = await supabaseAdmin
       .from("payment_payout_items")
       .select("payout_id");
 
-    const itemCounts = {};
+    const itemCounts: Record<string, number> = {};
     items?.forEach((i) => {
       itemCounts[i.payout_id] = (itemCounts[i.payout_id] || 0) + 1;
     });

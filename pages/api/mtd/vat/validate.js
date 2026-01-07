@@ -2,7 +2,7 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
-import { createClient } from "../../../../lib/mtd-client"; // <-- your HMRC MTD client wrapper
+import { createClient } from "../../../../lib/mtd-client";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -41,6 +41,22 @@ export default async function handler(req, res) {
     return res.status(400).json({
       error: "Missing required fields: periodStart, periodEnd",
     });
+  }
+
+  // ⭐ Accountant period-range sanity check
+  if (role === "ACCOUNTANT") {
+    const startYear = Number(periodStart.split("-")[0]);
+    const endYear = Number(periodEnd.split("-")[0]);
+
+    if (
+      Number.isNaN(startYear) ||
+      Number.isNaN(endYear) ||
+      startYear < 2000 ||
+      endYear > 2100 ||
+      endYear < startYear
+    ) {
+      return res.status(400).json({ error: "Invalid period range" });
+    }
   }
 
   try {
@@ -86,7 +102,6 @@ export default async function handler(req, res) {
       const vat = Number(tx.vat_amount || 0);
       const category = (tx.business_category || "").toLowerCase();
 
-      // Simple rule: sales = output VAT, everything else = input VAT
       if (category === "sales") {
         outputVat += vat;
       } else {
@@ -99,7 +114,12 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     // 3. Fetch HMRC obligations → get real periodKey
     // ---------------------------------------------------------
-    const mtd = await createClient(clientId); // your OAuth + VRN wrapper
+    const mtd = await createClient(clientId);
+
+    // ⭐ Guard: no MTD connection
+    if (!mtd) {
+      return res.status(400).json({ error: "MTD not connected" });
+    }
 
     const obligations = await mtd.getVATObligations();
 
@@ -113,7 +133,7 @@ export default async function handler(req, res) {
       return (
         o.start === periodStart &&
         o.end === periodEnd &&
-        o.status === "O" // Open obligation
+        o.status === "O"
       );
     });
 
@@ -163,4 +183,3 @@ export default async function handler(req, res) {
     });
   }
 }
-

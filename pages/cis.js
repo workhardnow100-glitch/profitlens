@@ -43,10 +43,25 @@ export default function CISPage() {
   const [returnsError, setReturnsError] = useState(null);
   const [deductionsError, setDeductionsError] = useState(null);
 
+  // NEW STATE FOR CIS COCKPIT EXTENSIONS
+  const [subcontractorStatements, setSubcontractorStatements] = useState(null);
+  const [exportedReturn, setExportedReturn] = useState(null);
+
+  const [repaymentDate, setRepaymentDate] = useState("");
+  const [repaymentAmount, setRepaymentAmount] = useState("");
+  const [repaymentReference, setRepaymentReference] = useState("");
+
+  const [txDate, setTxDate] = useState("");
+  const [txAmount, setTxAmount] = useState("");
+  const [txDescription, setTxDescription] = useState("");
+  const [txCisType, setTxCisType] = useState("deducted");
+  const [txCisAmount, setTxCisAmount] = useState("");
+  const [txCisRate, setTxCisRate] = useState("");
+
   // CLIENT RESOLUTION (same pattern as VAT / Tax Hub)
   const clientId = user?.actingAsClientId ?? user?.clientId;
 
-  // AUTH GUARD (effect can early-return internally; that's fine)
+  // AUTH GUARD
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) {
@@ -54,7 +69,7 @@ export default function CISPage() {
     }
   }, [isLoading, isAuthenticated, router]);
 
-  // AUTO-FILL PERIOD FROM TAX HUB LINK (client-side only)
+  // AUTO-FILL PERIOD FROM TAX HUB LINK
   useEffect(() => {
     if (!router.isReady) return;
 
@@ -63,14 +78,12 @@ export default function CISPage() {
     if (qFrom && qTo) {
       setFrom(qFrom);
       setTo(qTo);
-      // Run fetch on next tick to avoid hydration timing weirdness
       Promise.resolve().then(() => {
         fetchCIS(qFrom, qTo);
       });
     }
-  }, [router.isReady]); // do not depend on router.query to avoid SSR/client divergence
+  }, [router.isReady]);
 
-  // 🔹 ONLY NOW do we gate rendering
   if (isLoading) return null;
   if (!isAuthenticated || !user) return null;
 
@@ -341,6 +354,133 @@ export default function CISPage() {
     }
   }
 
+  // NEW INTERNAL: Fetch Subcontractor Statements
+  async function fetchSubcontractorStatements() {
+    if (!from || !to) return alert("Select a CIS period first.");
+    if (!clientId) return alert("No client selected.");
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/cis/subcontractor-statements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to load statements");
+
+      setSubcontractorStatements(data);
+    } catch (err) {
+      console.error(err);
+      alert("Error loading subcontractor statements: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // NEW INTERNAL: Export CIS Return
+  async function exportCISReturn() {
+    if (!from || !to) return alert("Select a CIS period first.");
+    if (!clientId) return alert("No client selected.");
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/cis/export-return", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to export CIS return");
+
+      setExportedReturn(data);
+      alert("CIS return exported. Scroll down to view.");
+    } catch (err) {
+      console.error(err);
+      alert("Export failed: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // NEW INTERNAL: Add CIS Repayment
+  async function addCISRepayment() {
+    if (!repaymentDate || !repaymentAmount)
+      return alert("Enter repayment date and amount.");
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/cis/add-repayment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          paymentDate: repaymentDate,
+          amount: repaymentAmount,
+          direction: "refund",
+          reference: repaymentReference,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to add repayment");
+
+      alert("CIS repayment added.");
+    } catch (err) {
+      console.error(err);
+      alert("Error adding repayment: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // NEW INTERNAL: Add CIS Transaction
+  async function addCISTransaction() {
+    if (!txDate || !txAmount || !txCisAmount)
+      return alert("Enter date, amount, and CIS amount.");
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/cis/add-transaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          date: txDate,
+          amount: txAmount,
+          description: txDescription,
+          cisType: txCisType,
+          cisAmount: txCisAmount,
+          cisRate: txCisRate,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to add CIS transaction");
+
+      alert("CIS transaction added.");
+    } catch (err) {
+      console.error(err);
+      alert("Error adding CIS transaction: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // RENDER
   return (
     <ResponsiveLayout currentPageName="CIS Return">
@@ -458,6 +598,193 @@ export default function CISPage() {
             )}
           </>
         )}
+
+        {/* NEW: CIS Subcontractor Statements */}
+        <ResponsiveCard title="Subcontractor Statements">
+          <div className="flex gap-3 mb-3">
+            <button
+              onClick={fetchSubcontractorStatements}
+              className="bg-purple-600 text-white px-4 py-2 rounded text-sm"
+              disabled={loading}
+            >
+              {loading ? "Loading…" : "Generate Statements"}
+            </button>
+          </div>
+
+          {subcontractorStatements ? (
+            <div className="space-y-3">
+              <p className="font-semibold">
+                Period: {subcontractorStatements.periodStart} →{" "}
+                {subcontractorStatements.periodEnd}
+              </p>
+
+              <p>
+                <strong>Total CIS Deducted:</strong>{" "}
+                £{subcontractorStatements.cisDeducted.toFixed(2)}
+              </p>
+              <p>
+                <strong>Total CIS Suffered:</strong>{" "}
+                £{subcontractorStatements.cisSuffered.toFixed(2)}
+              </p>
+              <p className="font-bold">
+                Net CIS: £{subcontractorStatements.netCis.toFixed(2)}
+              </p>
+
+              <ResponsiveTable
+                columns={[
+                  { header: "Date", accessor: "date" },
+                  { header: "Description", accessor: "description" },
+                  { header: "Gross (£)", accessor: "gross" },
+                  { header: "CIS (£)", accessor: "cisAmount" },
+                  { header: "Type", accessor: "cisType" },
+                ]}
+                data={subcontractorStatements.rows}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">
+              No subcontractor statements loaded yet.
+            </p>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: Export CIS Return */}
+        <ResponsiveCard title="Export CIS Return">
+          <div className="flex gap-3 mb-3">
+            <button
+              onClick={exportCISReturn}
+              className="bg-indigo-600 text-white px-4 py-2 rounded text-sm"
+              disabled={loading}
+            >
+              {loading ? "Exporting…" : "Export Return"}
+            </button>
+          </div>
+
+          {exportedReturn ? (
+            <div className="space-y-3">
+              <p className="font-semibold">
+                Exported at: {exportedReturn.exportedAt}
+              </p>
+
+              <p>
+                <strong>CIS Deducted:</strong>{" "}
+                £{exportedReturn.totals.cisDeducted.toFixed(2)}
+              </p>
+              <p>
+                <strong>CIS Suffered:</strong>{" "}
+                £{exportedReturn.totals.cisSuffered.toFixed(2)}
+              </p>
+              <p className="font-bold">
+                Net CIS: £{exportedReturn.totals.netCis.toFixed(2)}
+              </p>
+
+              <ResponsiveTable
+                columns={[
+                  { header: "Date", accessor: "date" },
+                  { header: "Description", accessor: "description" },
+                  { header: "CIS (£)", accessor: "cis_amount" },
+                  { header: "Type", accessor: "cis_type" },
+                ]}
+                data={exportedReturn.transactions}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">
+              No exported return loaded yet.
+            </p>
+          )}
+        </ResponsiveCard>
+
+        {/* NEW: Add CIS Repayment */}
+        <ResponsiveCard title="Add CIS Repayment">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <input
+              type="date"
+              value={repaymentDate}
+              onChange={(e) => setRepaymentDate(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <input
+              type="number"
+              placeholder="Amount (£)"
+              value={repaymentAmount}
+              onChange={(e) => setRepaymentAmount(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <input
+              type="text"
+              placeholder="Reference (optional)"
+              value={repaymentReference}
+              onChange={(e) => setRepaymentReference(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <button
+              onClick={addCISRepayment}
+              className="bg-green-700 text-white px-4 py-2 rounded"
+              disabled={loading}
+            >
+              Add Repayment
+            </button>
+          </div>
+        </ResponsiveCard>
+
+        {/* NEW: Add CIS Transaction */}
+        <ResponsiveCard title="Add CIS Transaction">
+          <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
+            <input
+              type="date"
+              value={txDate}
+              onChange={(e) => setTxDate(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <input
+              type="number"
+              placeholder="Amount (£)"
+              value={txAmount}
+              onChange={(e) => setTxAmount(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <input
+              type="text"
+              placeholder="Description"
+              value={txDescription}
+              onChange={(e) => setTxDescription(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <select
+              value={txCisType}
+              onChange={(e) => setTxCisType(e.target.value)}
+              className="border p-2 rounded"
+            >
+              <option value="deducted">Deducted</option>
+              <option value="suffered">Suffered</option>
+            </select>
+            <input
+              type="number"
+              placeholder="CIS Amount (£)"
+              value={txCisAmount}
+              onChange={(e) => setTxCisAmount(e.target.value)}
+              className="border p-2 rounded"
+            />
+            <input
+              type="number"
+              placeholder="CIS Rate (%)"
+              value={txCisRate}
+              onChange={(e) => setTxCisRate(e.target.value)}
+              className="border p-2 rounded"
+            />
+          </div>
+
+          <div className="mt-3">
+            <button
+              onClick={addCISTransaction}
+              className="bg-blue-700 text-white px-4 py-2 rounded"
+              disabled={loading}
+            >
+              Add CIS Transaction
+            </button>
+          </div>
+        </ResponsiveCard>
 
         {/* CIS MTD Connection Status */}
         <ResponsiveCard title="CIS MTD Connection Status (HMRC)">

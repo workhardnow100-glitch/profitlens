@@ -3,6 +3,18 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { CT_MAP } from "../../../lib/constants/ctMap";
+import { SYSTEM_CATEGORIES } from "../../../lib/constants/systemCategories";
+
+// Allowed HMRC categories
+const ALLOWED_CATEGORIES = new Set([
+  ...CT_MAP.income,
+  ...CT_MAP.allowable,
+  ...CT_MAP.disallowable,
+  ...CT_MAP.ignore,
+  ...SYSTEM_CATEGORIES,
+  "Uncategorised",
+]);
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -14,7 +26,9 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isFounder = session.user.role === "admin";
+  const role = session.user.role;
+  const isFounder = role === "admin";
+  const isAccountant = role === "accountant";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
@@ -23,6 +37,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
+  // Accountant-aware client scoping
   const clientId =
     session.user.actingAsClientId || session.user.clientId;
 
@@ -37,11 +52,104 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ---------------------------------------------------------
+    // 1) Fetch transaction for access control
+    // ---------------------------------------------------------
+    const { data: tx, error: fetchError } = await supabaseAdmin
+      .from("transactions")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !tx) {
+      return res.status(404).json({ error: "Transaction not found" });
+    }
+
+    // ---------------------------------------------------------
+    // 2) ACCESS CONTROL
+    // ---------------------------------------------------------
+    // USER → must own the transaction
+    if (role === "user" && tx.client_id !== clientId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // ACCOUNTANT → must be acting on assigned client
+    if (isAccountant && tx.client_id !== clientId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Founder bypasses all checks
+
+    // ---------------------------------------------------------
+    // 3) Validate fields
+    // ---------------------------------------------------------
+
+    // Validate category
+    if (fields.business_category) {
+      const clean = String(fields.business_category).trim();
+      if (!ALLOWED_CATEGORIES.has(clean)) {
+        return res.status(400).json({
+          error: `Invalid category "${clean}". Must be HMRC-aligned.`,
+        });
+      }
+      fields.business_category = clean;
+    }
+
+    // Validate VAT
+    if (fields.vat_rate != null) {
+      const rate = Number(fields.vat_rate);
+      if (![0, 5, 20].includes(rate)) {
+        return res.status(400).json({ error: "Invalid VAT rate" });
+      }
+      fields.vat_rate = rate;
+    }
+
+    if (fields.vat_amount != null) {
+      fields.vat_amount = Number(fields.vat_amount);
+      if (isNaN(fields.vat_amount)) {
+        return res.status(400).json({ error: "Invalid VAT amount" });
+      }
+    }
+
+    // Validate CIS
+    if (fields.cis_type != null) {
+      if (!["none", "deducted", "suffered"].includes(fields.cis_type)) {
+        return res.status(400).json({ error: "Invalid CIS type" });
+      }
+    }
+
+    // Validate SA
+    if (fields.includedinsa != null) {
+      fields.includedinsa = Boolean(fields.includedinsa);
+    }
+
+    // Validate CT flags
+    if (fields.includedinct != null) {
+      fields.includedinct = Boolean(fields.includedinct);
+    }
+    if (fields.manualctoverride != null) {
+      fields.manualctoverride = Boolean(fields.manualctoverride);
+    }
+
+    // Validate asset disposal fields
+    if (fields.assetdisposaltype) {
+      const allowed = ["MAIN_POOL", "SPECIAL_RATE_POOL", "CARS", "SHORT_LIFE"];
+      if (!allowed.includes(fields.assetdisposaltype)) {
+        return res.status(400).json({ error: "Invalid asset disposal type" });
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 4) Build update payload
+    // ---------------------------------------------------------
     const updatePayload = {
       ...fields,
       updatedat: new Date().toISOString(),
     };
 
+    // ---------------------------------------------------------
+    // 5) Perform update
+    // ---------------------------------------------------------
     const { error } = await supabaseAdmin
       .from("transactions")
       .update(updatePayload)
@@ -51,6 +159,20 @@ export default async function handler(req, res) {
     if (error) {
       console.error("Upsert error:", error);
       return res.status(500).json({ error: error.message });
+    }
+
+    // ---------------------------------------------------------
+    // 6) Accountant audit log
+    // ---------------------------------------------------------
+    if (isAccountant) {
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action: "ACCOUNTANT_UPDATE_TRANSACTION",
+          details: `Updated transaction ${id}`,
+        },
+      ]);
     }
 
     return res.status(200).json({ success: true });

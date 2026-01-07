@@ -23,7 +23,6 @@ function formatMonthLabel(key) {
   }).format(new Date(Number(year), Number(month) - 1));
 }
 
-// ✅ Unified allowed categories
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -33,7 +32,6 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
-// ✅ Lowercase sets for classification
 const MAP = {
   income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
   allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
@@ -43,49 +41,44 @@ const MAP = {
 
 export default async function handler(req, res) {
   try {
-    // ✅ Session guard (fully defensive)
     const session = await getServerSession(req, res, authOptions);
-
-    if (!session || !session.user) {
+    if (!session?.user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
     const user = session.user;
-
-    // ✅ Role + subscription guard (defensive reads)
-    const role = user.role || null;
+    const role = (user.role || "").toUpperCase();
     const subscriptionStatus = user.subscriptionStatus || null;
 
-    const isFounder = role === "admin";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      subscriptionStatus
-    );
+    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const isAccountant = role === "ACCOUNTANT";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
 
-    if (!(isFounder || isSubscribedOrTrial)) {
+    if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ✅ Accountant‑aware client ID (matches Reports/Profile)
-    const clientId =
-      user.actingAsClientId || user.clientId || null;
+    let clientId = null;
+    if (isAccountant) {
+      clientId = user.actingAsClientId || null;
+    } else {
+      clientId = user.clientId || user.defaultClientId || null;
+    }
 
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    // ✅ Optional: audit log for accountants (defensive)
-    if (role === "accountant") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: user.email || null,
-          action: "ACCOUNTANT_VIEW_FORECASTS",
-          details: "Viewed forecasts",
-        },
-      ]);
-    }
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: user.email || null,
+        action: isAccountant ? "ACCOUNTANT_VIEW_FORECASTS" : "VIEW_FORECASTS",
+        details: "Viewed forecasts",
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
-    // ✅ Fetch transactions
     const { data: transactions = [], error } = await supabaseAdmin
       .from("transactions")
       .select("date, amount, business_category, is_reversal")
@@ -111,7 +104,6 @@ export default async function handler(req, res) {
     const monthly = {};
     const categoriesTotals = {};
 
-    // ✅ Initialise category totals for all allowed categories
     for (const cat of ALLOWED_CATEGORIES) {
       categoriesTotals[cat] = { revenue: 0, expenses: 0 };
     }
@@ -124,13 +116,10 @@ export default async function handler(req, res) {
 
       const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
 
-      // ✅ Unified category handling
       let category = tx.business_category?.trim() || "Uncategorised";
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
-
-      // ✅ Skip system/ignored categories entirely
       if (MAP.ignore.has(lower)) continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
@@ -151,7 +140,6 @@ export default async function handler(req, res) {
     const expenses = keys.map((k) => monthly[k].expenses);
     const net = revenue.map((r, i) => r - expenses[i]);
 
-    // ✅ Use recent months for projection (last 3, if available)
     const recentRevenue = revenue.slice(-3);
     const recentExpenses = expenses.slice(-3);
 
@@ -167,7 +155,6 @@ export default async function handler(req, res) {
 
     const avgNet = avgRevenue - avgExpenses;
 
-    // ✅ Category‑level breakdown (ignoring system categories)
     const categories = Object.entries(categoriesTotals)
       .filter(([name]) => !MAP.ignore.has(name.toLowerCase()))
       .map(([name, vals]) => ({

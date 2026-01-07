@@ -16,7 +16,6 @@ export default async function handler(req, res) {
   }
 
   const role = (session.user.role || "").toUpperCase();
-
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -42,6 +41,22 @@ export default async function handler(req, res) {
 
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  // ⭐ Accountant period-range sanity check
+  if (role === "ACCOUNTANT") {
+    const startYear = Number(periodStart.split("-")[0]);
+    const endYear = Number(periodEnd.split("-")[0]);
+
+    if (
+      Number.isNaN(startYear) ||
+      Number.isNaN(endYear) ||
+      startYear < 2000 ||
+      endYear > 2100 ||
+      endYear < startYear
+    ) {
+      return res.status(400).json({ error: "Invalid period range" });
+    }
   }
 
   try {
@@ -75,6 +90,20 @@ export default async function handler(req, res) {
       return res.status(404).json({
         error: "No HMRC submission found for this VAT period",
       });
+    }
+
+    // ⭐ Accountant submission-ownership guard
+    if (!isFounder) {
+      const sessionClientId =
+        role === "ACCOUNTANT"
+          ? session.user.actingAsClientId
+          : session.user.clientId || session.user.defaultClientId;
+
+      if (sessionClientId !== submission.client_id) {
+        return res.status(403).json({
+          error: "You are not allowed to access this VAT receipt",
+        });
+      }
     }
 
     // ⭐ Create PDF
@@ -141,4 +170,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
-

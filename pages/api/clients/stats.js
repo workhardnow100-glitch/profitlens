@@ -9,14 +9,20 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isFounder = session.user.role === "admin";
-  const isSubscribed = ["basic", "pro"].includes(session.user.subscriptionStatus);
+  const role = session.user.role;
+  const isFounder = role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    session.user.subscriptionStatus
+  );
 
-  if (!(isFounder || isSubscribed)) {
+  if (!(isFounder || isSubscribedOrTrial)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  const clientId = session.user.clientId;
+  // Accountant-aware client scoping
+  const clientId =
+    session.user.actingAsClientId || session.user.clientId;
+
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -24,7 +30,7 @@ export default async function handler(req, res) {
   try {
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
-      .select("date, amount, category")
+      .select("date, amount, business_category")
       .eq("client_id", clientId);
 
     if (error) {
@@ -42,45 +48,56 @@ export default async function handler(req, res) {
       if (!tx?.date || typeof tx.amount !== "number") continue;
 
       const amount = tx.amount;
-      const category = tx.category || "Uncategorized";
-      const month = new Date(tx.date).toISOString().slice(0, 7); // YYYY-MM
+      const category = tx.business_category || "Uncategorised";
+      const month = new Date(tx.date).toISOString().slice(0, 7);
 
       if (amount > 0) {
         totalRevenue += amount;
-        revenueByCategoryMap[category] = (revenueByCategoryMap[category] || 0) + amount;
+        revenueByCategoryMap[category] =
+          (revenueByCategoryMap[category] || 0) + amount;
       } else {
-        totalExpenses += -amount; // ✅ accumulate as positive
-        expensesByCategoryMap[category] = (expensesByCategoryMap[category] || 0) + -amount;
+        const out = Math.abs(amount);
+        totalExpenses += out;
+        expensesByCategoryMap[category] =
+          (expensesByCategoryMap[category] || 0) + out;
       }
 
       monthlyProfitMap[month] = (monthlyProfitMap[month] || 0) + amount;
     }
 
-    const revenueByCategory = Object.entries(revenueByCategoryMap).map(([category, value]) => ({
-      category,
-      value: parseFloat(value.toFixed(2)),
-    }));
+    const revenueByCategory = Object.entries(revenueByCategoryMap).map(
+      ([category, value]) => ({
+        category,
+        value: parseFloat(value.toFixed(2)),
+      })
+    );
 
-    const expensesByCategory = Object.entries(expensesByCategoryMap).map(([category, value]) => ({
-      category,
-      value: parseFloat(value.toFixed(2)),
-    }));
+    const expensesByCategory = Object.entries(expensesByCategoryMap).map(
+      ([category, value]) => ({
+        category,
+        value: parseFloat(value.toFixed(2)),
+      })
+    );
 
-    const monthlyProfit = Object.entries(monthlyProfitMap).map(([month, profit]) => ({
-      month,
-      profit: parseFloat(profit.toFixed(2)),
-    }));
+    const monthlyProfit = Object.entries(monthlyProfitMap).map(
+      ([month, profit]) => ({
+        month,
+        profit: parseFloat(profit.toFixed(2)),
+      })
+    );
 
-    // ✅ Audit log
-    await supabaseAdmin.from("audit").insert([{
-      client_id: clientId,
-      user: session.user.email,
-      action: "FETCH_CLIENT_STATS",
-      details: `Returned ${transactions.length} transactions`,
-      timestamp: new Date().toISOString(),
-    }]);
+    // Audit log
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: "FETCH_CLIENT_STATS",
+        details: `Returned ${transactions.length} transactions`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       revenue: totalRevenue.toFixed(2),
       expenses: totalExpenses.toFixed(2),
       netProfit: (totalRevenue - totalExpenses).toFixed(2),
@@ -90,6 +107,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("Error in /api/clients/stats:", err.message);
-    res.status(500).json({ message: "Failed to load dashboard data" });
+    return res.status(500).json({ message: "Failed to load dashboard data" });
   }
 }

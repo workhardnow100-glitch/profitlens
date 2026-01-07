@@ -1,19 +1,37 @@
 // pages/api/vat/submit.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+
+// Reuse the same classification logic as vat/summary.js
+const EXPENSE_TYPE_HINTS = ["DEB","DR","DB","D","PAY","POS","CARD","CPT","DD","SO","ATM","CHG","FEE","PUR","WITHDRAWAL"];
+const INCOME_TYPE_HINTS = ["CR","CRD","C","BGC","FPI","FPS","DEP","REV","REFUND","SAL","INT"];
+const TRANSFER_TYPE_HINTS = ["TFR","TRANSFER","TFR IN","TFR OUT"];
+
+function classifyTransactionType(rawType, amount) {
+  const type = (rawType || "").toUpperCase().trim();
+  const gross = Number(amount || 0);
+
+  if (TRANSFER_TYPE_HINTS.includes(type)) return "transfer";
+  if (INCOME_TYPE_HINTS.includes(type)) return "income";
+  if (EXPENSE_TYPE_HINTS.includes(type)) return "expense";
+
+  if (gross > 0) return "income";
+  if (gross < 0) return "expense";
+
+  return null;
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
-  // ✅ Validate session
+  // 🔐 Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
 
   const role = (session.user.role || "").toUpperCase();
-
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -23,7 +41,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID (strict)
+  // 🔐 Accountant-aware client ID
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
@@ -35,14 +53,21 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "No client selected" });
   }
 
-  const { periodStart, periodEnd } = req.body;
+  const { periodStart, periodEnd, clientId: bodyClientId } = req.body;
 
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
+  // 🔐 Prevent accountants from spoofing clientId
+  if (role === "ACCOUNTANT" && bodyClientId && bodyClientId !== clientId) {
+    return res.status(403).json({
+      error: "Accountants cannot submit VAT for unauthorized clients",
+    });
+  }
+
   try {
-    // ✅ AUDIT LOG — Accountant submitting VAT
+    // 📝 AUDIT LOG — Accountant submitting VAT
     if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
@@ -55,43 +80,47 @@ export default async function handler(req, res) {
     }
 
     // ---------------------------------------------------------
-    // 1. Fetch VAT transactions
+    // 1. Fetch VAT-relevant transactions (same filter as VAT summary)
     // ---------------------------------------------------------
     const { data: vatTxs, error: txError } = await supabaseAdmin
       .from("transactions")
-      .select("id, business_category, vat_amount, tax_locked, date")
+      .select("id, amount, vat_amount, vat_rate, type, business_category, tax_locked, date")
       .eq("client_id", clientId)
-      .not("vat_amount", "is", null)
       .gte("date", periodStart)
-      .lte("date", periodEnd);
+      .lte("date", periodEnd)
+      .or("vat_rate.not.is.null,vat_amount.not.eq.0");
 
     if (txError) throw txError;
 
     if (!vatTxs || vatTxs.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "No VAT transactions in this period" });
+      return res.status(400).json({ error: "No VAT transactions in this period" });
     }
 
-    // ✅ 2. Recalculate totals server-side
+    // ---------------------------------------------------------
+    // 2. Recalculate totals using the SAME logic as vat/summary.js
+    // ---------------------------------------------------------
     let outputVat = 0;
     let inputVat = 0;
 
-    vatTxs.forEach((tx) => {
+    for (const tx of vatTxs) {
+      const gross = Number(tx.amount || 0);
       const vat = Number(tx.vat_amount || 0);
-      const category = (tx.business_category || "").toLowerCase();
+      const classification = classifyTransactionType(tx.type, gross);
 
-      // Simple rule: treat "sales" as output VAT, everything else as input VAT
-      if (category === "sales") {
-        outputVat += vat;
-      } else {
-        inputVat += vat;
+      if (!classification || classification === "transfer") continue;
+
+      if (classification === "income") {
+        outputVat += Math.abs(vat);
+      } else if (classification === "expense") {
+        inputVat += Math.abs(vat);
       }
-    });
+    }
 
     const netVat = outputVat - inputVat;
 
-    // ✅ 3. Insert submission record
+    // ---------------------------------------------------------
+    // 3. Insert submission record
+    // ---------------------------------------------------------
     const { error: insertError } = await supabaseAdmin
       .from("vat_submissions")
       .insert({
@@ -105,18 +134,22 @@ export default async function handler(req, res) {
 
     if (insertError) throw insertError;
 
-    // ✅ 4. Lock all VAT transactions in this period
+    // ---------------------------------------------------------
+    // 4. Lock ALL VAT-relevant transactions (same filter as VAT summary)
+    // ---------------------------------------------------------
     const { error: lockError } = await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
-      .eq("hmrc_category_id", "vat")
       .gte("date", periodStart)
-      .lte("date", periodEnd);
+      .lte("date", periodEnd)
+      .or("vat_rate.not.is.null,vat_amount.not.eq.0");
 
     if (lockError) throw lockError;
 
-    // ✅ 5. Return success + totals
+    // ---------------------------------------------------------
+    // 5. Return success + totals
+    // ---------------------------------------------------------
     return res.status(200).json({
       success: true,
       message: "VAT return submitted successfully",

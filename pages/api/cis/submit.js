@@ -1,6 +1,6 @@
 // pages/api/cis/submit.js
 import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]"; // adjust path if needed
+import { authOptions } from "../auth/[...nextauth]";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // ✅ Validate session
+  // 🔐 Validate session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user)
     return res.status(401).json({ error: "Unauthorized" });
@@ -28,7 +28,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
+  // 🔐 Accountant-aware client ID
   const actingClientId =
     session.user.actingAsClientId || session.user.clientId;
 
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
-  // ✅ Prevent accountants from spoofing clientId
+  // 🔐 Prevent accountants from spoofing clientId
   if (session.user.role === "accountant" && clientId !== actingClientId) {
     return res.status(403).json({
       error: "Accountants cannot submit CIS for unauthorized clients",
@@ -46,7 +46,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ AUDIT LOG — Accountant submitting CIS
+    // 📝 AUDIT LOG — Accountant submitting CIS
     if (session.user.role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
@@ -58,13 +58,17 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ✅ 1. Fetch CIS transactions for this period
+    // ---------------------------------------------------------
+    // 1. Fetch CIS-relevant transactions
+    // ---------------------------------------------------------
     const { data: cisTxs, error: fetchError } = await supabase
       .from("transactions")
-      .select("id, date, category, vat_amount, cis_amount, tax_locked")
+      .select("id, date, cis_type, cis_amount, tax_locked")
       .eq("client_id", clientId)
       .gte("date", periodStart)
       .lte("date", periodEnd)
+      .not("cis_type", "is", null)
+      .not("cis_amount", "is", null)
       .order("date", { ascending: true });
 
     if (fetchError) throw new Error(fetchError.message);
@@ -75,40 +79,38 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ 2. Check for missing CIS amounts
-    const missing = cisTxs.filter((tx) => tx.cis_amount == null);
-    if (missing.length > 0) {
-      return res.status(400).json({
-        error: "Cannot submit. Some CIS transactions have missing CIS amounts."
-      });
-    }
-
-    // ✅ 3. Compute CIS totals
-    let cisDeducted = 0; // you withheld from subcontractors
-    let cisSuffered = 0; // contractors withheld from you
+    // ---------------------------------------------------------
+    // 2. Compute CIS totals (correct fields)
+    // ---------------------------------------------------------
+    let cisDeducted = 0;
+    let cisSuffered = 0;
 
     cisTxs.forEach((tx) => {
-      if (tx.category === "cis_deducted") {
-        cisDeducted += Number(tx.cis_amount || 0);
-      }
-      if (tx.category === "cis_suffered") {
-        cisSuffered += Number(tx.cis_amount || 0);
-      }
+      const amt = Number(tx.cis_amount || 0);
+
+      if (tx.cis_type === "deducted") cisDeducted += Math.abs(amt);
+      if (tx.cis_type === "suffered") cisSuffered += Math.abs(amt);
     });
 
     const netCis = cisDeducted - cisSuffered;
 
-    // ✅ 4. Lock CIS transactions for the period
+    // ---------------------------------------------------------
+    // 3. Lock ONLY CIS-relevant transactions
+    // ---------------------------------------------------------
     const { error: lockError } = await supabase
       .from("transactions")
       .update({ tax_locked: true })
       .eq("client_id", clientId)
       .gte("date", periodStart)
-      .lte("date", periodEnd);
+      .lte("date", periodEnd)
+      .not("cis_type", "is", null)
+      .not("cis_amount", "is", null);
 
     if (lockError) throw new Error(lockError.message);
 
-    // ✅ 5. Insert CIS submission record
+    // ---------------------------------------------------------
+    // 4. Insert CIS submission record
+    // ---------------------------------------------------------
     const { data: submission, error: insertError } = await supabase
       .from("cis_submissions")
       .insert([
@@ -131,7 +133,9 @@ export default async function handler(req, res) {
 
     if (insertError) throw new Error(insertError.message);
 
-    // ✅ 6. Return HMRC-style response
+    // ---------------------------------------------------------
+    // 5. Return HMRC-style response
+    // ---------------------------------------------------------
     return res.status(200).json({
       success: true,
       hmrcResponse: submission.hmrc_response,

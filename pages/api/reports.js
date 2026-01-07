@@ -41,7 +41,6 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
-// ✅ Unified allowed categories
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -51,7 +50,6 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
-// ✅ Lowercase ignore set for system categories
 const MAP = {
   ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
 };
@@ -61,36 +59,40 @@ export default async function handler(req, res) {
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const isFounder = session.user.role === "admin";
+    const role = (session.user.role || "").toUpperCase();
+    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const isAccountant = role === "ACCOUNTANT";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
       session.user.subscriptionStatus
     );
 
-    if (!(isFounder || isSubscribedOrTrial)) {
+    // ⭐ Correct subscription gating
+    if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ✅ Accountant-aware client ID
-    const clientId =
-      session.user.actingAsClientId || session.user.clientId;
+    // ⭐ Accountant-aware client ID
+    const clientId = isAccountant
+      ? session.user.actingAsClientId
+      : session.user.clientId;
 
-    if (!clientId || clientId === "unknown-client")
+    if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
+    }
 
     const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } =
       req.query;
 
-    // ✅ AUDIT LOG — Accountant viewing reports
-    if (session.user.role === "accountant") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_REPORTS",
-          details: `Viewed reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
-        },
-      ]);
-    }
+    // ⭐ Audit log (all roles)
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
+        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
     const filters = {
       ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
@@ -126,22 +128,15 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      // ✅ Use validated business_category only
       let category = tx.business_category?.trim() || "Uncategorised";
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
-
-      // ✅ Exclude system categories from P&L
       if (MAP.ignore.has(lower)) continue;
 
       const amount = parseFloat(tx.amount || 0);
 
-      // ✅ FIXED: Only income transactions contribute to client dropdown
-      if (amount > 0) {
-        clientSet.add(clientLabel);
-      }
-
+      if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
       categorySet.add(category);
@@ -226,17 +221,16 @@ export default async function handler(req, res) {
       };
     });
 
-    // ✅ AUDIT LOG — Accountant filtered reports
-    if (session.user.role === "accountant") {
-      await supabaseAdmin.from("audit").insert([
-        {
-          client_id: clientId,
-          actor_email: session.user.email,
-          action: "ACCOUNTANT_FILTER_REPORTS",
-          details: `Filtered reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
-        },
-      ]);
-    }
+    // ⭐ Audit filtered reports
+    await supabaseAdmin.from("audit").insert([
+      {
+        client_id: clientId,
+        actor_email: session.user.email,
+        action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
+        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
 
     return res.status(200).json({
       pagination: {
@@ -251,11 +245,7 @@ export default async function handler(req, res) {
         yearly: allYearly,
       },
       transactions: returnedTxs,
-
-      // ✅ FIXED: Only income clients included
       clients: Array.from(clientSet).sort(),
-
-      // ✅ Unified categories
       categories: Array.from(categorySet).sort(),
     });
   } catch (err) {

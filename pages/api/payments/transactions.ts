@@ -1,21 +1,29 @@
+// pages/api/payments/transactions.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Users, Accountants, and Founder can view transactions
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  const { userId, role, clientId, actingAsClientId, accessibleClients } = guard;
 
-  const actingAsClientId = (session.user as any).actingAsClientId || null;
-  const baseClientId = (session.user as any).clientId || null;
-  const activeClientId = actingAsClientId || baseClientId;
-
+  const activeClientId = actingAsClientId || clientId;
   if (!activeClientId) {
     return res.status(400).json({ error: "No active client selected" });
+  }
+
+  // -------------------------------------------------------------
+  // ACCESS CONTROL: Ensure user can access this client
+  // -------------------------------------------------------------
+  if (role === "USER" && clientId !== activeClientId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (role === "ACCOUNTANT" && !accessibleClients.includes(activeClientId)) {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
@@ -49,7 +57,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ============================================================
-    // 3. FETCH MATCHES (THE BRIDGE BETWEEN CHARGES & INVOICES)
+    // 3. FETCH MATCHES
     // ============================================================
     const { data: matches, error: matchesError } = await supabaseAdmin
       .from("payment_matches")
@@ -64,7 +72,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const matchMap = new Map((matches || []).map((m: any) => [m.charge_id, m]));
 
     // ============================================================
-    // 4. FETCH INVOICES BY MATCH (NOT BY INTERNAL CLIENT)
+    // 4. FETCH INVOICES BY MATCH
     // ============================================================
     const invoiceIds = (matches || [])
       .map((m: any) => m.invoice_id)
@@ -83,7 +91,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const invoiceMap = new Map((invoices || []).map((inv: any) => [inv.id, inv]));
 
     // ============================================================
-    // 5. FETCH ALL EXTERNAL CLIENTS REFERENCED BY INVOICES
+    // 5. FETCH EXTERNAL CLIENTS
     // ============================================================
     const externalClientIds = (invoices || [])
       .map((inv: any) => inv.client_id)
@@ -104,12 +112,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     );
 
     // ============================================================
-    // 6. FETCH PAYOUTS (LINKED TO USER, NOT CLIENT)
+    // 6. FETCH PAYOUTS (LINKED TO USER)
     // ============================================================
     const { data: payouts, error: payoutError } = await supabaseAdmin
       .from("payment_payouts")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false });
 
     if (payoutError) {
@@ -143,7 +151,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     // ============================================================
-    // 8. BUILD UNIFIED LEDGER (CORRECT JOIN LOGIC)
+    // 8. BUILD UNIFIED LEDGER
     // ============================================================
     const balanceByCharge = new Map<string, any[]>();
     (balanceItems || []).forEach((b: any) => {
@@ -225,4 +233,3 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   }
 }
-

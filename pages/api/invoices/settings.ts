@@ -1,19 +1,18 @@
 // pages/api/invoices/settings.ts
-
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Only FOUNDER or USER can access/update their invoice settings
+  const guard = await requireRole(req, res, ["FOUNDER", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  const { userId } = guard;
 
-  const userId = session.user.id as string;
-
+  // ---------------------------------------------------------
+  // GET — Load invoice settings
+  // ---------------------------------------------------------
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
@@ -23,12 +22,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .single();
 
       if (error && error.code !== "PGRST116") {
-        // PGRST116 = row not found for single()
         console.error(error);
         return res.status(500).json({ error: "Failed to fetch invoice settings" });
       }
 
-      // Provide sensible defaults if no row yet
+      // Provide sensible defaults if no row exists
       const settings = data || {
         user_id: userId,
         default_payment_terms: "Payment due within 14 days.",
@@ -46,6 +44,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // ---------------------------------------------------------
+  // PUT — Update invoice settings
+  // ---------------------------------------------------------
   if (req.method === "PUT") {
     try {
       const {

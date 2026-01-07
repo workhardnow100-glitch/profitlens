@@ -1,17 +1,17 @@
+// pages/api/invoices/create-payment-link.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Users, Accountants, and Founder can create payment links
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  const { userId, role, accessibleClients } = guard;
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -19,7 +19,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const { invoiceId } = req.body;
-    const userId = session.user.id as string;
 
     if (!invoiceId) {
       return res.status(400).json({ error: "Missing invoiceId" });
@@ -32,7 +31,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .from("invoices")
       .select("*")
       .eq("id", invoiceId)
-      .eq("user_id", userId)
       .single();
 
     if (invoiceError || !invoice) {
@@ -40,14 +38,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Fetch EXTERNAL CLIENT (correct FK: client_id)
+    // ACCESS CONTROL
+    //
+    if (role === "USER" && invoice.user_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (role === "ACCOUNTANT" && !accessibleClients.includes(invoice.client_id)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    //
+    // 2) Fetch EXTERNAL CLIENT
     //
     const { data: externalClient, error: externalClientError } =
       await supabaseAdmin
         .from("external_clients")
         .select("*")
-        .eq("id", invoice.client_id)   // FIXED
-        .eq("owner_id", userId)
+        .eq("id", invoice.client_id)
+        .eq("owner_id", invoice.user_id)
         .single();
 
     if (externalClientError || !externalClient) {
@@ -68,7 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       customer_email: externalClient.contact_email,
       metadata: {
         invoice_id: invoiceId,
-        user_id: userId,
+        user_id: invoice.user_id,
       },
       line_items: [
         {

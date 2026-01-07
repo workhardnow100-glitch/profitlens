@@ -5,7 +5,6 @@ import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 
-// ✅ Build unified allowed category list
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -15,30 +14,18 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
-// ✅ Build lowercase sets for classification
-const MAP = {
-  income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
-  allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
-  disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
-  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
-};
-
 export default async function handler(req, res) {
-  // ✅ Session validation
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
-
-  // ⭐ Subscription / role logic
   const isFounder = role === "ADMIN" || role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  // ⭐ Accountants and founders bypass subscription checks; normal users must be subscribed/trialing
+  // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
@@ -52,9 +39,13 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------------------
-     ✅ PATCH — update category (validated)
+     ⭐ PATCH — update category (business owners only)
   ------------------------------------------------------- */
   if (req.method === "PATCH") {
+    if (isAccountant) {
+      return res.status(403).json({ error: "Accountants cannot modify data" });
+    }
+
     try {
       const { id, category } = req.body || {};
       if (!id || !category)
@@ -74,12 +65,11 @@ export default async function handler(req, res) {
 
       if (updateErr) throw updateErr;
 
-      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "UPDATE_CATEGORY",
+          action: isAccountant ? "ACCOUNTANT_UPDATE_CATEGORY" : "UPDATE_CATEGORY",
           details: `Updated transaction ${id} category to ${category}`,
           timestamp: new Date().toISOString(),
         },
@@ -93,9 +83,13 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------------------
-     ✅ DELETE — delete all transactions
+     ⭐ DELETE — delete all transactions (business owners only)
   ------------------------------------------------------- */
   if (req.method === "DELETE") {
+    if (isAccountant) {
+      return res.status(403).json({ error: "Accountants cannot delete data" });
+    }
+
     try {
       const { count, error } = await supabaseAdmin
         .from("transactions")
@@ -104,12 +98,11 @@ export default async function handler(req, res) {
 
       if (error) throw error;
 
-      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "DELETE_TRANSACTIONS",
+          action: isAccountant ? "ACCOUNTANT_DELETE_TRANSACTIONS" : "DELETE_TRANSACTIONS",
           details: `Deleted ${count} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -123,7 +116,7 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------------------
-     ✅ GET — dashboard data (RAW, MATCHES PROFILE EXACTLY)
+     ⭐ GET — dashboard data (everyone allowed)
   ------------------------------------------------------- */
   if (req.method === "GET") {
     try {
@@ -160,7 +153,6 @@ export default async function handler(req, res) {
 
         if (!categoryBreakdown[category]) categoryBreakdown[category] = 0;
 
-        // ✅ Return business_category, not category
         recent.push({
           id: tx.id,
           date: date.toISOString().slice(0, 10),
@@ -172,7 +164,6 @@ export default async function handler(req, res) {
           storagePath: tx.storage_path || null,
         });
 
-        // ✅ Count EVERYTHING (match Profile)
         if (amount > 0) {
           monthly[monthKey].revenue += amount;
         } else if (amount < 0) {
@@ -188,12 +179,11 @@ export default async function handler(req, res) {
       const totalExpenses = expenses.reduce((a, b) => a + b, 0);
       const netProfit = totalRevenue - totalExpenses;
 
-      // ✅ Audit log
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "FETCH_DASHBOARD",
+          action: isAccountant ? "ACCOUNTANT_FETCH_DASHBOARD" : "FETCH_DASHBOARD",
           details: `Returned ${transactions?.length ?? 0} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -216,6 +206,5 @@ export default async function handler(req, res) {
     }
   }
 
-  // If method not handled
   return res.status(405).json({ error: "Method not allowed" });
 }

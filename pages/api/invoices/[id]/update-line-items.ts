@@ -1,18 +1,15 @@
 // pages/api/invoices/[id]/update-line-items.ts
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
+import { requireRole } from "../../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Founder, Accountant, User
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
-
-  const userId = session.user.id as string;
+  const { userId, role, accessibleClients } = guard;
   const invoiceId = req.query.id as string;
 
   if (req.method !== "PUT") {
@@ -27,13 +24,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 1) Fetch invoice (ownership check)
+    // 1) Fetch invoice (no user filter yet)
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")
       .select("*")
       .eq("id", invoiceId)
-      .eq("user_id", userId)
       .single();
 
     if (invoiceError || !invoice) {
@@ -41,7 +37,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 2) Delete existing line items (clean slate)
+    // 2) ACCESS CONTROL
+    //
+    if (role === "USER" && invoice.user_id !== userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (role === "ACCOUNTANT" && !accessibleClients.includes(invoice.client_id)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    //
+    // 3) Delete existing line items
     //
     const { error: deleteError } = await supabaseAdmin
       .from("invoice_line_items")
@@ -54,7 +61,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 3) Insert new line items
+    // 4) Insert new line items
     //
     const preparedItems = lineItems.map((li: any, index: number) => ({
       id: li.id || undefined,
@@ -81,7 +88,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 4) Recalculate totals
+    // 5) Recalculate totals
     //
     const net = insertedItems.reduce(
       (sum: number, li: any) => sum + Number(li.quantity) * Number(li.unit_price),
@@ -100,7 +107,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const gross = net + tax;
 
     //
-    // 5) Update invoice totals
+    // 6) Update invoice totals
     //
     const { data: updatedInvoice, error: updateError } = await supabaseAdmin
       .from("invoices")
@@ -111,7 +118,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         updated_at: new Date().toISOString(),
       })
       .eq("id", invoiceId)
-      .eq("user_id", userId)
       .select()
       .single();
 
@@ -121,7 +127,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 6) Return updated invoice + items
+    // 7) Return updated invoice + items
     //
     return res.status(200).json({
       invoice: updatedInvoice,

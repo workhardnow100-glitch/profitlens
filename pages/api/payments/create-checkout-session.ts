@@ -4,28 +4,20 @@
 // Creates a Stripe Checkout Session for EXTERNAL CLIENTS to pay
 // an invoice. Applies dynamic platform fees and routes funds to
 // the user's connected Stripe account.
-//
-// Responsibilities:
-// - Fetch invoice + external client
-// - Load payment_settings (platform fees + stripe_account_id)
-// - Validate Stripe Connect onboarding
-// - Calculate platform fee (percent + min + max)
-// - Create Checkout Session with transfer_data.destination
-// - Attach metadata (invoice_id, user_id, client_id)
-// - Return Checkout URL
-//
-// IMPORTANT:
-// This endpoint does NOT process payments. All payment success
-// and failure handling is done in the invoice payment webhook.
 // -------------------------------------------------------------
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  // RBAC: Users, Accountants, and Founder can create checkout sessions
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
+
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
 
@@ -46,7 +38,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(404).json({ error: "Invoice not found" });
 
   // -------------------------------------------------------------
-  // 2. Fetch external client (for email)
+  // 2. Access control: ensure user can access this invoice
+  // -------------------------------------------------------------
+  if (
+    guard.role === "USER" &&
+    invoice.user_id !== guard.userId
+  ) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  if (
+    guard.role === "ACCOUNTANT" &&
+    guard.accessibleClients &&
+    !guard.accessibleClients.includes(invoice.client_id)
+  ) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
+  // -------------------------------------------------------------
+  // 3. Fetch external client (for email)
   // -------------------------------------------------------------
   const { data: externalClient } = await supabaseAdmin
     .from("external_clients")
@@ -55,7 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .maybeSingle();
 
   // -------------------------------------------------------------
-  // 3. Load payment_settings for the invoice owner
+  // 4. Load payment_settings for the invoice owner
   // -------------------------------------------------------------
   const { data: settings, error: settingsError } = await supabaseAdmin
     .from("payment_settings")
@@ -67,7 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Payment settings not found" });
 
   // -------------------------------------------------------------
-  // 4. Validate Stripe Connect onboarding
+  // 5. Validate Stripe Connect onboarding
   // -------------------------------------------------------------
   if (!settings.stripe_account_id || settings.stripe_status !== "verified") {
     return res.status(400).json({
@@ -76,7 +86,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // -------------------------------------------------------------
-  // 5. Calculate platform fee
+  // 6. Calculate platform fee
   // -------------------------------------------------------------
   const subtotal = invoice.total; // already in pence
 
@@ -91,7 +101,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     fee = Math.min(fee, settings.platform_fee_max);
 
   // -------------------------------------------------------------
-  // 6. Create Checkout Session
+  // 7. Create Checkout Session
   // -------------------------------------------------------------
   try {
     const session = await stripe.checkout.sessions.create({

@@ -1,11 +1,11 @@
-// pages/api/mtd/sa/get-obligations.js
+// pages/api/mtd/sa/status.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
 import { createClient } from "../../../../lib/mtd-client";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST")
+  if (req.method !== "GET")
     return res.status(405).json({ error: "Method not allowed" });
 
   // ⭐ Validate session
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   const role = (session.user.role || "").toUpperCase();
 
-  // ⭐ Subscription gating (required for all MTD endpoints)
+  // ⭐ Subscription gating
   const isFounder = session.user.role === "admin";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ⭐ Determine clientId (accountant‑aware)
+  // ⭐ Resolve clientId (accountant‑aware)
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
@@ -40,33 +40,28 @@ export default async function handler(req, res) {
     const mtd = await createClient(clientId);
 
     // ⭐ Guard: no MTD connection
-    if (!mtd || !mtd.mtditid) {
-      return res.status(400).json({ error: "MTD not connected" });
-    }
+    const connected = !!mtd?.mtditid;
 
-    // ⭐ AUDIT LOG — Accountant viewing SA MTD obligations
+    // ⭐ AUDIT LOG — Accountant viewing SA MTD status
     if (role === "ACCOUNTANT") {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: session.user.email,
-          action: "ACCOUNTANT_VIEW_MTD_SA_OBLIGATIONS",
-          details: "Viewed SA MTD obligations",
+          action: "ACCOUNTANT_VIEW_MTD_SA_STATUS",
+          details: `Viewed SA MTD connection status: ${connected ? "connected" : "not connected"}`,
           timestamp: new Date().toISOString(),
         },
       ]);
     }
 
-    // ⭐ Fetch SA obligations from HMRC
-    const obligations = await mtd.getSAObligations();
-
     return res.status(200).json({
       success: true,
-      obligations,
+      connected,
     });
 
   } catch (err) {
-    console.error("SA MTD obligations error:", err);
+    console.error("SA MTD status error:", err);
     return res.status(500).json({ error: err.message });
   }
 }

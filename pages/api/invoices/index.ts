@@ -1,22 +1,18 @@
 // pages/api/invoices/index.ts
-
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
+  // RBAC: Users, Accountants, and Founder can create/list invoices
+  const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
+  if (!guard.ok) return;
 
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
-
-  const userId = session.user.id as string;
+  const { userId, role, accessibleClients } = guard;
 
   //
   // ---------------------------------------------------------
-  // POST — CREATE INVOICE (Stripe temporarily disabled)
+  // POST — CREATE INVOICE
   // ---------------------------------------------------------
   //
   if (req.method === "POST") {
@@ -35,6 +31,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!clientId) {
         return res.status(400).json({ error: "Missing clientId" });
+      }
+
+      // ACCESS CONTROL
+      if (role === "USER") {
+        // User can only create invoices for their own business
+        const { data: client } = await supabaseAdmin
+          .from("external_clients")
+          .select("owner_id")
+          .eq("id", clientId)
+          .single();
+
+        if (!client || client.owner_id !== userId) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
+      if (role === "ACCOUNTANT" && !accessibleClients.includes(clientId)) {
+        return res.status(403).json({ error: "Forbidden" });
       }
 
       if (!Array.isArray(lineItems) || lineItems.length === 0) {
@@ -117,13 +131,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to create line items" });
       }
 
-      //
-      // 3) Return invoice WITHOUT Stripe payment link (for now)
-      //
       return res.status(201).json({
         invoice: {
           ...invoice,
-          stripe_payment_link_url: null, // placeholder until Stripe is re-enabled
+          stripe_payment_link_url: null,
         },
       });
     } catch (err) {
@@ -134,17 +145,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   //
   // ---------------------------------------------------------
-  // GET — LIST INVOICES (pure Supabase, always works)
+  // GET — LIST INVOICES
   // ---------------------------------------------------------
   //
   if (req.method === "GET") {
     try {
       const { status, q } = req.query;
 
-      let query = supabaseAdmin
-        .from("invoices")
-        .select("*")
-        .eq("user_id", userId);
+      let query = supabaseAdmin.from("invoices").select("*");
+
+      // ACCESS CONTROL
+      if (role === "USER") {
+        query = query.eq("user_id", userId);
+      }
+
+      if (role === "ACCOUNTANT") {
+        query = query.in("client_id", accessibleClients);
+      }
 
       if (status && status !== "all") {
         query = query.eq("status", status);

@@ -12,16 +12,20 @@
 // payments, payouts, Connect events, or invoices.
 // -------------------------------------------------------------
 
+// pages/api/payments/webhook-status.ts
+// -------------------------------------------------------------
+// PURPOSE:
+// Returns webhook health information for the Payment Settings UI.
+// -------------------------------------------------------------
+
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorised" });
-  }
+  // RBAC: Only the FOUNDER can view webhook health
+  const guard = await requireRole(req, res, ["FOUNDER"]);
+  if (!guard.ok) return;
 
   try {
     // Load the last 50 webhook log entries
