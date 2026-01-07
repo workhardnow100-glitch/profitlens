@@ -9,7 +9,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   // RBAC: founder, admin, accountant
-  const guard = await requireRole(req, res, ["ADMIN", "ACCOUNTANT", "FOUNDER"]);
+  const guard = await requireRole(req, res, ["USER", "ADMIN", "ACCOUNTANT", "FOUNDER"]);
+
   if (!guard.ok) return;
 
   const { clientId, role, accessibleClients } = guard;
