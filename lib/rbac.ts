@@ -12,7 +12,7 @@ type GuardResult =
       role: Role;
       clientId: string | null;
       actingAsClientId: string | null;
-      accessibleClients: string[]; // ⭐ Added
+      accessibleClients: string[];
     }
   | { ok: false };
 
@@ -30,18 +30,25 @@ export async function requireRole(
 
   const role = (session.user.role || "USER").toUpperCase() as Role;
 
-  if (!allowedRoles.includes(role)) {
+  // ⭐ Founder bypass — founders are ALWAYS allowed
+  const isFounder = role === "FOUNDER";
+
+  if (!allowedRoles.includes(role) && !isFounder) {
     res.status(403).json({ error: "Forbidden" });
     return { ok: false };
   }
+
+  // ⭐ Founders do NOT require a clientId
+  const clientId = isFounder
+    ? null
+    : ((session.user as any).clientId ?? null);
 
   return {
     ok: true,
     userId: session.user.id as string,
     role,
-    clientId: (session.user as any).clientId ?? null,
+    clientId,
     actingAsClientId: (session.user as any).actingAsClientId ?? null,
-    accessibleClients: (session.user as any).accessibleClients ?? [], // ⭐ Added
+    accessibleClients: (session.user as any).accessibleClients ?? [],
   };
 }
-
