@@ -14,13 +14,13 @@ type PaymentSettingsResponse = {
   platformFeePercent: number | null;
   platformFeeMin: number | null;
   platformFeeMax: number | null;
-  paymentMethods: {
+  paymentMethods?: {
     card: boolean;
     applePay: boolean;
     googlePay: boolean;
     bankTransfer: boolean;
     payByLink: boolean;
-  };
+  } | null;
   webhook: {
     lastEventAt: string | null;
     lastErrorAt: string | null;
@@ -52,6 +52,28 @@ export default function PaymentSettingsPage() {
     load();
   }, []);
 
+  if (loading) {
+    return <div className="p-6">Loading payment settings…</div>;
+  }
+
+  if (!data) {
+    return (
+      <div className="p-6 text-red-600">
+        Failed to load payment settings.
+      </div>
+    );
+  }
+
+  // ✅ Safe default to avoid undefined.paymentMethods access
+  const paymentMethods =
+    data.paymentMethods ?? {
+      card: false,
+      applePay: false,
+      googlePay: false,
+      bankTransfer: false,
+      payByLink: false,
+    };
+
   const handleConnectStripe = async () => {
     try {
       setConnecting(true);
@@ -74,7 +96,7 @@ export default function PaymentSettingsPage() {
       await fetch("/api/payments/update-methods", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data.paymentMethods),
+        body: JSON.stringify(paymentMethods),
       });
     } catch (e) {
       console.error("Failed to save payment methods", e);
@@ -103,14 +125,6 @@ export default function PaymentSettingsPage() {
     }
   };
 
-  if (loading) {
-    return <div className="p-6">Loading payment settings…</div>;
-  }
-
-  if (!data) {
-    return <div className="p-6 text-red-600">Failed to load payment settings.</div>;
-  }
-
   const statusLabel =
     data.stripeStatus === "not_connected"
       ? "Not connected"
@@ -128,14 +142,18 @@ export default function PaymentSettingsPage() {
           Get Paid Faster. Get Paid Automatically.
         </h1>
         <p className="text-slate-200">
-          ProfitLens connects your invoices, Stripe payments, and payouts into one cockpit.
-          When your customers pay, Stripe deposits funds directly into your bank account
-          — ProfitLens orchestrates everything and keeps your ledger perfectly reconciled.
+          ProfitLens connects your invoices, Stripe payments, and payouts into
+          one cockpit. When your customers pay, Stripe deposits funds directly
+          into your bank account — ProfitLens orchestrates everything and keeps
+          your ledger perfectly reconciled.
         </p>
         <ul className="list-disc list-inside text-slate-200 space-y-1">
           <li>No manual reconciliation or spreadsheets.</li>
           <li>Every charge, fee, refund, and payout is tracked automatically.</li>
-          <li>Your accountant gets a complete, audit‑ready view without chasing you.</li>
+          <li>
+            Your accountant gets a complete, audit‑ready view without chasing
+            you.
+          </li>
         </ul>
       </section>
 
@@ -145,8 +163,9 @@ export default function PaymentSettingsPage() {
           <div>
             <h2 className="text-lg font-semibold">Stripe Connect</h2>
             <p className="text-sm text-slate-600">
-              Connect Stripe to receive invoice payments directly into your bank account.
-              ProfitLens never holds your funds — we just keep everything in sync.
+              Connect Stripe to receive invoice payments directly into your bank
+              account. ProfitLens never holds your funds — we just keep
+              everything in sync.
             </p>
           </div>
           <span className="px-3 py-1 text-xs rounded-full bg-slate-100 text-slate-700">
@@ -157,8 +176,9 @@ export default function PaymentSettingsPage() {
         {data.stripeStatus === "not_connected" ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-700">
-              Once connected, Stripe will handle identity verification and payouts. ProfitLens
-              will automatically match every payment to the correct invoice and client.
+              Once connected, Stripe will handle identity verification and
+              payouts. ProfitLens will automatically match every payment to the
+              correct invoice and client.
             </p>
             <button
               onClick={handleConnectStripe}
@@ -226,29 +246,32 @@ export default function PaymentSettingsPage() {
       <section className="border rounded-xl p-6 space-y-3 bg-slate-50">
         <h2 className="text-lg font-semibold">Why use ProfitLens invoicing?</h2>
         <p className="text-sm text-slate-700">
-          ProfitLens doesn’t just send invoices — it closes the loop. Every invoice, payment,
-          fee, refund, and payout is tied together in your Transactions Ledger and Tax Hub.
+          ProfitLens doesn’t just send invoices — it closes the loop. Every
+          invoice, payment, fee, refund, and payout is tied together in your
+          Transactions Ledger and Tax Hub.
         </p>
         <ul className="list-disc list-inside text-sm text-slate-700 space-y-1">
           <li>
-            <span className="font-medium">Smart matching:</span> Payments are matched to invoices
-            using amount, reference, metadata, email, and timing.
+            <span className="font-medium">Smart matching:</span> Payments are
+            matched to invoices using amount, reference, metadata, email, and
+            timing.
           </li>
           <li>
-            <span className="font-medium">Recurring invoicing:</span> Set up weekly, monthly, or
-            custom recurring invoices — ProfitLens generates, sends, and tracks them automatically.
+            <span className="font-medium">Recurring invoicing:</span> Set up
+            weekly, monthly, or custom recurring invoices — ProfitLens
+            generates, sends, and tracks them automatically.
           </li>
           <li>
-            <span className="font-medium">Payment links:</span> Every invoice includes a secure
-            payment link so customers can pay instantly.
+            <span className="font-medium">Payment links:</span> Every invoice
+            includes a secure payment link so customers can pay instantly.
           </li>
           <li>
-            <span className="font-medium">Automatic reminders:</span> Reduce late payments with
-            pre‑due and post‑due reminders.
+            <span className="font-medium">Automatic reminders:</span> Reduce
+            late payments with pre‑due and post‑due reminders.
           </li>
           <li>
-            <span className="font-medium">Audit‑ready:</span> Every invoice has a full timeline:
-            created, sent, viewed, paid, matched, reconciled.
+            <span className="font-medium">Audit‑ready:</span> Every invoice has
+            a full timeline: created, sent, viewed, paid, matched, reconciled.
           </li>
         </ul>
       </section>
@@ -266,8 +289,8 @@ export default function PaymentSettingsPage() {
           </button>
         </div>
         <p className="text-sm text-slate-700">
-          Choose how your customers can pay your ProfitLens invoices. These options are applied
-          to payment links and checkout flows.
+          Choose how your customers can pay your ProfitLens invoices. These
+          options are applied to payment links and checkout flows.
         </p>
         <div className="grid gap-3 md:grid-cols-2 text-sm">
           {[
@@ -280,14 +303,14 @@ export default function PaymentSettingsPage() {
             <label key={m.key} className="flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={(data.paymentMethods as any)[m.key]}
+                checked={paymentMethods[m.key as keyof typeof paymentMethods]}
                 onChange={(e) =>
                   setData((prev) =>
                     prev
                       ? {
                           ...prev,
                           paymentMethods: {
-                            ...prev.paymentMethods,
+                            ...(prev.paymentMethods ?? paymentMethods),
                             [m.key]: e.target.checked,
                           },
                         }
@@ -316,8 +339,9 @@ export default function PaymentSettingsPage() {
           </div>
 
           <p className="text-sm text-slate-700">
-            If you choose to charge a platform fee on payments processed through ProfitLens,
-            it will be automatically deducted before funds reach your bank account.
+            If you choose to charge a platform fee on payments processed through
+            ProfitLens, it will be automatically deducted before funds reach
+            your bank account.
           </p>
 
           <div className="grid gap-3 md:grid-cols-3 text-sm">
@@ -329,7 +353,12 @@ export default function PaymentSettingsPage() {
                 value={data.platformFeePercent ?? ""}
                 onChange={(e) =>
                   setData((prev) =>
-                    prev ? { ...prev, platformFeePercent: Number(e.target.value) } : prev
+                    prev
+                      ? {
+                          ...prev,
+                          platformFeePercent: Number(e.target.value),
+                        }
+                      : prev
                   )
                 }
                 className="w-full border rounded-md px-2 py-1 text-sm"
@@ -337,14 +366,21 @@ export default function PaymentSettingsPage() {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-600 mb-1">Min fee (£)</label>
+              <label className="block text-xs text-slate-600 mb-1">
+                Min fee (£)
+              </label>
               <input
                 type="number"
                 step="0.01"
                 value={data.platformFeeMin ?? ""}
                 onChange={(e) =>
                   setData((prev) =>
-                    prev ? { ...prev, platformFeeMin: Number(e.target.value) } : prev
+                    prev
+                      ? {
+                          ...prev,
+                          platformFeeMin: Number(e.target.value),
+                        }
+                      : prev
                   )
                 }
                 className="w-full border rounded-md px-2 py-1 text-sm"
@@ -352,14 +388,21 @@ export default function PaymentSettingsPage() {
             </div>
 
             <div>
-              <label className="block text-xs text-slate-600 mb-1">Max fee (£)</label>
+              <label className="block text-xs text-slate-600 mb-1">
+                Max fee (£)
+              </label>
               <input
                 type="number"
                 step="0.01"
                 value={data.platformFeeMax ?? ""}
                 onChange={(e) =>
                   setData((prev) =>
-                    prev ? { ...prev, platformFeeMax: Number(e.target.value) } : prev
+                    prev
+                      ? {
+                          ...prev,
+                          platformFeeMax: Number(e.target.value),
+                        }
+                      : prev
                   )
                 }
                 className="w-full border rounded-md px-2 py-1 text-sm"
@@ -373,8 +416,9 @@ export default function PaymentSettingsPage() {
       <section className="border rounded-xl p-6 space-y-3 bg-slate-50">
         <h2 className="text-lg font-semibold">Stripe Webhook Health</h2>
         <p className="text-sm text-slate-700">
-          ProfitLens listens to Stripe webhooks for charges, payouts, refunds, and disputes.
-          If webhooks stop flowing, your ledger and payouts may fall out of sync.
+          ProfitLens listens to Stripe webhooks for charges, payouts, refunds,
+          and disputes. If webhooks stop flowing, your ledger and payouts may
+          fall out of sync.
         </p>
         <div className="grid gap-3 md:grid-cols-3 text-sm">
           <p>
@@ -394,8 +438,9 @@ export default function PaymentSettingsPage() {
 
       {/* Footer reassurance */}
       <section className="text-sm text-slate-600">
-        ProfitLens handles the heavy lifting — Stripe moves the money, we keep every invoice,
-        payment, fee, refund, and payout perfectly aligned for you and your accountant.
+        ProfitLens handles the heavy lifting — Stripe moves the money, we keep
+        every invoice, payment, fee, refund, and payout perfectly aligned for
+        you and your accountant.
       </section>
     </div>
   );
