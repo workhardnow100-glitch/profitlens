@@ -1,4 +1,3 @@
-// pages/settings/account.tsx
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { supabase } from "../../lib/supabase-client";
@@ -78,155 +77,101 @@ export default function AccountSettingsPage() {
       </div>
 
       {/* USER INFO */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-4">
+      <div className="bg-white shadow rounded-lg p-6 space-y-6">
         <h2 className="text-xl font-semibold">User Information</h2>
-        <p className="text-gray-500 text-sm">Read‑only profile details.</p>
-
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm text-gray-600">Name</label>
-            <div className="font-medium">{user?.name}</div>
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-600">Email</label>
-            <div className="font-medium">{user?.email}</div>
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-600">Role</label>
-            <div className="font-medium">{user?.role}</div>
-          </div>
-
-          <div>
-            <label className="text-sm text-gray-600">Subscription</label>
-            <div className="font-medium capitalize">
-              {user?.subscriptionStatus}
+          {[
+            { label: "Name", value: user?.name },
+            { label: "Email", value: user?.email },
+            { label: "Role", value: user?.role },
+            { label: "Subscription", value: user?.subscriptionStatus },
+            { label: "Client ID", value: user?.clientId },
+          ].map(({ label, value }) => (
+            <div key={label} className="border rounded-md p-3 bg-gray-50">
+              <div className="text-sm text-gray-600">{label}</div>
+              <div className="font-medium text-gray-800">{value || "—"}</div>
             </div>
-          </div>
+          ))}
         </div>
       </div>
 
       {/* BUSINESS INFO */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-6">
-        <h2 className="text-xl font-semibold">Business Information</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            "business_name",
-            "trading_name",
-            "industry",
-            "business_type",
-            "website",
-          ].map((field) => (
-            <div key={field}>
-              <label className="text-sm text-gray-600">
-                {field.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </label>
-              <input
-                className="input"
-                value={client[field] || ""}
-                onChange={(e) =>
-                  setClient({ ...client, [field]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-
-          <div className="md:col-span-2">
-            <label className="text-sm text-gray-600">Notes</label>
-            <textarea
-              className="input h-24"
-              value={client.notes || ""}
-              onChange={(e) =>
-                setClient({ ...client, notes: e.target.value })
-              }
-            />
-          </div>
-        </div>
-      </div>
+      <Section title="Business Information">
+        {[
+          "business_name",
+          "trading_name",
+          "industry",
+          "business_type",
+          "website",
+        ].map((field) => (
+          <FieldBox
+            key={field}
+            label={formatLabel(field)}
+            value={client[field]}
+            onChange={(val) => setClient({ ...client, [field]: val })}
+          />
+        ))}
+        <FieldBox
+          label="Notes"
+          value={client.notes}
+          onChange={(val) => setClient({ ...client, notes: val })}
+          textarea
+          full
+        />
+      </Section>
 
       {/* CONTACT */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-6">
-        <h2 className="text-xl font-semibold">Contact Details</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            "email",
-            "phone",
-            "contact_person",
-            "contact_phone",
-            "contact_email",
-          ].map((field) => (
-            <div key={field}>
-              <label className="text-sm text-gray-600">
-                {field.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </label>
-              <input
-                className="input"
-                value={client[field] || ""}
-                onChange={(e) =>
-                  setClient({ ...client, [field]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-        </div>
-      </div>
+      <Section title="Contact Details">
+        {[
+          "email",
+          "phone",
+          "contact_person",
+          "contact_phone",
+          "contact_email",
+        ].map((field) => (
+          <FieldBox
+            key={field}
+            label={formatLabel(field)}
+            value={client[field]}
+            onChange={(val) => setClient({ ...client, [field]: val })}
+          />
+        ))}
+      </Section>
 
       {/* ADDRESS */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-6">
-        <h2 className="text-xl font-semibold">Address</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            "address",
-            "postcode",
-            "registered_address",
-          ].map((field) => (
-            <div key={field} className={field === "address" || field === "registered_address" ? "md:col-span-2" : ""}>
-              <label className="text-sm text-gray-600">
-                {field.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </label>
-              <input
-                className="input"
-                value={client[field] || ""}
-                onChange={(e) =>
-                  setClient({ ...client, [field]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-        </div>
-      </div>
+      <Section title="Address">
+        {[
+          "address",
+          "postcode",
+          "registered_address",
+        ].map((field) => (
+          <FieldBox
+            key={field}
+            label={formatLabel(field)}
+            value={client[field]}
+            onChange={(val) => setClient({ ...client, [field]: val })}
+            full={field !== "postcode"}
+          />
+        ))}
+      </Section>
 
       {/* LEGAL */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-6">
-        <h2 className="text-xl font-semibold">Legal Details</h2>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            "company_number",
-            "utr_number",
-            "vat_number",
-            "nino",
-            "mtditsa_id",
-          ].map((field) => (
-            <div key={field}>
-              <label className="text-sm text-gray-600">
-                {field.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-              </label>
-              <input
-                className="input"
-                value={client[field] || ""}
-                onChange={(e) =>
-                  setClient({ ...client, [field]: e.target.value })
-                }
-              />
-            </div>
-          ))}
-        </div>
-      </div>
+      <Section title="Legal Details">
+        {[
+          "company_number",
+          "utr_number",
+          "vat_number",
+          "nino",
+          "mtditsa_id",
+        ].map((field) => (
+          <FieldBox
+            key={field}
+            label={formatLabel(field)}
+            value={client[field]}
+            onChange={(val) => setClient({ ...client, [field]: val })}
+          />
+        ))}
+      </Section>
 
       {/* SAVE */}
       <div className="flex justify-end">
@@ -239,4 +184,56 @@ export default function AccountSettingsPage() {
       </div>
     </div>
   );
+}
+
+// 🔹 Utility Components
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white shadow rounded-lg p-6 space-y-6">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
+    </div>
+  );
+}
+
+function FieldBox({
+  label,
+  value,
+  onChange,
+  textarea = false,
+  full = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  textarea?: boolean;
+  full?: boolean;
+}) {
+  return (
+    <div className={`${full ? "md:col-span-2" : ""}`}>
+      <div className="border rounded-md p-3 bg-gray-50 space-y-1">
+        <div className="text-sm text-gray-600">{label}</div>
+        {textarea ? (
+          <textarea
+            className="w-full bg-white border border-gray-300 rounded-md p-2 text-sm"
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        ) : (
+          <input
+            className="w-full bg-white border border-gray-300 rounded-md p-2 text-sm"
+            value={value || ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function formatLabel(field: string) {
+  return field
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
