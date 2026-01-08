@@ -1,3 +1,6 @@
+//// cron job every 5 mins tested via vercel.josn 
+
+
 import { supabaseAdmin } from "../supabase-admin";
 import { createInvoiceFromSchedule } from "../invoices/createInvoiceFromSchedule";
 
