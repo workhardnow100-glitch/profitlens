@@ -70,38 +70,43 @@ export default function RecurringInvoiceDetailPage() {
 
 
   // Load schedule
-  useEffect(() => {
-    if (!user || !id) return;
+useEffect(() => {
+  // Wait until user is loaded
+  if (!user) return;
 
-    async function load() {
-      const res = await fetch(`/api/recurring-invoices/${id}`);
-      const data = await res.json();
+  // Ensure id is a stable string (Next.js sometimes gives undefined → array → string)
+  if (!id || typeof id !== "string") return;
 
-      if (!res.ok || !data.recurring) {
-        setRecord(null);
-        return;
-      }
+  async function load() {
+    const res = await fetch(`/api/recurring-invoices/${id}`);
+    const data = await res.json();
 
-      const r: RecurringRecord = data.recurring;
-
-      setRecord(r);
-      setClientId(r.client_id);
-      setFrequencyType(r.frequency_type);
-      setInterval(r.interval || 1);
-      setDayOfWeek(r.day_of_week);
-      setDayOfMonth(r.day_of_month);
-      setCustomRule(r.custom_rule || "");
-      setStartDate(r.start_date?.slice(0, 10) || "");
-      setNextRunDate(r.next_run_date?.slice(0, 10) || "");
-      setEndDate(r.end_date?.slice(0, 10) || "");
-      setLineItems(r.template_line_items || []);
-      setPaymentInstructions(r.template_payment_instructions || "");
-      setNotesToClient(r.template_notes || "");
-      setActive(r.active);
+    if (!res.ok || !data.recurring) {
+      setRecord(null);
+      return;
     }
 
-    load();
-  }, [user, id]);
+    const r: RecurringRecord = data.recurring;
+
+    setRecord(r);
+    setClientId(r.client_id);
+    setFrequencyType(r.frequency_type);
+    setInterval(r.interval || 1);
+    setDayOfWeek(r.day_of_week);
+    setDayOfMonth(r.day_of_month);
+    setCustomRule(r.custom_rule || "");
+    setStartDate(r.start_date?.slice(0, 10) || "");
+    setNextRunDate(r.next_run_date?.slice(0, 10) || "");
+    setEndDate(r.end_date?.slice(0, 10) || "");
+    setLineItems(r.template_line_items || []);
+    setPaymentInstructions(r.template_payment_instructions || "");
+    setNotesToClient(r.template_notes || "");
+    setActive(r.active);
+  }
+
+  load();
+}, [user, id]);
+
 
   const nextRunPreview = useMemo(
     () => nextRunDate || startDate || "Not set",
