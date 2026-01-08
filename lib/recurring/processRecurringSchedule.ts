@@ -31,28 +31,29 @@ export async function processRecurringSchedule(schedule: any) {
     return;
   }
 
-  // ⭐ 3. Validate BUSINESS OWNER (user_id) is subscribed
-  const { data: user, error: userErr } = await supabaseAdmin
+  // ⭐ 3. Validate BUSINESS OWNER exists (correct column: owner_id)
+  const { data: business, error: businessErr } = await supabaseAdmin
     .from("clients")
     .select("id, subscription_status")
-    .eq("id", user_id)
+    .eq("owner_id", user_id)
     .single();
 
-  if (userErr || !user) {
+  if (businessErr || !business) {
     await logFailure(scheduleId, client_id, user_id, "Business owner not found");
     return;
   }
 
+  // ⭐ 4. Validate subscription
   const isSubscribed = ["basic", "pro", "trialing"].includes(
-    user.subscription_status
+    business.subscription_status
   );
 
   if (!isSubscribed) {
-    await logFailure(scheduleId, client_id, user_id, "Business owner not subscribed");
+    await logFailure(scheduleId, client_id, user_id, "Business not subscribed");
     return;
   }
 
-  // ⭐ 4. Create invoice
+  // ⭐ 5. Create invoice
   let invoice;
   try {
     invoice = await createInvoiceFromSchedule(schedule);
@@ -66,7 +67,7 @@ export async function processRecurringSchedule(schedule: any) {
     return;
   }
 
-  // ⭐ 5. Log successful run
+  // ⭐ 6. Log successful run
   await supabaseAdmin.from("recurring_invoice_runs").insert({
     recurring_invoice_id: scheduleId,
     user_id,
@@ -76,14 +77,14 @@ export async function processRecurringSchedule(schedule: any) {
     error_message: null,
   });
 
-  // ⭐ 6. Compute next run date
+  // ⭐ 7. Compute next run date
   const nextRun = safeComputeNextRunDate(
     next_run_date,
     frequency_type,
     interval
   );
 
-  // ⭐ 7. Update schedule
+  // ⭐ 8. Update schedule
   await supabaseAdmin
     .from("recurring_invoices")
     .update({
@@ -121,7 +122,6 @@ async function logFailure(
     },
   ]);
 
-  // Unlock schedule
   await supabaseAdmin
     .from("recurring_invoices")
     .update({ processing: false })
