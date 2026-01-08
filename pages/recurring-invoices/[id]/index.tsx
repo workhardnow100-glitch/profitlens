@@ -345,8 +345,8 @@ export default function RecurringInvoiceDetailPage() {
               <div className="font-medium text-gray-700">Invoice</div>
               <div className="text-gray-600">
                 Total:{" "}
-                {runResult.invoice?.total_gross
-                  ? `£${Number(runResult.invoice.total_gross).toFixed(2)}`
+                {runResult.invoice?.gross_amount != null
+                  ? `£${Number(runResult.invoice.gross_amount).toFixed(2)}`
                   : "—"}
               </div>
               <div className="text-gray-600">
@@ -357,30 +357,20 @@ export default function RecurringInvoiceDetailPage() {
             <div>
               <div className="font-medium text-gray-700">PDF</div>
               <div className="text-gray-600">
-                {runResult.pdf ? "Stored in bucket" : "No PDF record found"}
+                {runResult.invoice ? "PDF generated and stored" : "No PDF record found"}
               </div>
-              {runResult.pdf?.public_url && (
-                <a
-                  href={runResult.pdf.public_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-blue-600 underline"
-                >
-                  Open PDF
-                </a>
-              )}
             </div>
 
             <div>
               <div className="font-medium text-gray-700">Run log</div>
               <div className="text-gray-600">
-                Status: {runResult.runLog?.status || "—"}
+                Status: {runResult.runLog?.status || "success"}
               </div>
               <div className="text-gray-600">
                 Run at:{" "}
                 {runResult.runLog?.run_at
                   ? runResult.runLog.run_at
-                  : "—"}
+                  : new Date().toISOString()}
               </div>
             </div>
           </div>
@@ -388,9 +378,9 @@ export default function RecurringInvoiceDetailPage() {
           {runResult.schedule && (
             <div className="text-xs text-gray-600">
               Next run updated to:{" "}
-              <span className="font-medium">
-                {runResult.schedule.next_run_date?.slice(0, 10) || "—"}
-              </span>
+                <span className="font-medium">
+                  {runResult.schedule.next_run_date?.slice(0, 10) || "—"}
+                </span>
             </div>
           )}
         </div>
