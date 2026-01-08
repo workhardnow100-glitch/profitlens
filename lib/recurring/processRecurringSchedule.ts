@@ -19,28 +19,40 @@ export async function processRecurringSchedule(schedule: any) {
     return;
   }
 
-  // ⭐ 2. Validate client exists + subscription status
-  const { data: client, error: clientErr } = await supabaseAdmin
-    .from("clients")
-    .select("id, subscription_status")
+  // ⭐ 2. Validate EXTERNAL client exists
+  const { data: extClient, error: extErr } = await supabaseAdmin
+    .from("external_clients")
+    .select("id")
     .eq("id", client_id)
     .single();
 
-  if (clientErr || !client) {
-    await logFailure(scheduleId, client_id, user_id, "Client not found");
+  if (extErr || !extClient) {
+    await logFailure(scheduleId, client_id, user_id, "External client not found");
+    return;
+  }
+
+  // ⭐ 3. Validate BUSINESS OWNER (user_id) is subscribed
+  const { data: user, error: userErr } = await supabaseAdmin
+    .from("clients")
+    .select("id, subscription_status")
+    .eq("id", user_id)
+    .single();
+
+  if (userErr || !user) {
+    await logFailure(scheduleId, client_id, user_id, "Business owner not found");
     return;
   }
 
   const isSubscribed = ["basic", "pro", "trialing"].includes(
-    client.subscription_status
+    user.subscription_status
   );
 
   if (!isSubscribed) {
-    await logFailure(scheduleId, client_id, user_id, "Client not subscribed");
+    await logFailure(scheduleId, client_id, user_id, "Business owner not subscribed");
     return;
   }
 
-  // ⭐ 3. Create invoice (with error capture)
+  // ⭐ 4. Create invoice
   let invoice;
   try {
     invoice = await createInvoiceFromSchedule(schedule);
@@ -54,7 +66,7 @@ export async function processRecurringSchedule(schedule: any) {
     return;
   }
 
-  // ⭐ 4. Log successful run
+  // ⭐ 5. Log successful run
   await supabaseAdmin.from("recurring_invoice_runs").insert({
     recurring_invoice_id: scheduleId,
     user_id,
@@ -64,14 +76,14 @@ export async function processRecurringSchedule(schedule: any) {
     error_message: null,
   });
 
-  // ⭐ 5. Compute next run date safely
+  // ⭐ 6. Compute next run date
   const nextRun = safeComputeNextRunDate(
     next_run_date,
     frequency_type,
     interval
   );
 
-  // ⭐ 6. Update schedule
+  // ⭐ 7. Update schedule
   await supabaseAdmin
     .from("recurring_invoices")
     .update({
@@ -140,4 +152,3 @@ function safeComputeNextRunDate(
 
   return d.toISOString().slice(0, 10);
 }
- 
