@@ -56,18 +56,18 @@ export default function RecurringInvoiceDetailPage() {
   const [runError, setRunError] = useState<string | null>(null);
 
   // Load clients
-  useEffect(() => {
-    if (!user || !loadingClients) return;
+ useEffect(() => {
+  if (!user) return;
+  if (!loadingClients) return;
 
-    async function loadClients() {
-      const res = await fetch("/api/external-clients");
-      const data = await res.json();
-      setExternalClients(data.externalClients || []);
-      setLoadingClients(false);
-    }
+  (async () => {
+    const res = await fetch("/api/external-clients");
+    const data = await res.json();
+    setExternalClients(data.externalClients || []);
+    setLoadingClients(false);
+  })();
+}, [user, loadingClients]);
 
-    loadClients();
-  }, [user, loadingClients]);
 
   // Load schedule
   useEffect(() => {
