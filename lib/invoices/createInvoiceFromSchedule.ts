@@ -5,7 +5,7 @@ import { sendMail } from "../email/smtp";
 import { buildInvoiceEmail } from "../email/templates/invoiceEmail";
 
 // -------------------------------------------------------------
-// 1. Generate next invoice number (INV-1, INV-2, INV-3…)
+// 1. Generate next invoice number
 // -------------------------------------------------------------
 async function generateNextInvoiceNumber(userId: string) {
   const { data: settings } = await supabaseAdmin
@@ -24,9 +24,7 @@ async function generateNextInvoiceNumber(userId: string) {
     .limit(1)
     .maybeSingle();
 
-  if (!lastInvoice?.invoice_number) {
-    return `${prefix}1`;
-  }
+  if (!lastInvoice?.invoice_number) return `${prefix}1`;
 
   const match = lastInvoice.invoice_number.match(/(\d+)$/);
   const lastNumber = match ? parseInt(match[1], 10) : 0;
@@ -35,7 +33,7 @@ async function generateNextInvoiceNumber(userId: string) {
 }
 
 // -------------------------------------------------------------
-// 2. Compute net, tax, gross
+// 2. Compute totals
 // -------------------------------------------------------------
 function computeTotals(items: any[]) {
   let net = 0;
@@ -44,7 +42,6 @@ function computeTotals(items: any[]) {
   for (const item of items) {
     const lineNet = item.quantity * item.unit_price;
     const lineTax = (lineNet * (item.vat_rate || 0)) / 100;
-
     net += lineNet;
     tax += lineTax;
   }
@@ -61,33 +58,33 @@ function computeTotals(items: any[]) {
 // -------------------------------------------------------------
 export async function createInvoiceFromSchedule(schedule: any) {
   const {
-    user_id,
-    client_id, // external client
+    user_id,                     // platform user (sender)
+    client_id,                   // external client (recipient)
     template_line_items,
     template_payment_instructions,
-    template_payment_terms,     // NEW COLUMN YOU ADDED
+    template_payment_terms,
     template_notes,
     id: scheduleId,
   } = schedule;
 
-  const now = new Date();
-  const todayISO = now.toISOString().split("T")[0];
+  const todayISO = new Date().toISOString().split("T")[0];
 
   // -------------------------------------------------------------
-  // A) Validate business (subscription)
+  // A) Fetch sender business profile (CORRECT LOOKUP)
   // -------------------------------------------------------------
-  const { data: business, error: businessErr } = await supabaseAdmin
+  const { data: senderClient, error: senderErr } = await supabaseAdmin
     .from("clients")
-    .select("id, subscription_status, business_name")
-    .eq("owner_id", user_id)
+    .select("*")
+    .eq("owner_id", user_id)     // <-- THIS IS THE CORRECT RELATIONSHIP
     .single();
 
-  if (businessErr || !business) {
+  if (senderErr || !senderClient) {
+    console.error("Sender business fetch error:", senderErr);
     throw new Error("Business not found for recurring invoice");
   }
 
   const isSubscribed = ["basic", "pro", "trialing"].includes(
-    business.subscription_status
+    senderClient.subscription_status
   );
 
   if (!isSubscribed) {
@@ -95,7 +92,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   }
 
   // -------------------------------------------------------------
-  // B) Validate external client
+  // B) Fetch external client (recipient)
   // -------------------------------------------------------------
   const { data: externalClient, error: extErr } = await supabaseAdmin
     .from("external_clients")
@@ -105,6 +102,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
     .single();
 
   if (extErr || !externalClient) {
+    console.error("External client fetch error:", extErr);
     throw new Error("External client not found for recurring invoice");
   }
 
@@ -151,7 +149,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
       invoice_number: invoiceNumber,
       status: "sent",
       issue_date: todayISO,
-      due_date: todayISO, // You can adjust based on terms if needed
+      due_date: todayISO,
       currency: "GBP",
       net_amount: totals.net_amount,
       tax_amount: totals.tax_amount,
@@ -174,7 +172,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   }
 
   // -------------------------------------------------------------
-  // G) Insert line items into invoice_line_items
+  // G) Insert line items
   // -------------------------------------------------------------
   const lineItemsToInsert = template_line_items.map((item: any, index: number) => ({
     invoice_id: invoice.id,
@@ -182,24 +180,20 @@ export async function createInvoiceFromSchedule(schedule: any) {
     quantity: item.quantity,
     unit_price: item.unit_price,
     vat_rate: item.vat_rate || 0,
-    line_total: (item.quantity * item.unit_price) * (1 + (item.vat_rate || 0) / 100),
+    line_total:
+      item.quantity * item.unit_price * (1 + (item.vat_rate || 0) / 100),
     position: index,
   }));
 
   await supabaseAdmin.from("invoice_line_items").insert(lineItemsToInsert);
 
   // -------------------------------------------------------------
-  // H) Fetch payments (none for new invoice)
+  // H) Payments (none for new invoice)
   // -------------------------------------------------------------
   const payments: any[] = [];
 
   // -------------------------------------------------------------
-  // I) Fetch sender business profile
-  // -------------------------------------------------------------
-  const senderClient = business;
-
-  // -------------------------------------------------------------
-  // J) Generate PDF
+  // I) Generate PDF
   // -------------------------------------------------------------
   let pdfBuffer: Buffer | null = null;
 
@@ -219,7 +213,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   }
 
   // -------------------------------------------------------------
-  // K) Store PDF
+  // J) Store PDF
   // -------------------------------------------------------------
   if (pdfBuffer) {
     try {
@@ -247,7 +241,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   }
 
   // -------------------------------------------------------------
-  // L) Build email content
+  // K) Build email content
   // -------------------------------------------------------------
   const { subject, html, text } = buildInvoiceEmail({
     invoice,
@@ -257,7 +251,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   });
 
   // -------------------------------------------------------------
-  // M) Send email
+  // L) Send email
   // -------------------------------------------------------------
   try {
     const filename = `invoice-${invoice.invoice_number}.pdf`;
@@ -278,25 +272,26 @@ export async function createInvoiceFromSchedule(schedule: any) {
         : [],
     });
 
-    await supabaseAdmin
-      .from("invoice_email_events")
-      .insert([
-        {
-          invoice_id: invoice.id,
-          external_client_id: invoice.client_id,
-          user_id: invoice.user_id,
-          to_email: externalClient.contact_email,
-          subject,
-          status: "sent",
-          metadata: {
-            invoice_number: invoice.invoice_number,
-            created_from_schedule_id: scheduleId,
-          },
+    await supabaseAdmin.from("invoice_email_events").insert([
+      {
+        invoice_id: invoice.id,
+        external_client_id: invoice.client_id,
+        user_id: invoice.user_id,
+        to_email: externalClient.contact_email,
+        subject,
+        status: "sent",
+        metadata: {
+          invoice_number: invoice.invoice_number,
+          created_from_schedule_id: scheduleId,
         },
-      ]);
+      },
+    ]);
   } catch (err) {
     console.error("Failed to send recurring invoice email:", err);
   }
 
+  // -------------------------------------------------------------
+  // M) Return invoice for Run‑Now + cron
+  // -------------------------------------------------------------
   return invoice;
 }
