@@ -69,12 +69,9 @@ export default function RecurringInvoiceDetailPage() {
 }, [user, loadingClients]);
 
 
-  // Load schedule
+// Load schedule
 useEffect(() => {
-  // Wait until user is loaded
   if (!user) return;
-
-  // Ensure id is a stable string (Next.js sometimes gives undefined → array → string)
   if (!id || typeof id !== "string") return;
 
   async function load() {
@@ -98,7 +95,15 @@ useEffect(() => {
     setStartDate(r.start_date?.slice(0, 10) || "");
     setNextRunDate(r.next_run_date?.slice(0, 10) || "");
     setEndDate(r.end_date?.slice(0, 10) || "");
-    setLineItems(r.template_line_items || []);
+
+    // ⭐ FIX: convert pence → pounds for UI
+    setLineItems(
+      (r.template_line_items || []).map(li => ({
+        ...li,
+        unit_price: li.unit_price / 100, // convert pence → pounds
+      }))
+    );
+
     setPaymentInstructions(r.template_payment_instructions || "");
     setNotesToClient(r.template_notes || "");
     setActive(r.active);
@@ -106,6 +111,7 @@ useEffect(() => {
 
   load();
 }, [user, id]);
+
 
 
   const nextRunPreview = useMemo(
@@ -150,48 +156,55 @@ useEffect(() => {
   const removeLine = (idx: number) =>
     setLineItems((items) => items.filter((_, i) => i !== idx));
 
-  // Save schedule
-  const handleSave = async () => {
-    if (!record) return;
-    if (!clientId) {
-      alert("Please select a client");
+ // Save schedule
+const handleSave = async () => {
+  if (!record) return;
+  if (!clientId) {
+    alert("Please select a client");
+    return;
+  }
+
+  setSaving(true);
+  try {
+    const res = await fetch(`/api/recurring-invoices/${record.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId,
+
+        // ⭐ FIX: convert pounds → pence before saving
+        templateLineItems: lineItems.map(li => ({
+          ...li,
+          unit_price: Math.round(li.unit_price * 100), // £ → pence
+        })),
+
+        templatePaymentInstructions: paymentInstructions,
+        templateNotes: notesToClient,
+        frequencyType,
+        interval,
+        dayOfWeek,
+        dayOfMonth,
+        customRule: customRule || null,
+        startDate,
+        nextRunDate,
+        endDate: endDate || null,
+        active,
+      }),
+    });
+
+    if (!res.ok) {
+      console.error("Failed to update recurring invoice");
+      setSaving(false);
       return;
     }
 
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/recurring-invoices/${record.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId,
-          templateLineItems: lineItems,
-          templatePaymentInstructions: paymentInstructions,
-          templateNotes: notesToClient,
-          frequencyType,
-          interval,
-          dayOfWeek,
-          dayOfMonth,
-          customRule: customRule || null,
-          startDate,
-          nextRunDate,
-          endDate: endDate || null,
-          active,
-        }),
-      });
+    router.push("/recurring-invoices");
+  } catch (err) {
+    console.error(err);
+    setSaving(false);
+  }
+};
 
-      if (!res.ok) {
-        console.error("Failed to update recurring invoice");
-        setSaving(false);
-        return;
-      }
-
-      router.push("/recurring-invoices");
-    } catch (err) {
-      console.error(err);
-      setSaving(false);
-    }
-  };
 
   // Cancel schedule
   const handleCancelSchedule = async () => {
