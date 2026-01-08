@@ -3,6 +3,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { processRecurringSchedule } from "../../../lib/recurring/processRecurringSchedule";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -17,6 +18,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
+  // -------------------------------------------------------------
+  // GET — Fetch schedule
+  // -------------------------------------------------------------
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
@@ -42,7 +46,79 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // -------------------------------------------------------------
+  // PUT — Update OR Run Now
+  // -------------------------------------------------------------
   if (req.method === "PUT") {
+    const body = req.body;
+
+    // -------------------------------------------------------------
+    // MODE 1: RUN NOW (full engine)
+    // -------------------------------------------------------------
+    if (body.runNow === true) {
+      try {
+        // Load schedule fresh
+        const { data: schedule, error: scheduleError } = await supabaseAdmin
+          .from("recurring_invoices")
+          .select("*")
+          .eq("id", id)
+          .eq("user_id", businessOwnerId)
+          .single();
+
+        if (scheduleError || !schedule) {
+          console.error("Schedule load error:", scheduleError);
+          return res.status(404).json({ error: "Schedule not found" });
+        }
+
+        // Mark as processing
+        await supabaseAdmin
+          .from("recurring_invoices")
+          .update({ processing: true })
+          .eq("id", schedule.id);
+
+        // Run engine (returns invoice)
+        const invoice = await processRecurringSchedule(schedule);
+
+        // Fetch PDF metadata
+        const { data: pdf } = await supabaseAdmin
+          .from("pdf_documents")
+          .select("*")
+          .eq("invoice_id", invoice.id)
+          .maybeSingle();
+
+        // Fetch latest run log
+        const { data: runLog } = await supabaseAdmin
+          .from("recurring_invoice_runs")
+          .select("*")
+          .eq("recurring_invoice_id", schedule.id)
+          .order("run_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        // Reload updated schedule
+        const { data: updatedSchedule } = await supabaseAdmin
+          .from("recurring_invoices")
+          .select("*")
+          .eq("id", schedule.id)
+          .maybeSingle();
+
+        return res.status(200).json({
+          success: true,
+          message: "Schedule executed immediately",
+          invoice,
+          pdf,
+          runLog,
+          schedule: updatedSchedule,
+        });
+      } catch (err: any) {
+        console.error("RunNow error:", err);
+        return res.status(500).json({ error: err?.message || "Run failed" });
+      }
+    }
+
+    // -------------------------------------------------------------
+    // MODE 2: NORMAL UPDATE
+    // -------------------------------------------------------------
     try {
       const {
         clientId,
@@ -58,7 +134,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         nextRunDate,
         endDate,
         active,
-      } = req.body;
+      } = body;
 
       const now = new Date().toISOString();
 
@@ -97,9 +173,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // -------------------------------------------------------------
+  // DELETE — Cancel schedule
+  // -------------------------------------------------------------
   if (req.method === "DELETE") {
     try {
-      // Soft-cancel: mark inactive
       const { error } = await supabaseAdmin
         .from("recurring_invoices")
         .update({ active: false, updated_at: new Date().toISOString() })

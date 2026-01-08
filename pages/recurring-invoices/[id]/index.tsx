@@ -19,6 +19,8 @@ interface RecurringRecord {
   next_run_date: string;
   end_date: string | null;
   active: boolean;
+  last_run_date?: string | null;
+  processing?: boolean;
 }
 
 export default function RecurringInvoiceDetailPage() {
@@ -48,50 +50,55 @@ export default function RecurringInvoiceDetailPage() {
   const [notesToClient, setNotesToClient] = useState("");
   const [active, setActive] = useState(true);
 
+  // Run Now state
+  const [runLoading, setRunLoading] = useState(false);
+  const [runResult, setRunResult] = useState<any | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  // Load clients
   useEffect(() => {
-  if (!user || !loadingClients) return;
+    if (!user || !loadingClients) return;
 
-  async function loadClients() {
-    const res = await fetch("/api/external-clients");
-    const data = await res.json();
-    setExternalClients(data.externalClients || []);
-    setLoadingClients(false);
-  }
+    async function loadClients() {
+      const res = await fetch("/api/external-clients");
+      const data = await res.json();
+      setExternalClients(data.externalClients || []);
+      setLoadingClients(false);
+    }
 
-  loadClients();
-}, [user, loadingClients]);
+    loadClients();
+  }, [user, loadingClients]);
 
-
+  // Load schedule
   useEffect(() => {
     if (!user || !id) return;
 
-  async function load() {
-  const res = await fetch(`/api/recurring-invoices/${id}`);
-  const data = await res.json();
+    async function load() {
+      const res = await fetch(`/api/recurring-invoices/${id}`);
+      const data = await res.json();
 
-  if (!res.ok || !data.recurring) {
-    setRecord(null);
-    return;
-  }
+      if (!res.ok || !data.recurring) {
+        setRecord(null);
+        return;
+      }
 
-  const r: RecurringRecord = data.recurring;
+      const r: RecurringRecord = data.recurring;
 
-  setRecord(r);
-  setClientId(r.client_id);
-  setFrequencyType(r.frequency_type);
-  setInterval(r.interval || 1);
-  setDayOfWeek(r.day_of_week);
-  setDayOfMonth(r.day_of_month);
-  setCustomRule(r.custom_rule || "");
-  setStartDate(r.start_date?.slice(0, 10) || "");
-  setNextRunDate(r.next_run_date?.slice(0, 10) || "");
-  setEndDate(r.end_date?.slice(0, 10) || "");
-  setLineItems(r.template_line_items || []);
-  setPaymentInstructions(r.template_payment_instructions || "");
-  setNotesToClient(r.template_notes || "");
-  setActive(r.active);
-}
-
+      setRecord(r);
+      setClientId(r.client_id);
+      setFrequencyType(r.frequency_type);
+      setInterval(r.interval || 1);
+      setDayOfWeek(r.day_of_week);
+      setDayOfMonth(r.day_of_month);
+      setCustomRule(r.custom_rule || "");
+      setStartDate(r.start_date?.slice(0, 10) || "");
+      setNextRunDate(r.next_run_date?.slice(0, 10) || "");
+      setEndDate(r.end_date?.slice(0, 10) || "");
+      setLineItems(r.template_line_items || []);
+      setPaymentInstructions(r.template_payment_instructions || "");
+      setNotesToClient(r.template_notes || "");
+      setActive(r.active);
+    }
 
     load();
   }, [user, id]);
@@ -138,6 +145,7 @@ export default function RecurringInvoiceDetailPage() {
   const removeLine = (idx: number) =>
     setLineItems((items) => items.filter((_, i) => i !== idx));
 
+  // Save schedule
   const handleSave = async () => {
     if (!record) return;
     if (!clientId) {
@@ -180,6 +188,7 @@ export default function RecurringInvoiceDetailPage() {
     }
   };
 
+  // Cancel schedule
   const handleCancelSchedule = async () => {
     if (!record) return;
     if (!confirm("Cancel this recurring schedule?")) return;
@@ -200,16 +209,55 @@ export default function RecurringInvoiceDetailPage() {
     }
   };
 
-  if (loading || loadingClients)
-  return <div className="p-6">Loading…</div>;
+  // Run Now
+  const handleRunNow = async () => {
+    if (!record) return;
+    setRunLoading(true);
+    setRunError(null);
+    setRunResult(null);
 
-if (!record)
-  return <div className="p-6 text-red-500">Recurring schedule not found</div>;
+    try {
+      const res = await fetch(`/api/recurring-invoices/${record.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runNow: true }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        setRunError(data.error || "Run failed");
+        setRunLoading(false);
+        return;
+      }
+
+      setRunResult(data);
+
+      // Update schedule with new next_run_date
+      if (data.schedule) {
+        const s = data.schedule;
+        setRecord((prev) => (prev ? { ...prev, ...s } : s));
+        setNextRunDate(s.next_run_date?.slice(0, 10) || nextRunDate);
+      }
+
+      setRunLoading(false);
+    } catch (err: any) {
+      setRunError(err?.message || "Run failed");
+      setRunLoading(false);
+    }
+  };
+
+  if (loading || loadingClients)
+    return <div className="p-6">Loading…</div>;
+
+  if (!record)
+    return <div className="p-6 text-red-500">Recurring schedule not found</div>;
 
   if (!user) return <div className="p-6">Please sign in</div>;
 
   return (
     <div className="space-y-8 p-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">
@@ -218,7 +266,32 @@ if (!record)
           <p className="text-sm text-gray-500">
             Adjust the orbit, template, and status of this schedule.
           </p>
+          <div className="mt-2 text-xs text-gray-500 space-x-4">
+            <span>
+              Last run:{" "}
+              <span className="font-medium">
+                {record.last_run_date
+                  ? record.last_run_date.slice(0, 10)
+                  : "Never"}
+              </span>
+            </span>
+            <span>
+              Next run:{" "}
+              <span className="font-medium">
+                {record.next_run_date
+                  ? record.next_run_date.slice(0, 10)
+                  : "Not set"}
+              </span>
+            </span>
+            <span>
+              Status:{" "}
+              <span className="font-medium">
+                {record.active ? "Active" : "Paused"}
+              </span>
+            </span>
+          </div>
         </div>
+
         <div className="flex gap-3">
           <button
             type="button"
@@ -227,6 +300,16 @@ if (!record)
           >
             Cancel schedule
           </button>
+
+          <button
+            type="button"
+            disabled={runLoading}
+            onClick={handleRunNow}
+            className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-60"
+          >
+            {runLoading ? "Running…" : "Run now"}
+          </button>
+
           <button
             type="button"
             disabled={saving}
@@ -238,9 +321,86 @@ if (!record)
         </div>
       </div>
 
+      {/* Run result panel */}
+      {runError && (
+        <div className="rounded-md border border-red-500 bg-red-50 p-4 text-sm text-red-700">
+          <div className="font-semibold mb-1">Run failed</div>
+          <div>{runError}</div>
+        </div>
+      )}
+
+      {runResult && (
+        <div className="rounded-md border border-emerald-500 bg-emerald-50 p-4 text-sm space-y-2">
+          <div className="flex justify-between items-center">
+            <div className="font-semibold text-emerald-800">
+              Run completed successfully
+            </div>
+            <div className="text-xs text-emerald-700">
+              Invoice ID: {runResult.invoice?.id?.slice(0, 8) || "—"}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div>
+              <div className="font-medium text-gray-700">Invoice</div>
+              <div className="text-gray-600">
+                Total:{" "}
+                {runResult.invoice?.total_gross
+                  ? `£${Number(runResult.invoice.total_gross).toFixed(2)}`
+                  : "—"}
+              </div>
+              <div className="text-gray-600">
+                Status: {runResult.invoice?.status || "—"}
+              </div>
+            </div>
+
+            <div>
+              <div className="font-medium text-gray-700">PDF</div>
+              <div className="text-gray-600">
+                {runResult.pdf ? "Stored in bucket" : "No PDF record found"}
+              </div>
+              {runResult.pdf?.public_url && (
+                <a
+                  href={runResult.pdf.public_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 underline"
+                >
+                  Open PDF
+                </a>
+              )}
+            </div>
+
+            <div>
+              <div className="font-medium text-gray-700">Run log</div>
+              <div className="text-gray-600">
+                Status: {runResult.runLog?.status || "—"}
+              </div>
+              <div className="text-gray-600">
+                Run at:{" "}
+                {runResult.runLog?.run_at
+                  ? runResult.runLog.run_at
+                  : "—"}
+              </div>
+            </div>
+          </div>
+
+          {runResult.schedule && (
+            <div className="text-xs text-gray-600">
+              Next run updated to:{" "}
+              <span className="font-medium">
+                {runResult.schedule.next_run_date?.slice(0, 10) || "—"}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main layout */}
       <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)]">
         {/* Left: Recurrence designer */}
         <div className="space-y-6">
+          {/* Recurrence card */}
           <div className="rounded-xl border bg-slate-950 text-slate-50 p-6 relative overflow-hidden">
             <div className="absolute inset-0 pointer-events-none opacity-40">
               <div className="absolute -top-32 -right-32 h-64 w-64 rounded-full bg-blue-500/20 blur-3xl" />
@@ -323,7 +483,9 @@ if (!record)
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      Every {interval} {frequencyType === "daily"
+                      Every{" "}
+                      {interval}{" "}
+                      {frequencyType === "daily"
                         ? "day(s)"
                         : frequencyType === "weekly"
                         ? "week(s)"
@@ -635,7 +797,8 @@ if (!record)
     </div>
   );
 }
-// 🔒 Force SSR so static export doesn’t break on API/session usage
+
+// Force SSR so static export doesn’t break on API/session usage
 export async function getServerSideProps() {
   return { props: {} };
 }
