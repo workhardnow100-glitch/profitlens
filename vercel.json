@@ -3,7 +3,8 @@
   "crons": [
     {
       "path": "/api/cron/run-recurring-invoices",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 7 * * *"
     }
   ]
 }
+
