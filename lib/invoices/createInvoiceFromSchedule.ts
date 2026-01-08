@@ -83,13 +83,26 @@ export async function createInvoiceFromSchedule(schedule: any) {
     throw new Error("Business not found for recurring invoice");
   }
 
-  const isSubscribed = ["basic", "pro", "trialing"].includes(
-    senderClient.subscription_status
-  );
+ // Fetch subscription from app_users (correct table)
+const { data: appUser, error: appUserErr } = await supabaseAdmin
+  .from("app_users")
+  .select("subscription_status")
+  .eq("id", user_id)
+  .single();
 
-  if (!isSubscribed) {
-    throw new Error("Business subscription inactive — cannot generate invoice");
-  }
+if (appUserErr || !appUser) {
+  console.error("Failed to fetch subscription:", appUserErr);
+  throw new Error("Unable to verify subscription");
+}
+
+const isSubscribed = ["basic", "pro", "trialing"].includes(
+  appUser.subscription_status
+);
+
+if (!isSubscribed) {
+  throw new Error("Subscription inactive — cannot generate invoice");
+}
+
 
   // -------------------------------------------------------------
   // B) Fetch external client (recipient)
