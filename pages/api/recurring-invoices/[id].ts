@@ -1,12 +1,10 @@
 // pages/api/recurring-invoices/[id].ts
-
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // 🔥 STOP VERCEL FROM CACHING THIS ROUTE
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 
   const session = await getServerSession(req, res, authOptions);
@@ -17,12 +15,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid ID" });
   }
 
-  // ⭐ Business owner identity (accountant-aware)
   const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
-  // ============================================================
-  // GET — Fetch a single recurring schedule
-  // ============================================================
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
@@ -48,12 +42,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // ============================================================
-  // PUT — Update a recurring schedule
-  // ============================================================
   if (req.method === "PUT") {
     try {
       const {
+        clientId,
         templateLineItems,
         templatePaymentInstructions,
         templateNotes,
@@ -73,6 +65,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const { data, error } = await supabaseAdmin
         .from("recurring_invoices")
         .update({
+          client_id: clientId,
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
@@ -104,14 +97,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // ============================================================
-  // DELETE — Cancel a recurring schedule
-  // ============================================================
   if (req.method === "DELETE") {
     try {
+      // Soft-cancel: mark inactive
       const { error } = await supabaseAdmin
         .from("recurring_invoices")
-        .delete()
+        .update({ active: false, updated_at: new Date().toISOString() })
         .eq("id", id)
         .eq("user_id", businessOwnerId);
 

@@ -1,23 +1,18 @@
 // pages/api/recurring-invoices/index.ts
-
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // 🔥 STOP VERCEL FROM CACHING THIS ROUTE
   res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
 
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
-  // ⭐ Who owns the business?
+  // Business owner (or acting-as client business)
   const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
-  // ============================================================
-  // GET — List recurring schedules
-  // ============================================================
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
@@ -38,9 +33,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
-  // ============================================================
-  // POST — Create a new recurring schedule
-  // ============================================================
   if (req.method === "POST") {
     try {
       const {
@@ -56,6 +48,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         startDate,
         endDate,
       } = req.body;
+
+      if (!clientId) {
+        return res.status(400).json({ error: "Client is required" });
+      }
 
       const now = new Date().toISOString();
 
@@ -73,9 +69,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           day_of_month: dayOfMonth,
           custom_rule: customRule,
           start_date: startDate,
-          next_run_date: startDate,
+          next_run_date: startDate, // v1: first run on start date
           end_date: endDate || null,
           active: true,
+          processing: false,
           created_at: now,
           updated_at: now,
         })
