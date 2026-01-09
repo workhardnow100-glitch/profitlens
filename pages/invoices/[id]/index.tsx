@@ -296,7 +296,7 @@ if (matchResult?.matched && matchResult.match?.transaction) {
           <div className="space-y-1 text-right">
             <div className="text-sm text-gray-600">Balance due</div>
             <div className="text-sm font-medium">
-              £{balance.toFixed(2)}
+              £{(balance / 100).toFixed(2)}
             </div>
           </div>
         </div>
