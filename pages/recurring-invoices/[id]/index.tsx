@@ -1,3 +1,6 @@
+///// page/recurring-invoices/[id]/index.tsx
+
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { useUser } from "../../../hooks/useUser";
@@ -100,7 +103,10 @@ useEffect(() => {
     setLineItems(
       (r.template_line_items || []).map(li => ({
         ...li,
-        unit_price: li.unit_price / 100, // convert pence → pounds
+        unit_price: Number.isInteger(li.unit_price)
+  ? li.unit_price / 100
+  : li.unit_price,
+
       }))
     );
 
