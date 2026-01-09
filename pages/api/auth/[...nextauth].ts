@@ -321,99 +321,116 @@ export const authOptions: NextAuthOptions = {
 
   session: { strategy: "jwt" },
 
-  callbacks: {
-    /* -------------------------------------------------------
-       ✅ JWT CALLBACK — loads acting_client_id from DB
-    ------------------------------------------------------- */
-    async jwt({ token, user }) {
-      if (!token.email && token.sub) {
-        const { data: dbUser } = await supabaseAdmin
-          .from("app_users")
-          .select("email")
-          .eq("id", token.sub)
-          .single();
+callbacks: {
+  async jwt({ token, user }) {
+    if (!token.email && token.sub) {
+      const { data: dbUser } = await supabaseAdmin
+        .from("app_users")
+        .select("email")
+        .eq("id", token.sub)
+        .single();
 
-        if (dbUser) {
-          token.email = dbUser.email;
-        }
+      if (dbUser) {
+        token.email = dbUser.email;
       }
+    }
 
-      if (user) {
-        token.sub = String(user.id);
-        token.email = user.email;
-        token.role = (user as any).role ?? "USER";
+    if (user) {
+      token.sub = String(user.id);
+      token.email = user.email;
+      token.role = (user as any).role ?? "USER";
+    }
+
+    if (token.email) {
+      const { data: dbUser } = await supabaseAdmin
+        .from("app_users")
+        .select("id, role, client_id, subscription_status, acting_client_id")
+        .eq("email", token.email.toLowerCase().trim())
+        .single();
+
+      if (dbUser) {
+        token.sub = dbUser.id;
+        token.role = dbUser.role ?? "USER";
+        token.clientId = dbUser.client_id ?? null;
+        token.subscriptionStatus = dbUser.subscription_status ?? "incomplete";
+        token.actingAsClientId = dbUser.acting_client_id ?? null;
       }
+    }
 
-      if (token.email) {
-        const { data: dbUser } = await supabaseAdmin
-          .from("app_users")
-          .select(
-            "id, role, client_id, subscription_status, acting_client_id"
-          )
-          .eq("email", token.email.toLowerCase().trim())
-          .single();
+    return token;
+  },
 
-        if (dbUser) {
-          token.sub = dbUser.id;
-          token.role = dbUser.role ?? "USER";
-          token.clientId = dbUser.client_id ?? null;
-          token.subscriptionStatus =
-            dbUser.subscription_status ?? "incomplete";
-          token.actingAsClientId = dbUser.acting_client_id ?? null;
-        }
-      }
+  async session({ session, token }) {
+    session.user = {
+      id: token.sub ?? "unknown",
+      email: token.email ?? "unknown@example.com",
+      role: token.role ?? "USER",
+      clientId: token.clientId ?? null,
+      subscriptionStatus: token.subscriptionStatus ?? "incomplete",
+    };
 
-      return token;
-    },
+    const role = (session.user.role || "").toUpperCase();
 
-    /* -------------------------------------------------------
-       ⭐ SESSION CALLBACK — unify privileged roles
-    ------------------------------------------------------- */
-    async session({ session, token }) {
-      session.user = {
-        id: token.sub ?? "unknown",
-        email: token.email ?? "unknown@example.com",
-        role: token.role ?? "USER",
-        clientId: token.clientId ?? null,
-        subscriptionStatus: token.subscriptionStatus ?? "incomplete",
-      };
+    // ⭐ ACCOUNTANTS ONLY
+    if (role === "ACCOUNTANT") {
+      const { data: accessRows } = await supabaseAdmin
+        .from("accountant_clients")
+        .select("client_id")
+        .eq("accountant_email", session.user.email);
 
-      const role = (session.user.role || "").toUpperCase();
-      const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
+      const accessibleClients = accessRows?.map((r) => r.client_id) || [];
+      session.user.accessibleClients = accessibleClients;
 
-      if (privilegedRoles.includes(role)) {
-        const { data: accessRows } = await supabaseAdmin
-          .from("accountant_clients")
-          .select("client_id")
-          .eq("accountant_email", session.user.email);
+      const persisted = token.actingAsClientId;
 
-        const accessibleClients = accessRows?.map((r) => r.client_id) || [];
-        session.user.accessibleClients = accessibleClients;
-
-        const persisted = token.actingAsClientId as string | null;
-
-        if (persisted && accessibleClients.includes(persisted)) {
-          session.user.actingAsClientId = persisted;
-        } else if (accessibleClients.length > 0) {
-          session.user.actingAsClientId = accessibleClients[0];
-        } else {
-          session.user.actingAsClientId = null;
-        }
+      if (persisted && accessibleClients.includes(persisted)) {
+        session.user.actingAsClientId = persisted;
+      } else if (accessibleClients.length > 0) {
+        session.user.actingAsClientId = accessibleClients[0];
       } else {
-        const cid = session.user.clientId ?? "unknown-client";
-        session.user.accessibleClients = [cid];
-        session.user.actingAsClientId = cid;
+        session.user.actingAsClientId = null;
       }
 
       return session;
-    },
+    }
 
-    async redirect({ url, baseUrl }) {
-      if (url.startsWith("/")) return `${baseUrl}${url}`;
-      if (new URL(url).origin === baseUrl) return url;
-      return `${baseUrl}/dashboard`;
-    },
+    // ⭐ FOUNDERS + ADMINS — full access to ALL clients
+    if (role === "FOUNDER" || role === "ADMIN") {
+      const { data: allClients } = await supabaseAdmin
+        .from("clients")
+        .select("id");
+
+      const accessibleClients = allClients?.map((c) => c.id) || [];
+      session.user.accessibleClients = accessibleClients;
+
+      const persisted = token.actingAsClientId;
+
+      if (persisted && accessibleClients.includes(persisted)) {
+        session.user.actingAsClientId = persisted;
+      } else if (accessibleClients.length > 0) {
+        session.user.actingAsClientId = accessibleClients[0];
+      } else {
+        session.user.actingAsClientId = null;
+      }
+
+      return session;
+    }
+
+    // ⭐ NORMAL USERS
+    const cid = session.user.clientId ?? "unknown-client";
+    session.user.accessibleClients = [cid];
+    session.user.actingAsClientId = cid;
+
+    return session;
   },
+
+  async redirect({ url, baseUrl }) {
+    if (url.startsWith("/")) return `${baseUrl}${url}`;
+    if (new URL(url).origin === baseUrl) return url;
+    return `${baseUrl}/dashboard`;
+  }
+},
+
 
   pages: {
     signIn: "/login",
