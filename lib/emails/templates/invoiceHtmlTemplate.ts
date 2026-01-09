@@ -1,3 +1,13 @@
+// lib/email/templates/invoiceHtmlTemplate.ts
+// PURPOSE:
+//   Generates the HTML body for manual invoice emails.
+//
+// MONEY MODEL (CRITICAL):
+//   • invoice amounts are stored in PENCE (net_amount, tax_amount, gross_amount).
+//   • This template MUST convert pence → pounds exactly once.
+//   • The previous version incorrectly used invoice.total (non‑existent),
+//     causing incorrect totals in manual invoice emails.
+
 function esc(v) {
   return String(v || "")
     .replace(/&/g, "&amp;")
@@ -19,7 +29,9 @@ export function generateInvoiceHtml({ invoice, customer, owner }) {
   const logo = owner?.logo_url || null;
 
   const customerName = customer?.name || "Customer";
-  const totalFormatted = (invoice.total / 100).toFixed(2);
+
+  // ⭐ FIXED: Convert pence → pounds using gross_amount
+  const totalFormatted = (Number(invoice.gross_amount || 0) / 100).toFixed(2);
 
   const payUrl = invoice.stripe_payment_link_url || null;
 

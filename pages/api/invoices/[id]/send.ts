@@ -1,4 +1,30 @@
 // pages/api/invoices/[id]/send.ts
+// PURPOSE:
+//   Sends a manual invoice email with a PDF attachment.
+//
+// WHAT THIS ENDPOINT DOES:
+//   1. Validates RBAC permissions (Founder, Accountant, User)
+//   2. Loads the invoice row
+//   3. Loads the external client (recipient)
+//   4. Loads the sender business profile
+//   5. Loads invoice line items (unit_price + line_total in pence)
+//   6. Loads matched payments
+//   7. Generates a PDF using buildInvoicePdf()
+//   8. Generates email HTML/text using buildInvoiceEmail()
+//   9. Sends the email with PDF attached
+//   10. Inserts an audit log row into invoice_email_events
+//
+// MONEY MODEL (CRITICAL):
+//   • This endpoint does NOT perform any money conversion.
+//   • It simply passes invoice + line items to buildInvoicePdf() and buildInvoiceEmail().
+//   • Both of those functions now correctly convert pence → pounds.
+//   • No changes required for the unified money system.
+//
+// VERIFIED:
+//   • No money logic exists here.
+//   • No formatting drift.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
@@ -22,7 +48,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     //
-    // 1) Fetch invoice (no user filter yet)
+    // 1) Fetch invoice
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")

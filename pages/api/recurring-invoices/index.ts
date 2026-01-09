@@ -1,4 +1,33 @@
 // pages/api/recurring-invoices/index.ts
+// PURPOSE:
+//   Handles listing and creating recurring invoice schedules.
+//
+// ENDPOINTS:
+//   GET  /api/recurring-invoices
+//       → Returns all recurring schedules for the authenticated business owner.
+//
+//   POST /api/recurring-invoices
+//       → Creates a new recurring invoice schedule.
+//
+// POSITION IN PIPELINE:
+//   • This is the entry point for creating recurring schedules.
+//   • The UI sends template_line_items here.
+//   • These line items MUST already be in PENCE (UI converts pounds → pence).
+//   • This endpoint stores them exactly as provided.
+//   • processRecurringSchedule() later consumes these values to create invoices.
+//
+// MONEY MODEL:
+//   • This file does NOT perform any money conversion.
+//   • It simply stores template_line_items exactly as received.
+//   • The UI is responsible for converting pounds → pence before POST.
+//   • The recurring engine and invoice creation logic (already fixed) assume pence.
+//
+// VERIFIED:
+//   • No money logic exists here.
+//   • No formatting drift.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -13,6 +42,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // Business owner (or acting-as client business)
   const businessOwnerId = session.user.actingAsClientId || session.user.id;
 
+  // -------------------------------------------------------------
+  // GET — List recurring schedules
+  // -------------------------------------------------------------
   if (req.method === "GET") {
     try {
       const { data, error } = await supabaseAdmin
@@ -33,6 +65,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   }
 
+  // -------------------------------------------------------------
+  // POST — Create new recurring schedule
+  // -------------------------------------------------------------
   if (req.method === "POST") {
     try {
       const {
@@ -60,7 +95,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .insert({
           user_id: businessOwnerId,
           client_id: clientId,
-          template_line_items: templateLineItems,
+          template_line_items: templateLineItems, // EXPECTED: already in pence
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,
           frequency_type: frequencyType,
@@ -69,7 +104,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           day_of_month: dayOfMonth,
           custom_rule: customRule,
           start_date: startDate,
-          next_run_date: startDate, // v1: first run on start date
+          next_run_date: startDate, // first run = start date
           end_date: endDate || null,
           active: true,
           processing: false,

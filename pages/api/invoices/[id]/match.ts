@@ -1,4 +1,12 @@
 // pages/api/invoices/[id]/match.ts
+// PURPOSE:
+//   Attempts to automatically match an invoice to a bank transaction.
+//
+// MONEY MODEL (CRITICAL):
+//   • Invoice amounts are stored in PENCE.
+//   • Matching must compare transaction.amount (pounds) to invoice.gross_amount / 100.
+//   • The previous version incorrectly used invoice.total (non‑existent),
+//     causing NaN comparisons and broken matching logic.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
@@ -11,7 +19,7 @@ interface InvoiceRow {
   user_id: string;
   client_id: string;
   issue_date: string;
-  total: number;
+  gross_amount: number; // pence
   status: string;
   payment_status: string | null;
   invoice_number: string;
@@ -21,7 +29,7 @@ interface TransactionRow {
   id: string;
   user_id: string;
   client_id: string;
-  amount: number;
+  amount: number; // pounds
   description: string | null;
   date: string;
 }
@@ -33,7 +41,6 @@ interface MatchResult {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // RBAC: Founder, Accountant, User
   const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
   if (!guard.ok) return;
 
@@ -46,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     //
-    // 1) Fetch invoice (no user filter yet)
+    // 1) Fetch invoice
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")
@@ -105,7 +112,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     //
     // 5) Scoring logic
     //
-    const invAmount = Number(invoice.total) / 100;
+    // ⭐ FIXED: Use gross_amount (pence) → pounds
+    const invAmount = Number(invoice.gross_amount || 0) / 100;
 
     for (const tx of txList) {
       const txAmount = Number(tx.amount) || 0;

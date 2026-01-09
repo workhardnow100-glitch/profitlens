@@ -1,4 +1,17 @@
 // pages/api/pdfs/index.js
+// PURPOSE:
+//   List all PDF documents the authenticated user is allowed to see.
+//
+// POSITION IN PIPELINE:
+//   • Purely metadata listing.
+//   • Does NOT touch money, invoice totals, VAT, or Stripe.
+//   • Safe from all monetary drift.
+//
+// MONEY MODEL:
+//   • No monetary fields are read or written.
+//   • No pence/pounds conversions.
+//   • No risk of affecting invoice totals.
+
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -52,15 +65,12 @@ export default async function handler(req, res) {
   // ACCESS LOGIC
   //
   if (isFounder) {
-    // Founder sees everything
     query = query.order("created_at", { ascending: false });
   } else if (isAccountant) {
-    // Accountant sees PDFs ONLY for the client they are acting as
     query = query
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });
   } else {
-    // Business owner → only their own PDFs for their own client
     query = query
       .eq("client_id", clientId)
       .order("created_at", { ascending: false });

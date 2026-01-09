@@ -1,3 +1,27 @@
+// lib/invoices/createInvoiceFromSchedule.ts
+// PURPOSE:
+// Creates a full, real invoice from a recurring schedule, including:
+//   • Generating the next invoice number
+//   • Computing totals (net, tax, gross) from template_line_items
+//   • Inserting the invoice + line items into the database
+//   • Generating and storing a PDF
+//   • Sending the invoice email to the external client
+//
+// POSITION IN PIPELINE:
+//   • Called by processRecurringSchedule(schedule) for cron + “Run Now”.
+//   • Consumes schedule.template_line_items and produces a persisted invoice row.
+//   • Downstream: PDF template (buildInvoicePdf) and email template (buildInvoiceEmail)
+//     both read the resulting invoice and line items.
+//
+// MONEY MODEL (CRITICAL):
+//   • EXPECTATION: schedule.template_line_items[].unit_price is in PENCE (integer).
+//   • computeTotals() operates entirely in pence.
+//   • net_amount, tax_amount, gross_amount are stored in pence in the invoices table.
+//   • invoice_line_items.unit_price and line_total are stored in pence.
+//   • PDF + Email templates are responsible for dividing by 100 when displaying pounds.
+//   • The UI must convert pounds → pence before saving template_line_items to the schedule.
+//     (We’ve already patched the UI save/load to do this.)
+
 import { supabaseAdmin } from "../supabase-admin";
 import { createPdfBuffer, storePdfAndRecord } from "../pdf/engine";
 import { buildInvoicePdf } from "../pdf/templates/invoice";
@@ -33,23 +57,24 @@ async function generateNextInvoiceNumber(userId: string) {
 }
 
 // -------------------------------------------------------------
-// 2. Compute totals
+// 2. Compute totals (in PENCE)
 // -------------------------------------------------------------
 function computeTotals(items: any[]) {
   let net = 0;
   let tax = 0;
 
   for (const item of items) {
+    // item.unit_price is expected to be in pence (integer)
     const lineNet = item.quantity * item.unit_price;
-    const lineTax = (lineNet * (item.vat_rate || 0)) / 100;
+    const lineTax = Math.round((lineNet * (item.vat_rate || 0)) / 100);
     net += lineNet;
     tax += lineTax;
   }
 
   return {
-    net_amount: net,
-    tax_amount: tax,
-    gross_amount: net + tax,
+    net_amount: net,              // pence
+    tax_amount: tax,              // pence
+    gross_amount: net + tax,      // pence
   };
 }
 
@@ -75,7 +100,7 @@ export async function createInvoiceFromSchedule(schedule: any) {
   const { data: senderClient, error: senderErr } = await supabaseAdmin
     .from("clients")
     .select("*")
-    .eq("owner_id", user_id)     // <-- THIS IS THE CORRECT RELATIONSHIP
+    .eq("owner_id", user_id)     // <-- business profile owned by this user
     .single();
 
   if (senderErr || !senderClient) {
@@ -83,26 +108,25 @@ export async function createInvoiceFromSchedule(schedule: any) {
     throw new Error("Business not found for recurring invoice");
   }
 
- // Fetch subscription from app_users (correct table)
-const { data: appUser, error: appUserErr } = await supabaseAdmin
-  .from("app_users")
-  .select("subscription_status")
-  .eq("id", user_id)
-  .single();
+  // Fetch subscription from app_users (correct table)
+  const { data: appUser, error: appUserErr } = await supabaseAdmin
+    .from("app_users")
+    .select("subscription_status")
+    .eq("id", user_id)
+    .single();
 
-if (appUserErr || !appUser) {
-  console.error("Failed to fetch subscription:", appUserErr);
-  throw new Error("Unable to verify subscription");
-}
+  if (appUserErr || !appUser) {
+    console.error("Failed to fetch subscription:", appUserErr);
+    throw new Error("Unable to verify subscription");
+  }
 
-const isSubscribed = ["basic", "pro", "trialing"].includes(
-  appUser.subscription_status
-);
+  const isSubscribed = ["basic", "pro", "trialing"].includes(
+    appUser.subscription_status
+  );
 
-if (!isSubscribed) {
-  throw new Error("Subscription inactive — cannot generate invoice");
-}
-
+  if (!isSubscribed) {
+    throw new Error("Subscription inactive — cannot generate invoice");
+  }
 
   // -------------------------------------------------------------
   // B) Fetch external client (recipient)
@@ -124,8 +148,8 @@ if (!isSubscribed) {
   }
 
   // -------------------------------------------------------------
-  // C) Validate line items
-  // -------------------------------------------------------------
+  // C) Validate line items (values expected in pence)
+// -------------------------------------------------------------
   if (!Array.isArray(template_line_items) || template_line_items.length === 0) {
     throw new Error("Invalid or empty line items in schedule");
   }
@@ -142,8 +166,8 @@ if (!isSubscribed) {
   }
 
   // -------------------------------------------------------------
-  // D) Compute totals
-  // -------------------------------------------------------------
+  // D) Compute totals (still in pence)
+// -------------------------------------------------------------
   const totals = computeTotals(template_line_items);
 
   // -------------------------------------------------------------
@@ -152,8 +176,8 @@ if (!isSubscribed) {
   const invoiceNumber = await generateNextInvoiceNumber(user_id);
 
   // -------------------------------------------------------------
-  // F) Create invoice row
-  // -------------------------------------------------------------
+  // F) Create invoice row (amounts in pence)
+// -------------------------------------------------------------
   const { data: invoice, error: invoiceErr } = await supabaseAdmin
     .from("invoices")
     .insert({
@@ -164,9 +188,9 @@ if (!isSubscribed) {
       issue_date: todayISO,
       due_date: todayISO,
       currency: "GBP",
-      net_amount: totals.net_amount,
-      tax_amount: totals.tax_amount,
-      gross_amount: totals.gross_amount,
+      net_amount: totals.net_amount,     // pence
+      tax_amount: totals.tax_amount,     // pence
+      gross_amount: totals.gross_amount, // pence
       payment_terms: template_payment_terms || "Payment due on receipt",
       payment_instructions: template_payment_instructions
         ? { text: template_payment_instructions }
@@ -185,16 +209,17 @@ if (!isSubscribed) {
   }
 
   // -------------------------------------------------------------
-  // G) Insert line items
-  // -------------------------------------------------------------
+  // G) Insert line items (unit_price + line_total in pence)
+// -------------------------------------------------------------
   const lineItemsToInsert = template_line_items.map((item: any, index: number) => ({
     invoice_id: invoice.id,
     description: item.description || "",
     quantity: item.quantity,
-    unit_price: item.unit_price,
+    unit_price: item.unit_price, // pence
     vat_rate: item.vat_rate || 0,
-    line_total:
-      item.quantity * item.unit_price * (1 + (item.vat_rate || 0) / 100),
+    line_total: Math.round(
+      item.quantity * item.unit_price * (1 + (item.vat_rate || 0) / 100)
+    ), // pence
     position: index,
   }));
 
@@ -202,12 +227,12 @@ if (!isSubscribed) {
 
   // -------------------------------------------------------------
   // H) Payments (none for new invoice)
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   const payments: any[] = [];
 
   // -------------------------------------------------------------
   // I) Generate PDF
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   let pdfBuffer: Buffer | null = null;
 
   try {
@@ -216,6 +241,8 @@ if (!isSubscribed) {
         invoice,
         externalClient,
         senderClient,
+        // IMPORTANT: lineItems here are still in pence; the PDF template
+        // must divide by 100 when rendering amounts.
         lineItems: template_line_items,
         payments,
         paymentLinkUrl: invoice.stripe_payment_link_url || null,
@@ -227,7 +254,7 @@ if (!isSubscribed) {
 
   // -------------------------------------------------------------
   // J) Store PDF
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   if (pdfBuffer) {
     try {
       const filename = `invoice-${invoice.invoice_number}.pdf`;
@@ -255,7 +282,7 @@ if (!isSubscribed) {
 
   // -------------------------------------------------------------
   // K) Build email content
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   const { subject, html, text } = buildInvoiceEmail({
     invoice,
     externalClient,
@@ -265,7 +292,7 @@ if (!isSubscribed) {
 
   // -------------------------------------------------------------
   // L) Send email
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   try {
     const filename = `invoice-${invoice.invoice_number}.pdf`;
 
@@ -305,6 +332,6 @@ if (!isSubscribed) {
 
   // -------------------------------------------------------------
   // M) Return invoice for Run‑Now + cron
-  // -------------------------------------------------------------
+// -------------------------------------------------------------
   return invoice;
 }

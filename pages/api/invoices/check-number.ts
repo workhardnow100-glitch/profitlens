@@ -1,4 +1,17 @@
 // pages/api/invoices/check-number.ts
+// PURPOSE:
+//   Check whether a given invoice number already exists for the authenticated user.
+//
+// POSITION IN PIPELINE:
+//   • Used by the UI when creating or editing invoices.
+//   • Ensures invoice numbers remain unique per user.
+//   • Does NOT touch money, totals, VAT, or line items.
+//
+// MONEY MODEL:
+//   • No monetary fields are read or written.
+//   • No pence/pounds conversions.
+//   • Safe and correct.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";

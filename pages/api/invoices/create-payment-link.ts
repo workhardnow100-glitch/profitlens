@@ -1,4 +1,13 @@
 // pages/api/invoices/create-payment-link.ts
+// PURPOSE:
+//   Create a Stripe Checkout session for an invoice.
+//
+// MONEY MODEL (CRITICAL):
+//   • invoice.gross_amount is stored in PENCE.
+//   • Stripe expects unit_amount in PENCE.
+//   • The previous version multiplied by 100, causing 100× overcharging.
+//   • This fix removes the multiplication and uses the pence value directly.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";
@@ -7,7 +16,6 @@ import Stripe from "stripe";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // RBAC: Users, Accountants, and Founder can create payment links
   const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
   if (!guard.ok) return;
 
@@ -86,7 +94,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             product_data: {
               name: `Invoice ${invoice.invoice_number}`,
             },
-            unit_amount: Math.round(Number(invoice.gross_amount) * 100),
+            // ⭐ FIXED: invoice.gross_amount is already in pence
+            unit_amount: Number(invoice.gross_amount),
           },
           quantity: 1,
         },

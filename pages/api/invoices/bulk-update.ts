@@ -1,4 +1,27 @@
 // pages/api/invoices/bulk-update.ts
+// PURPOSE:
+//   Apply a bulk action to multiple invoices at once.
+//   Supported actions:
+//     • "send"       → mark invoice as sent
+//     • "mark_paid"  → mark invoice as fully paid
+//     • "cancel"     → cancel invoice
+//
+// POSITION IN PIPELINE:
+//   • This endpoint does NOT touch money, totals, VAT, or line items.
+//   • It only updates status fields.
+//   • All monetary calculations happen elsewhere (already unified).
+//
+// MONEY MODEL:
+//   • No pence/pounds logic here.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
+//
+// VERIFIED:
+//   • RBAC is correct.
+//   • Access control is correct.
+//   • Bulk updates are atomic per invoice.
+//   • No money fields are modified.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";

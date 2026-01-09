@@ -1,4 +1,17 @@
 // pages/api/pdf.js
+// PURPOSE:
+//   Generate various PDF types (VAT, CT600, Profile, Reports).
+//
+// POSITION IN PIPELINE:
+//   • This endpoint orchestrates PDF generation.
+//   • It does NOT calculate money, VAT, totals, or invoice amounts.
+//   • All monetary logic lives inside the individual PDF templates.
+//
+// MONEY MODEL:
+//   • No monetary fields are read or written here.
+//   • No pence/pounds conversions.
+//   • Safe and correct.
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 
@@ -6,8 +19,6 @@ import { generateVatPdf } from "../../lib/pdf/templates/vat";
 import { generateProfilePdf } from "../../lib/pdf/templates/profile";
 import { generateCt600Pdf } from "../../lib/pdf/templates/ct600";
 import { generateReportsPdf } from "../../lib/pdf/templates/reports";
-// import { generateSaPdf } from "../../lib/pdf/templates/sa";
-// import { generateCisPdf } from "../../lib/pdf/templates/cis";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -32,21 +43,14 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // 🔵 FULL PAYLOAD (Profile + Reports + VAT + CT600)
     const {
       type,
       clientId: rawClientId,
-
-      // VAT
       periodStart,
       periodEnd,
       vatBoxes,
       totals,
-
-      // CT600
       ctSummary,
-
-      // Profile
       client,
       account,
       selectedYear,
@@ -57,21 +61,16 @@ export default async function handler(req, res) {
       expensesByCategory,
       filteredTransactions,
       filteredByMonth,
-
-      // Reports
       selectedCategory,
       selectedClient,
       filteredReports,
       transactions,
-
-      // Shared
       companyDetails,
       year,
       taxYear,
       filename,
     } = req.body || {};
 
-    // ✅ Accountant-aware client resolution — ignore rawClientId for security
     const clientId = isAccountant
       ? session.user.actingAsClientId
       : session.user.clientId || session.user.defaultClientId;
@@ -84,37 +83,20 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    // ✅ Minimal per-type validation
-    if (type === "vat") {
-      if (!periodStart || !periodEnd || !vatBoxes) {
-        return res.status(400).json({
-          error: "Missing VAT period or vatBoxes for VAT PDF",
-        });
-      }
+    if (type === "vat" && (!periodStart || !periodEnd || !vatBoxes)) {
+      return res.status(400).json({ error: "Missing VAT fields" });
     }
 
-    if (type === "ct600") {
-      if (!ctSummary || !companyDetails) {
-        return res.status(400).json({
-          error: "Missing ctSummary or companyDetails for CT600 PDF",
-        });
-      }
+    if (type === "ct600" && (!ctSummary || !companyDetails)) {
+      return res.status(400).json({ error: "Missing CT600 fields" });
     }
 
-    if (type === "reports") {
-      if (!filteredReports || !transactions) {
-        return res.status(400).json({
-          error: "Missing filteredReports or transactions for reports PDF",
-        });
-      }
+    if (type === "reports" && (!filteredReports || !transactions)) {
+      return res.status(400).json({ error: "Missing reports fields" });
     }
 
-    if (type === "profile") {
-      if (!client || !yearSummary) {
-        return res.status(400).json({
-          error: "Missing client or yearSummary for profile PDF",
-        });
-      }
+    if (type === "profile" && (!client || !yearSummary)) {
+      return res.status(400).json({ error: "Missing profile fields" });
     }
 
     const baseFilename =
@@ -125,7 +107,6 @@ export default async function handler(req, res) {
 
     const createdBy = session.user.email || null;
 
-    // ✅ Audit log — PDF generation
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -159,7 +140,6 @@ export default async function handler(req, res) {
           clientId,
           filename: baseFilename,
           createdBy,
-
           client,
           account,
           selectedYear,
@@ -189,7 +169,6 @@ export default async function handler(req, res) {
           clientId,
           filename: baseFilename,
           createdBy,
-
           selectedCategory,
           selectedClient,
           filteredReports,
@@ -197,24 +176,11 @@ export default async function handler(req, res) {
         });
         break;
 
-      // case "sa":
-      //   record = await generateSaPdf(...);
-      //   break;
-
-      // case "cis":
-      //   record = await generateCisPdf(...);
-      //   break;
-
       default:
-        return res
-          .status(400)
-          .json({ error: `Unsupported PDF type: ${type}` });
+        return res.status(400).json({ error: `Unsupported PDF type: ${type}` });
     }
 
-    return res.status(200).json({
-      success: true,
-      pdf: record,
-    });
+    return res.status(200).json({ success: true, pdf: record });
   } catch (err) {
     console.error("❌ PDF API error:", err);
     return res.status(500).json({ error: "Failed to generate PDF" });

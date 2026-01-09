@@ -1,19 +1,29 @@
 // pages/api/invoices/next-number.ts
+// PURPOSE:
+//   Generate the next invoice number for the authenticated user.
+//
+// POSITION IN PIPELINE:
+//   • Used by the UI when creating a new invoice.
+//   • Does NOT touch money, totals, VAT, or line items.
+//   • Only inspects invoice_number strings.
+//
+// MONEY MODEL:
+//   • No monetary fields are read or written.
+//   • No pence/pounds conversions.
+//   • Safe and correct.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // RBAC: Users, Accountants, and Founder can generate next invoice number
   const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
   if (!guard.ok) return;
 
   const { userId, role, accessibleClients } = guard;
 
   try {
-    // -------------------------------------------------------------
     // Fetch invoice numbers with correct access control
-    // -------------------------------------------------------------
     let query = supabaseAdmin
       .from("invoices")
       .select("invoice_number, user_id, client_id")
@@ -43,9 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json({ nextNumber: "INV-001" });
     }
 
-    // -------------------------------------------------------------
     // Find the highest numeric tail
-    // -------------------------------------------------------------
     let best = "";
     let bestNum = -1;
     let bestPadding = 0;

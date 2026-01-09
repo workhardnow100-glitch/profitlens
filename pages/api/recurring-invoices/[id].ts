@@ -1,4 +1,18 @@
 // pages/api/recurring-invoices/[id].ts
+// PURPOSE:
+// Handles a single recurring invoice schedule for the authenticated business owner.
+// - GET:    Load one recurring schedule (including template_line_items stored in pence).
+// - PUT:    EITHER:
+//           • runNow === true → execute the recurring engine (processRecurringSchedule),
+//             create an invoice, PDF, run log, and return all artefacts.
+//           • normal update → persist schedule/template changes (template_line_items expected in pence).
+// - DELETE: Soft-cancel the schedule by setting active = false.
+// MONEY MODEL:
+// - This route does NOT perform any pounds↔pence conversion itself.
+// - It expects template_line_items.unit_price to already be in pence (handled by the UI).
+// - processRecurringSchedule is responsible for creating invoices in pence, which downstream
+//   PDF/email generators then convert to pounds by dividing by 100.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
@@ -76,7 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           .update({ processing: true })
           .eq("id", schedule.id);
 
-        // Run engine (returns invoice)
+        // Run engine (returns invoice created from this schedule)
         const invoice = await processRecurringSchedule(schedule);
 
         // Fetch PDF metadata
@@ -142,6 +156,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         .from("recurring_invoices")
         .update({
           client_id: clientId,
+          // EXPECTATION: templateLineItems.unit_price is already in pence (UI converts pounds → pence)
           template_line_items: templateLineItems,
           template_payment_instructions: templatePaymentInstructions,
           template_notes: templateNotes,

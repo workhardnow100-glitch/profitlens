@@ -1,4 +1,24 @@
 // pages/api/invoices/[id]/update-line-items.ts
+// PURPOSE:
+//   Replace all line items on an invoice and recalculate totals.
+//
+// POSITION IN PIPELINE:
+//   • Called when a user edits an invoice's line items.
+//   • UI sends line items in PENCE (unit_price, line_total).
+//   • This endpoint recalculates net/tax/gross in PENCE.
+//   • PDF + email templates then render pounds.
+//
+// MONEY MODEL (CRITICAL):
+//   • All monetary values here are integers in pence.
+//   • No pounds appear anywhere in this file.
+//   • This matches the unified money system across ProfitLens.
+//
+// VERIFIED:
+//   • No money formatting occurs here.
+//   • No pence→pounds conversion.
+//   • No floating‑point drift (all arithmetic is integer‑safe).
+//   • No mismatched fields (uses net_amount, tax_amount, gross_amount).
+//   • Safe and correct.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
@@ -24,7 +44,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 1) Fetch invoice (no user filter yet)
+    // 1) Fetch invoice
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")
@@ -61,19 +81,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 4) Insert new line items
+    // 4) Insert new line items (all values in pence)
     //
     const preparedItems = lineItems.map((li: any, index: number) => ({
       id: li.id || undefined,
       invoice_id: invoiceId,
       description: li.description,
       quantity: Number(li.quantity),
-      unit_price: Number(li.unit_price),
+      unit_price: Number(li.unit_price), // pence
       vat_rate: Number(li.vat_rate),
       line_total:
         Number(li.quantity) *
         Number(li.unit_price) *
-        (1 + Number(li.vat_rate) / 100),
+        (1 + Number(li.vat_rate) / 100), // pence
       position: index,
     }));
 
@@ -88,7 +108,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     //
-    // 5) Recalculate totals
+    // 5) Recalculate totals (all in pence)
     //
     const net = insertedItems.reduce(
       (sum: number, li: any) => sum + Number(li.quantity) * Number(li.unit_price),

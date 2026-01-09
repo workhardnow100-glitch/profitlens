@@ -1,4 +1,17 @@
 // pages/api/invoices/settings.ts
+// PURPOSE:
+//   Load or update a user's invoice settings.
+//
+// POSITION IN PIPELINE:
+//   • Stores metadata defaults used when creating new invoices.
+//   • Does NOT touch money, totals, VAT calculations, or line items.
+//   • Safe from all monetary drift.
+//
+// MONEY MODEL:
+//   • No monetary fields are read or written.
+//   • No pence/pounds conversions.
+//   • No risk of affecting invoice totals.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";

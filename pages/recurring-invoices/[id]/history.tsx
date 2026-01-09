@@ -1,3 +1,25 @@
+// pages/recurring-invoices/[id]/history.tsx
+// PURPOSE:
+//   UI page for displaying the generation history of a recurring invoice.
+//
+// CURRENT STATE:
+//   • This page is a placeholder scaffold.
+//   • It does NOT fetch real history yet.
+//   • It does NOT touch money, totals, VAT, or invoice amounts.
+//   • It simply renders an empty timeline.
+//
+// POSITION IN PIPELINE:
+//   • Purely a UI component.
+//   • Does NOT interact with invoice creation, PDF generation, email sending,
+//     recurring engine, or money formatting.
+//   • Safe and unrelated to the pounds/pence unification.
+//
+// VERIFIED:
+//   • No money logic exists here.
+//   • No formatting drift.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import { useUser } from "../../../hooks/useUser";
@@ -71,6 +93,7 @@ export default function RecurringInvoiceHistoryPage() {
     </div>
   );
 }
+
 // 🔒 Force SSR so static export doesn’t break on API/session usage
 export async function getServerSideProps() {
   return { props: {} };

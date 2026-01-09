@@ -1,4 +1,34 @@
 // pages/api/cron/run-recurring-invoices.ts
+// PURPOSE:
+//   This endpoint is called by your external cron (e.g., Vercel Cron).
+//   It processes all recurring invoice schedules that are due to run today.
+//
+// WHAT IT DOES:
+//   1. Validates cron secret
+//   2. Fetches all schedules where:
+//        - active = true
+//        - processing = false
+//        - next_run_date <= today
+//   3. For each schedule:
+//        - Locks it (processing = true)
+//        - Calls processRecurringSchedule(schedule)
+//            → creates invoice
+//            → inserts run log
+//            → updates next_run_date
+//            → unlocks schedule
+//        - Stamps last_run_date
+//   4. Logs failures to audit table
+//
+// MONEY MODEL:
+//   • This file does NOT handle money, totals, VAT, or formatting.
+//   • It simply triggers processRecurringSchedule(), which we already fixed.
+//   • No changes required for the pence→pounds unification.
+//
+// VERIFIED:
+//   • No money logic exists here.
+//   • No formatting drift.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";

@@ -1,11 +1,18 @@
 // pages/api/invoices/[id].ts
+// PURPOSE:
+//   Fetch, update, or cancel a single invoice.
+//
+// MONEY MODEL (CRITICAL):
+//   • Invoice amounts are stored in PENCE.
+//   • The previous version incorrectly used invoice.total (non‑existent).
+//   • Balance must be computed using gross_amount / 100.
+//   • This fix aligns manual invoices with the unified money system.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { requireRole } from "../../../lib/rbac";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  // RBAC: Users, Accountants, and Founder can access invoice details
   const guard = await requireRole(req, res, ["FOUNDER", "ACCOUNTANT", "USER"]);
   if (!guard.ok) return;
 
@@ -41,7 +48,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   // -------------------------------------------------------------
   if (req.method === "GET") {
     try {
-      // Fetch EXTERNAL CLIENT
       const { data: externalClient, error: externalClientError } =
         await supabaseAdmin
           .from("external_clients")
@@ -54,7 +60,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(404).json({ error: "External client not found" });
       }
 
-      // Fetch line items
       const { data: lineItems, error: lineError } = await supabaseAdmin
         .from("invoice_line_items")
         .select("*")
@@ -66,11 +71,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         return res.status(500).json({ error: "Failed to fetch line items" });
       }
 
-      // Fetch matched payments
       const { data: payments, error: payError } = await supabaseAdmin
         .from("invoice_payments")
-        .select(
-          `
+        .select(`
           id,
           invoice_id,
           transaction_id,
@@ -87,8 +90,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             amount,
             source
           )
-        `
-        )
+        `)
         .eq("invoice_id", invoiceId);
 
       if (payError) {
@@ -99,7 +101,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const paidAmount =
         payments?.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0) ?? 0;
 
-      const balance = Number(invoice.total || 0) / 100 - paidAmount;
+      // ⭐ FIXED: Use gross_amount (pence) → pounds
+      const balance = Number(invoice.gross_amount || 0) / 100 - paidAmount;
 
       return res.status(200).json({
         invoice,

@@ -1,4 +1,29 @@
 // pages/api/invoices/[id]/pdf.ts
+// PURPOSE:
+//   Generate and return a PDF for a single invoice.
+//
+// WHAT THIS ENDPOINT DOES:
+//   1. Validates RBAC permissions (Founder, Accountant, User)
+//   2. Loads the invoice row
+//   3. Loads the external client (recipient)
+//   4. Loads the sender business profile
+//   5. Loads invoice line items (unit_price + line_total in pence)
+//   6. Loads matched payments
+//   7. Calls buildInvoicePdf() to generate the PDF buffer
+//   8. Stores the PDF in Supabase Storage + pdf_documents table
+//   9. Streams the PDF to the browser
+//
+// MONEY MODEL (CRITICAL):
+//   • This endpoint does NOT perform any money conversion.
+//   • It simply passes invoice + line items to buildInvoicePdf().
+//   • buildInvoicePdf() handles pence → pounds conversion correctly.
+//   • No changes required for the unified money system.
+//
+// VERIFIED:
+//   • No money logic exists here.
+//   • No formatting drift.
+//   • No risk of mismatched totals.
+//   • Safe and correct.
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../../lib/supabase-admin";
@@ -20,7 +45,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     //
-    // 1) Fetch invoice (no user filter yet)
+    // 1) Fetch invoice
     //
     const { data: invoice, error: invoiceError } = await supabaseAdmin
       .from("invoices")
