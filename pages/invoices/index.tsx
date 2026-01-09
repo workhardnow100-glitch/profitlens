@@ -361,7 +361,8 @@ export default function InvoicesPage() {
                     £{inv.paidAmount.toFixed(2)} / £{inv.grossAmount.toFixed(2)}
                     {balance > 0 && (
                       <div className="text-xs text-gray-500">
-                        Balance £{balance.toFixed(2)}
+                        Balance £{(balance / 100).toFixed(2)}
+
                       </div>
                     )}
                   </td>

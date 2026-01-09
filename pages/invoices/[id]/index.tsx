@@ -330,9 +330,10 @@ if (matchResult?.matched && matchResult.match?.transaction) {
 
         {/* Paid / Balance summary */}
         <div className="text-sm text-gray-600">
-          Paid: £{paidAmount.toFixed(2)}
+          Paid: Paid: £{(paidAmount / 100).toFixed(2)}
           <br />
-          Balance: £{balance.toFixed(2)}
+          Balance: £{(balance / 100).toFixed(2)}
+
         </div>
       </div>
 
@@ -466,7 +467,8 @@ if (matchResult?.matched && matchResult.match?.transaction) {
                 <td className="px-4 py-2">{li.description}</td>
                 <td className="px-4 py-2 text-right">{li.quantity}</td>
                 <td className="px-4 py-2 text-right">
-                  £{li.unit_price.toFixed(2)}
+                  £{(li.unit_price / 100).toFixed(2)}
+
                 </td>
                 <td className="px-4 py-2 text-right">{li.vat_rate}%</td>
                 <td className="px-4 py-2 text-right">
