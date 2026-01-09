@@ -112,7 +112,7 @@ export default async function handler(req, res) {
 
   try {
     // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
     if (!guard.ok) return;
 
     const role = guard.role;
@@ -120,17 +120,15 @@ export default async function handler(req, res) {
     const isAccountant = role === "ACCOUNTANT";
 
     const subscriptionStatus = req?.session?.user?.subscriptionStatus;
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      subscriptionStatus
-    );
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
 
     // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ⭐ Accountant-aware client ID
-    const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
+    // ⭐ Unified client resolution for ALL roles
+    const clientId = guard.actingAsClientId || guard.clientId;
 
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
@@ -157,19 +155,13 @@ export default async function handler(req, res) {
 
     // ⭐ Build filters
     const filters = {
-      ...(from && !isNaN(new Date(from)) && {
-        gte: new Date(from).toISOString(),
-      }),
-      ...(to && !isNaN(new Date(to)) && {
-        lte: new Date(to).toISOString(),
-      }),
+      ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
+      ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
     let txQuery = supabaseAdmin
       .from("transactions")
-      .select(
-        "id, date, description, amount, business_category, type, is_reversal"
-      )
+      .select("id, date, description, amount, business_category, type, is_reversal")
       .eq("client_id", clientId);
 
     if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
@@ -192,10 +184,7 @@ export default async function handler(req, res) {
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const month = date.toLocaleString("en-US", {
-        month: "short",
-        year: "numeric",
-      });
+      const month = date.toLocaleString("en-US", { month: "short", year: "numeric" });
       const quarter = getQuarter(tx.date);
       const year = String(date.getFullYear());
 
@@ -233,15 +222,12 @@ export default async function handler(req, res) {
 
         bucket.net = bucket.revenue - bucket.expenses;
 
-        bucket.categories[category] =
-          (bucket.categories[category] || 0) + amount;
+        bucket.categories[category] = (bucket.categories[category] || 0) + amount;
 
         bucket.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description
-            ? String(tx.description).trim()
-            : "Unlabeled",
+          description: tx.description ? String(tx.description).trim() : "Unlabeled",
           amount: formatCurrency(tx.amount),
           category,
         });
@@ -331,3 +317,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to generate report" });
   }
 }
+
