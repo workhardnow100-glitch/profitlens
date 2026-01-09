@@ -447,7 +447,38 @@ export default function InvoiceViewPage() {
                 <td className="px-4 py-2">{li.description}</td>
                 <td className="px-4 py-2 text-right">{li.quantity}</td>
                 <td className="px-4 py-2 text-right">
+                  {/* Line items */}
+      <div className="rounded-md border overflow-hidden">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-2 text-left">Description</th>
+              <th className="px-4 py-2 text-right">Qty</th>
+              <th className="px-4 py-2 text-right">Unit</th>
+              <th className="px-4 py-2 text-right">VAT</th>
+              <th className="px-4 py-2 text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {lineItems.map((li) => (
+              <tr key={li.id}>
+                <td className="px-4 py-2">{li.description}</td>
+                <td className="px-4 py-2 text-right">{li.quantity}</td>
+                <td className="px-4 py-2 text-right">
                   £{li.unit_price.toFixed(2)}
+                </td>
+                <td className="px-4 py-2 text-right">{li.vat_rate}%</td>
+                <td className="px-4 py-2 text-right">
+                  £{(
+  (li.quantity * li.unit_price * (1 + li.vat_rate / 100)) / 100
+).toFixed(2)}
+
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
                 </td>
                 <td className="px-4 py-2 text-right">{li.vat_rate}%</td>
                 <td className="px-4 py-2 text-right">
