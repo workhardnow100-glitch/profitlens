@@ -120,7 +120,7 @@ export default function NewRecurringInvoicePage() {
           templateLineItems: lineItems.map((li) => ({
             description: li.description,
             quantity: li.quantity,
-            unit_price: li.unit_price,
+            unit_price: Math.round(li.unit_price * 100),
             vat_rate: li.vat_rate,
           })),
           templatePaymentInstructions: paymentInstructions,
