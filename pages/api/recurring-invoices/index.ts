@@ -40,7 +40,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!session?.user) return res.status(401).json({ error: "Unauthorised" });
 
   // Business owner (or acting-as client business)
-  const businessOwnerId = session.user.actingAsClientId || session.user.id;
+  const businessOwnerId = session.user.id; // ALWAYS the real user
+const actingClientId = session.user.actingAsClientId || session.user.clientId;
+
 
   // -------------------------------------------------------------
   // GET — List recurring schedules
@@ -90,29 +92,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       const now = new Date().toISOString();
 
-      const { data, error } = await supabaseAdmin
-        .from("recurring_invoices")
-        .insert({
-          user_id: businessOwnerId,
-          client_id: clientId,
-          template_line_items: templateLineItems, // EXPECTED: already in pence
-          template_payment_instructions: templatePaymentInstructions,
-          template_notes: templateNotes,
-          frequency_type: frequencyType,
-          interval,
-          day_of_week: dayOfWeek,
-          day_of_month: dayOfMonth,
-          custom_rule: customRule,
-          start_date: startDate,
-          next_run_date: startDate, // first run = start date
-          end_date: endDate || null,
-          active: true,
-          processing: false,
-          created_at: now,
-          updated_at: now,
-        })
-        .select()
-        .single();
+     const { data, error } = await supabaseAdmin
+  .from("recurring_invoices")
+  .insert({
+    user_id: businessOwnerId,       // always the real user
+    client_id: clientId,            // the client selected in the UI
+    template_line_items: templateLineItems,
+    template_payment_instructions: templatePaymentInstructions,
+    template_notes: templateNotes,
+    frequency_type: frequencyType,
+    interval,
+    day_of_week: dayOfWeek,
+    day_of_month: dayOfMonth,
+    custom_rule: customRule,
+    start_date: startDate,
+    next_run_date: startDate,
+    end_date: endDate || null,
+    active: true,
+    processing: false,
+    created_at: now,
+    updated_at: now,
+  })
+  .select()
+  .single();
+
 
       if (error) {
         console.error("Supabase insert error:", error);
