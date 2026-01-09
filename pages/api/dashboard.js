@@ -65,15 +65,11 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ⭐ Accountant-aware client ID with founder bypass
-  let clientId = guard.actingAsClientId || guard.clientId;
+  // ⭐ Accountant-aware client ID
+  const clientId = guard.actingAsClientId || guard.clientId;
 
-  // Founders do NOT require a clientId
-  if (!clientId && isFounder) {
-    clientId = null;
-  }
-
-  if (!clientId && !isFounder) {
+  // Everyone, including founders, must have a valid clientId for this endpoint
+  if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
