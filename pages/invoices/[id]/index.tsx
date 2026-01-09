@@ -179,22 +179,23 @@ export default function InvoiceViewPage() {
   }
 
   if (payments.length > 0) {
-    payments.forEach((p) => {
-      activityEntries.push({
-        label: "Payment received",
-        detail: `£${p.amount.toFixed(2)}${
-          p.created_at ? ` • ${new Date(p.created_at).toLocaleString()}` : ""
-        }`,
-      });
-    });
-  }
-
-  if (matchResult?.matched && matchResult.match?.transaction) {
+  payments.forEach((p) => {
     activityEntries.push({
-      label: "Matching engine",
-      detail: `Matched transaction on ${matchResult.match.transaction.date} with ${matchResult.match.confidence}% confidence`,
+      label: "Payment received",
+      detail: `£${(p.amount / 100).toFixed(2)}${
+        p.created_at ? ` • ${new Date(p.created_at).toLocaleString()}` : ""
+      }`,
     });
-  }
+  });
+}
+
+if (matchResult?.matched && matchResult.match?.transaction) {
+  activityEntries.push({
+    label: "Matching engine",
+    detail: `Matched transaction on ${matchResult.match.transaction.date} with ${matchResult.match.confidence}% confidence`,
+  });
+}
+
 
   // -----------------------------
   // UI
