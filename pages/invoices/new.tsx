@@ -229,18 +229,32 @@ export default function NewInvoicePage() {
   );
   const grossTotal = subtotal + vatTotal;
 
-  // -----------------------------
-  // Line item handlers
-  // -----------------------------
-  const handleLineChange = (id: string, field: keyof LineItem, value: any) => {
-    setLineItems((items) =>
-      items.map((li) =>
-        li.id === id
-          ? { ...li, [field]: field === "description" ? value : Number(value) }
-          : li
-      )
-    );
-  };
+// -----------------------------
+// Line item handlers
+// -----------------------------
+const handleLineChange = (
+  id: string,
+  field: string,   // <-- FIXED: no more LineItemTemplate reference
+  value: any
+) => {
+  setLineItems((items) =>
+    items.map((li) =>
+      li.id === id
+        ? {
+            ...li,
+            [field]:
+              field === "description"
+                ? value
+                : field === "unit_price"
+                ? parseFloat(value || "0") // keep pounds as pounds, prevent NaN
+                : Number(value || 0),
+          }
+        : li
+    )
+  );
+};
+
+
 
   const addLine = () =>
     setLineItems((items) => [
