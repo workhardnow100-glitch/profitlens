@@ -52,7 +52,7 @@ const ALLOWED_CATEGORIES = new Set([
 
 export default async function handler(req, res) {
   // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
   if (!guard.ok) return;
 
   const role = guard.role;
@@ -69,8 +69,8 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ⭐ Accountant-aware client ID
-  const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
+  // ⭐ Unified client resolution for ALL roles
+  const clientId = guard.actingAsClientId || guard.clientId;
 
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
