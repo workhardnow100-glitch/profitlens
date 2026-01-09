@@ -34,7 +34,6 @@
  *     MUST be reflected here and in the Dashboard UI.
  * ============================================================
  */
-
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
@@ -52,7 +51,6 @@ const ALLOWED_CATEGORIES = new Set([
 export default async function handler(req, res) {
   // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
   const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
-
   if (!guard.ok) return;
 
   const role = guard.role;
@@ -60,19 +58,22 @@ export default async function handler(req, res) {
   const isAccountant = role === "ACCOUNTANT";
 
   const subscriptionStatus = req?.session?.user?.subscriptionStatus || "incomplete";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    subscriptionStatus
-  );
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
 
   // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ⭐ Accountant-aware client ID
-  const clientId = guard.actingAsClientId || guard.clientId;
+  // ⭐ Accountant-aware client ID with founder bypass
+  let clientId = guard.actingAsClientId || guard.clientId;
 
-  if (!clientId || clientId === "unknown-client") {
+  // Founders do NOT require a clientId
+  if (!clientId && isFounder) {
+    clientId = null;
+  }
+
+  if (!clientId && !isFounder) {
     return res.status(400).json({ error: "Invalid client ID" });
   }
 
@@ -81,9 +82,7 @@ export default async function handler(req, res) {
   ------------------------------------------------------- */
   if (req.method === "PATCH") {
     if (isAccountant) {
-      return res
-        .status(403)
-        .json({ error: "Accountants cannot modify data" });
+      return res.status(403).json({ error: "Accountants cannot modify data" });
     }
 
     try {
@@ -110,9 +109,7 @@ export default async function handler(req, res) {
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant
-            ? "ACCOUNTANT_UPDATE_CATEGORY"
-            : "UPDATE_CATEGORY",
+          action: isAccountant ? "ACCOUNTANT_UPDATE_CATEGORY" : "UPDATE_CATEGORY",
           details: `Updated transaction ${id} category to ${category}`,
           timestamp: new Date().toISOString(),
         },
@@ -130,9 +127,7 @@ export default async function handler(req, res) {
   ------------------------------------------------------- */
   if (req.method === "DELETE") {
     if (isAccountant) {
-      return res
-        .status(403)
-        .json({ error: "Accountants cannot delete data" });
+      return res.status(403).json({ error: "Accountants cannot delete data" });
     }
 
     try {
@@ -147,9 +142,7 @@ export default async function handler(req, res) {
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant
-            ? "ACCOUNTANT_DELETE_TRANSACTIONS"
-            : "DELETE_TRANSACTIONS",
+          action: isAccountant ? "ACCOUNTANT_DELETE_TRANSACTIONS" : "DELETE_TRANSACTIONS",
           details: `Deleted ${count} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -230,9 +223,7 @@ export default async function handler(req, res) {
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant
-            ? "ACCOUNTANT_FETCH_DASHBOARD"
-            : "FETCH_DASHBOARD",
+          action: isAccountant ? "ACCOUNTANT_FETCH_DASHBOARD" : "FETCH_DASHBOARD",
           details: `Returned ${transactions?.length ?? 0} transactions`,
           timestamp: new Date().toISOString(),
         },
