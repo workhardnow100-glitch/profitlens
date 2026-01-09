@@ -370,8 +370,9 @@ const handleSave = async () => {
               <div className="text-gray-600">
                 Total:{" "}
                 {runResult.invoice?.gross_amount != null
-                  ? `£${Number(runResult.invoice.gross_amount).toFixed(2)}`
-                  : "—"}
+  ? `£${(Number(runResult.invoice.gross_amount) / 100).toFixed(2)}`
+  : "—"}
+
               </div>
               <div className="text-gray-600">
                 Status: {runResult.invoice?.status || "—"}
