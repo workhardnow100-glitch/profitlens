@@ -30,7 +30,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "Invalid ID" });
   }
 
-  const businessOwnerId = session.user.actingAsClientId || session.user.id;
+  const businessOwnerId = session.user.id; // ALWAYS the real user
+
 
   // -------------------------------------------------------------
   // GET — Fetch schedule
