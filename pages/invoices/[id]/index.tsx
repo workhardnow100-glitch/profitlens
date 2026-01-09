@@ -481,66 +481,68 @@ if (matchResult?.matched && matchResult.match?.transaction) {
         </table>
       </div>
                 </td>
-                <td className="px-4 py-2 text-right">{li.vat_rate}%</td>
-                <td className="px-4 py-2 text-right">
-                  £{(li.quantity * li.unit_price * (1 + li.vat_rate / 100)).toFixed(2)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+<td className="px-4 py-2 text-right">{li.vat_rate}%</td>
+<td className="px-4 py-2 text-right">
+  £{(
+    (li.quantity * li.unit_price * (1 + li.vat_rate / 100)) / 100
+  ).toFixed(2)}
+</td>
+</tr>
+))}
+</tbody>
+</table>
+</div>
 
-      {/* Summary */}
-      <div className="flex justify-end">
-        <div className="w-64 space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span>£{subtotal.toFixed(2)}</span>
+{/* Summary */}
+<div className="flex justify-end">
+  <div className="w-64 space-y-2 text-sm">
+    <div className="flex justify-between">
+      <span>Subtotal</span>
+      <span>£{(subtotal / 100).toFixed(2)}</span>
+    </div>
+    <div className="flex justify-between">
+      <span>VAT</span>
+      <span>£{(vatTotal / 100).toFixed(2)}</span>
+    </div>
+    <div className="flex justify-between font-semibold">
+      <span>Total</span>
+      <span>£{(grossTotal / 100).toFixed(2)}</span>
+    </div>
+  </div>
+</div>
+
+{/* Payments */}
+<div className="rounded-md border p-6 space-y-4">
+  <h2 className="text-lg font-semibold">Payments</h2>
+
+  {payments.length === 0 ? (
+    <p className="text-sm text-gray-500">No payments yet.</p>
+  ) : (
+    <div className="space-y-3">
+      {payments.map((p) => (
+        <div
+          key={p.id}
+          className="rounded-md border p-3 text-sm flex justify-between"
+        >
+          <div>
+            <div>£{(p.amount / 100).toFixed(2)}</div>
+            <div className="text-gray-500">
+              {p.match_confidence} confidence • {p.source}
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span>VAT</span>
-            <span>£{vatTotal.toFixed(2)}</span>
-          </div>
-          <div className="flex justify-between font-semibold">
-            <span>Total</span>
-            <span>£{grossTotal.toFixed(2)}</span>
+          <div className="text-right">
+            <div className="text-gray-500">
+              {p.transactions?.date?.slice(0, 10)}
+            </div>
+            <div className="text-gray-500">
+              {p.transactions?.description}
+            </div>
           </div>
         </div>
-      </div>
-
-      {/* Payments */}
-      <div className="rounded-md border p-6 space-y-4">
-        <h2 className="text-lg font-semibold">Payments</h2>
-
-        {payments.length === 0 ? (
-          <p className="text-sm text-gray-500">No payments yet.</p>
-        ) : (
-          <div className="space-y-3">
-            {payments.map((p) => (
-              <div
-                key={p.id}
-                className="rounded-md border p-3 text-sm flex justify-between"
-              >
-                <div>
-                  <div>£{p.amount.toFixed(2)}</div>
-                  <div className="text-gray-500">
-                    {p.match_confidence} confidence • {p.source}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-gray-500">
-                    {p.transactions?.date?.slice(0, 10)}
-                  </div>
-                  <div className="text-gray-500">
-                    {p.transactions?.description}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      ))}
     </div>
-  );
+  )}
+</div>
+</div>
+);
 }
