@@ -24,6 +24,49 @@
 // - ProfitLens subscription billing
 // Those are handled by separate webhooks.
 // -------------------------------------------------------------
+/**
+ * ============================================================
+ * File: pages/api/payments/stripe-connect-webhook.ts
+ * Purpose:
+ *   STRIPE CONNECT + PAYOUTS WEBHOOK
+ *
+ *   Handles Stripe events related to:
+ *     - Connected account onboarding (account.updated)
+ *     - Payouts (payout.paid, payout.failed)
+ *     - Balance updates (balance.available)
+ *     - Webhook health + logging
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Verified exclusively via Stripe webhook signature.
+ *       • No user/session context is trusted here.
+ *   - Stripe verification:
+ *       • Uses STRIPE_CONNECT_WEBHOOK_SECRET to validate signature.
+ *       • Rejects on any mismatch.
+ *   - Data handling:
+ *       • Updates:
+ *           – payment_settings
+ *           – payment_payouts
+ *           – payment_balance_items
+ *           – payment_webhook_log
+ *       • All writes use supabaseAdmin (service role) under strict control.
+ *   - RLS Alignment:
+ *       • payment_settings, payment_payouts, payment_balance_items
+ *         are protected by RLS for normal users.
+ *       • Webhook bypasses RLS using service role (correct).
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • payout semantics
+ *       • payment_settings schema
+ *       • Stripe Connect onboarding metadata
+ *     MUST be reflected in:
+ *       • onboarding UI
+ *       • payout reporting UI
+ *       • accountant dashboards
+ * ============================================================
+ */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
@@ -33,7 +76,9 @@ export const config = {
   api: { bodyParser: false },
 };
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+ 
+});
 
 // -------------------------------------------------------------
 // Helper: Read raw body for signature verification
@@ -97,7 +142,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         const payoutsEnabled = account.payouts_enabled ?? false;
         const chargesEnabled = account.charges_enabled ?? false;
 
-        // Safe narrowing: only bank accounts have routing_number + last4
         const externalBank = account.external_accounts?.data?.[0] ?? null;
 
         const bankLast4 =

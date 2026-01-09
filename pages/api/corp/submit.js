@@ -1,4 +1,46 @@
-// pages/api/ct/submit.js
+/**
+ * ============================================================
+ * File: pages/api/ct/submit.js
+ * Purpose:
+ *   Perform a Corporation Tax submission for a specific client:
+ *     - Classify transactions (income / allowable / disallowable)
+ *     - Compute profit and adjusted profit
+ *     - Apply marginal relief rules
+ *     - Lock transactions for the period
+ *     - Insert a CT submission record
+ *     - Return a simulated HMRC response
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May submit CT for actingAsClientId.
+ *       • USER:
+ *           – May submit CT for their own clientId.
+ *       • FOUNDER:
+ *           – May submit CT for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Anti‑spoofing:
+ *       • clientId is derived from session, not request body.
+ *   - Data handling:
+ *       • All reads/writes are client‑scoped via client_id.
+ *       • Transactions are permanently locked after submission.
+ *   - Audit logging:
+ *       • Logs SUBMIT_CT / ACCOUNTANT_SUBMIT_CT.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP semantics
+ *       • transaction schema (CT fields)
+ *       • marginal relief rules
+ *     MUST be reflected here and in the CT UI.
+ * ============================================================
+ */
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -25,39 +67,47 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Session validation
+  // ⭐ Session validation
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  // Normalize role
+  // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+  const subscriptionStatus = session.user.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
-  // Subscription gating (accountants + founders bypass)
+  // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // Accountant-aware client ID
+  // ⭐ Accountant-aware client ID
   const clientId = isAccountant
     ? session.user.actingAsClientId
     : session.user.clientId || session.user.defaultClientId;
 
-  if (!clientId) {
+  if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "No client selected" });
   }
 
-  const { periodStart, periodEnd } = req.body;
+  const { periodStart, periodEnd } = req.body || {};
+
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
+  const startDate = new Date(periodStart);
+  const endDate = new Date(periodEnd);
+  if (isNaN(startDate) || isNaN(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: "Invalid period range" });
+  }
+
   try {
-    // Audit log — all roles
+    // ⭐ Audit log — all roles
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -85,7 +135,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Prevent double submission
+    // ⭐ Prevent double submission
     if (txs.some((tx) => tx.tax_locked === true)) {
       return res.status(400).json({
         error: "This CT period is already locked and submitted.",
@@ -141,7 +191,7 @@ export default async function handler(req, res) {
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // Lock transactions
+    // ⭐ Lock transactions
     await supabaseAdmin
       .from("transactions")
       .update({ tax_locked: true })
@@ -149,7 +199,7 @@ export default async function handler(req, res) {
       .gte("date", periodStart)
       .lte("date", periodEnd);
 
-    // Insert CT submission record
+    // ⭐ Insert CT submission record
     const { data: submission, error: insertError } = await supabaseAdmin
       .from("corp_submissions")
       .insert([

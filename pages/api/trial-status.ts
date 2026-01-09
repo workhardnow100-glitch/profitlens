@@ -11,7 +11,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const session = await getServerSession(req, res, authOptions);
 
-    // If no session, treat as guest (trial not started yet)
+    // ⭐ Guest mode — no session means no trial
     if (!session?.user?.id) {
       return res.status(200).json({
         trialActive: false,
@@ -20,19 +20,31 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
+    const userId = session.user.id;
+
+    // ⭐ Fetch subscription
     const { data: sub, error } = await supabaseAdmin
       .from("subscriptions")
       .select("status, trial_end")
-      .eq("user_id", session.user.id)
-      .single();
+      .eq("user_id", userId)
+      .maybeSingle();
 
     if (error) {
       console.error("Supabase error:", error.message);
-      return res.status(500).json({ trialActive: false, error: error.message });
+      return res.status(500).json({
+        trialActive: false,
+        status: "error",
+        error: error.message,
+      });
     }
 
+    // ⭐ No subscription row yet
     if (!sub) {
-      return res.status(200).json({ trialActive: false, status: "none" });
+      return res.status(200).json({
+        trialActive: false,
+        trialEndsAt: null,
+        status: "none",
+      });
     }
 
     const now = new Date();
@@ -47,6 +59,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
   } catch (err: any) {
     console.error("Handler error:", err);
-    return res.status(500).json({ trialActive: false, error: "Internal server error" });
+    return res.status(500).json({
+      trialActive: false,
+      status: "error",
+      error: "Internal server error",
+    });
   }
 }

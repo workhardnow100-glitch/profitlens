@@ -1,4 +1,38 @@
-// pages/api/checkout.js
+/**
+ * ============================================================
+ * File: pages/api/checkout.js
+ * Purpose:
+ *   Initiate a Stripe Checkout session for upgrading a ProfitLens
+ *   subscription (basic → pro, or new subscription).
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT cannot upgrade subscriptions.
+ *       • USER may upgrade only their own subscription.
+ *       • FOUNDER may upgrade freely (bypass gating).
+ *   - Subscription gating:
+ *       • USER must already be subscribed or trialing to upgrade.
+ *       • ACCOUNTANT bypass is explicitly blocked.
+ *   - Stripe metadata:
+ *       • Includes client_id, user_id, plan.
+ *       • Used by subscription webhook to sync app_users + subscriptions.
+ *   - Audit logging:
+ *       • Logs STRIPE_CHECKOUT_INITIATED with plan + client context.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • plan names (basic/pro)
+ *       • subscription_status semantics
+ *       • Stripe price IDs
+ *     MUST be reflected in:
+ *       • subscription webhook
+ *       • frontend upgrade UI
+ * ============================================================
+ */
+
 import Stripe from "stripe";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
@@ -20,18 +54,22 @@ export default async function handler(req, res) {
 
   const user = session.user;
   const role = (user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     user.subscriptionStatus
   );
 
-  // ❌ Accountants cannot upgrade subscriptions
+  // ⭐ Accountants cannot upgrade subscriptions
   if (isAccountant) {
-    return res.status(403).json({ error: "Accountants cannot upgrade subscriptions" });
+    return res
+      .status(403)
+      .json({ error: "Accountants cannot upgrade subscriptions" });
   }
 
-  // Business owners must be subscribed or trialing to upgrade
+  // ⭐ Business owners must be subscribed or trialing to upgrade
   if (!isFounder && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade not permitted" });
   }
@@ -63,7 +101,7 @@ export default async function handler(req, res) {
       },
     });
 
-    // Audit log
+    // ⭐ Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: user.clientId,
@@ -76,7 +114,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ id: stripeSession.id });
   } catch (err) {
-    console.error("Stripe session error:", err.message);
-    return res.status(500).json({ error: err.message || "Internal server error" });
+    console.error("Stripe session error:", err);
+    return res
+      .status(500)
+      .json({ error: err.message || "Internal server error" });
   }
 }

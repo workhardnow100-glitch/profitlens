@@ -1,16 +1,40 @@
-// pages/api/pdf.js
-// PURPOSE:
-//   Generate various PDF types (VAT, CT600, Profile, Reports).
-//
-// POSITION IN PIPELINE:
-//   • This endpoint orchestrates PDF generation.
-//   • It does NOT calculate money, VAT, totals, or invoice amounts.
-//   • All monetary logic lives inside the individual PDF templates.
-//
-// MONEY MODEL:
-//   • No monetary fields are read or written here.
-//   • No pence/pounds conversions.
-//   • Safe and correct.
+/**
+ * ============================================================
+ * File: pages/api/pdf.js
+ * Purpose:
+ *   Generate HMRC‑style PDFs for:
+ *     - VAT returns
+ *     - CT600 summaries
+ *     - Profile summaries
+ *     - Reports exports
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May generate PDFs for actingAsClientId.
+ *       • USER:
+ *           – May generate PDFs for their own clientId.
+ *       • FOUNDER:
+ *           – May generate PDFs for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Anti‑spoofing:
+ *       • Ignores clientId from body; uses session‑resolved clientId only.
+ *   - Data handling:
+ *       • This endpoint does NOT calculate money.
+ *       • All monetary logic lives inside the PDF templates.
+ *   - Audit logging:
+ *       • Logs GENERATE_PDF / ACCOUNTANT_GENERATE_PDF.
+ *
+ * Change Control:
+ *   - Any change to PDF templates or report structures
+ *     MUST be reflected here and in the PDF UI.
+ * ============================================================
+ */
 
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
@@ -27,25 +51,38 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ⭐ Session validation
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // ⭐ Role normalization
     const role = (session.user.role || "").toUpperCase();
-    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const isFounder = role === "FOUNDER";
     const isAccountant = role === "ACCOUNTANT";
+    const subscriptionStatus = session.user.subscriptionStatus;
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
+      subscriptionStatus
     );
 
+    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
+    // ⭐ Accountant-aware client ID (ignore rawClientId)
+    const clientId = isAccountant
+      ? session.user.actingAsClientId
+      : session.user.clientId || session.user.defaultClientId;
+
+    if (!clientId || clientId === "unknown-client") {
+      return res.status(400).json({ error: "Invalid client ID" });
+    }
+
+    // ⭐ Extract fields
     const {
       type,
-      clientId: rawClientId,
       periodStart,
       periodEnd,
       vatBoxes,
@@ -71,18 +108,11 @@ export default async function handler(req, res) {
       filename,
     } = req.body || {};
 
-    const clientId = isAccountant
-      ? session.user.actingAsClientId
-      : session.user.clientId || session.user.defaultClientId;
-
     if (!type) {
       return res.status(400).json({ error: "Missing PDF type" });
     }
 
-    if (!clientId || clientId === "unknown-client") {
-      return res.status(400).json({ error: "Invalid client ID" });
-    }
-
+    // ⭐ Type-specific validation
     if (type === "vat" && (!periodStart || !periodEnd || !vatBoxes)) {
       return res.status(400).json({ error: "Missing VAT fields" });
     }
@@ -99,6 +129,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing profile fields" });
     }
 
+    // ⭐ Filename
     const baseFilename =
       filename ||
       `${type}-${clientId}-${
@@ -107,6 +138,7 @@ export default async function handler(req, res) {
 
     const createdBy = session.user.email || null;
 
+    // ⭐ Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -117,6 +149,7 @@ export default async function handler(req, res) {
       },
     ]);
 
+    // ⭐ Dispatch to correct PDF generator
     let record;
 
     switch (type) {

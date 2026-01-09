@@ -1,4 +1,46 @@
-// pages/api/ct/summary.js
+/**
+ * ============================================================
+ * File: pages/api/ct/summary.js
+ * Purpose:
+ *   Compute Corporation Tax summary for a specific client over
+ *   a given accounting period:
+ *     - Income / allowable / disallowable totals
+ *     - Profit and adjusted profit
+ *     - Marginal‑relief‑aware Corporation Tax due
+ *     - Effective tax rate
+ *     - Per‑transaction CT classification breakdown
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May view CT summary for actingAsClientId.
+ *       • USER:
+ *           – May view CT summary for their own clientId.
+ *       • FOUNDER:
+ *           – May view CT summary for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *       • Only transactions with includedinct = true are used.
+ *       • Asset balancing charges/allowances are applied to
+ *         adjusted profit.
+ *   - Audit logging:
+ *       • Logs VIEW_CT_SUMMARY / ACCOUNTANT_VIEW_CT_SUMMARY.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP semantics
+ *       • transaction schema (CT fields)
+ *       • marginal relief rules
+ *     MUST be reflected here and in the CT UI.
+ * ============================================================
+ */
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -41,41 +83,49 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Session validation
+  // ⭐ Session validation
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  // Normalize role
+  // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+  const subscriptionStatus = session.user.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
-  // Subscription gating (accountants + founders bypass)
+  // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // Accountant-aware client ID
+  // ⭐ Accountant-aware client ID
   const clientId = isAccountant
     ? session.user.actingAsClientId
     : session.user.clientId || session.user.defaultClientId;
 
-  if (!clientId) {
+  if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "No client selected" });
   }
 
-  const { periodStart, periodEnd } = req.body;
+  const { periodStart, periodEnd } = req.body || {};
+
   if (!periodStart || !periodEnd) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
+  const startDate = new Date(periodStart);
+  const endDate = new Date(periodEnd);
+  if (isNaN(startDate) || isNaN(endDate) || startDate > endDate) {
+    return res.status(400).json({ error: "Invalid period range" });
+  }
+
   try {
-    // Audit log — all roles
+    // ⭐ Audit log — all roles
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,

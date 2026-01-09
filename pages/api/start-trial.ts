@@ -2,7 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import type { NextApiRequest, NextApiResponse } from "next";
-import { randomUUID } from "crypto"; // ✅ import randomUUID directly
+import { randomUUID } from "crypto";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
@@ -12,20 +12,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const session = await getServerSession(req, res, authOptions);
 
-    let userId = session?.user?.id;
-    let email = session?.user?.email;
+    let userId = session?.user?.id ?? null;
+    let email = session?.user?.email ?? null;
+    let clientId = session?.user?.clientId ?? null;
 
-    // If no session, allow guest trial creation by email
-    if (!userId) {
-      const { guestEmail } = req.body;
+    const isAuthenticated = Boolean(session?.user);
+
+    // ============================================================
+    // 1. Guest trial creation (no session)
+    // ============================================================
+    if (!isAuthenticated) {
+      const { guestEmail } = req.body || {};
       if (!guestEmail) {
         return res.status(400).json({ error: "Email required to start trial" });
       }
-      email = guestEmail.trim().toLowerCase();
-      userId = randomUUID(); // ✅ pure UUID
 
-      // 1️⃣ Create stub client row
-      const clientId = randomUUID();
+      email = guestEmail.trim().toLowerCase();
+      userId = randomUUID();
+      clientId = randomUUID();
+
+      // Create stub client
       const { error: clientError } = await supabaseAdmin.from("clients").insert({
         id: clientId,
         name: `Trial Client for ${email}`,
@@ -34,39 +40,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
+
       if (clientError) {
         console.error("Supabase client insert error:", clientError.message);
         return res.status(500).json({ error: clientError.message });
       }
 
-      // 2️⃣ Insert stub app_user row referencing that client
+      // Create stub user
       const { error: userInsertError } = await supabaseAdmin.from("app_users").insert({
         id: userId,
         email,
         role: "user",
-        subscription_status: "trialing", // ✅ mark as trialing
+        subscription_status: "trialing",
         default_client_id: clientId,
-        client_id: clientId, // ✅ explicitly set so adapter check passes
+        client_id: clientId,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
+
       if (userInsertError) {
         console.error("Supabase app_users insert error:", userInsertError.message);
         return res.status(500).json({ error: userInsertError.message });
       }
     }
 
-    // Check existing subscription
+    // ============================================================
+    // 2. Check existing subscription
+    // ============================================================
     const { data: existing } = await supabaseAdmin
       .from("subscriptions")
       .select("status, trial_end")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
+
+    const now = new Date();
 
     if (
       existing &&
-      (existing.status === "active" ||
-        (existing.trial_end && new Date(existing.trial_end) > new Date()))
+      (
+        existing.status === "active" ||
+        (existing.trial_end && new Date(existing.trial_end) > now)
+      )
     ) {
       return res.status(200).json({
         success: true,
@@ -76,7 +90,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
     }
 
-    // Create new 24h trial
+    // ============================================================
+    // 3. Create new 24h trial
+    // ============================================================
     const trialEnd = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const { error: upsertError } = await supabaseAdmin
@@ -99,16 +115,22 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ error: upsertError.message });
     }
 
-    // Audit log
+    // ============================================================
+    // 4. Audit log
+    // ============================================================
     await supabaseAdmin.from("audit").insert([
       {
-        client_id: session?.user?.clientId ?? null,
+        client_id: clientId ?? null,
         actor_email: email,
         action: "TRIAL_STARTED",
         details: `Trial started until ${trialEnd.toISOString()}`,
+        timestamp: new Date().toISOString(),
       },
     ]);
 
+    // ============================================================
+    // 5. Response
+    // ============================================================
     return res.status(200).json({
       success: true,
       trialActive: true,

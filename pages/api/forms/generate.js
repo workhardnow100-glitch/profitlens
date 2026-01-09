@@ -1,4 +1,43 @@
-// pages/api/forms/generate.js
+/**
+ * ============================================================
+ * File: pages/api/forms/generate.js
+ * Purpose:
+ *   Generate HMRC-style PDF forms for a specific client:
+ *     - CT600 family (Corporation Tax)
+ *     - SA100 / SA103 / SA105 / SA110 (Self Assessment)
+ *     - CIS300 / CIS_STATEMENT (CIS)
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May generate forms for actingAsClientId.
+ *       • USER:
+ *           – May generate forms for their own clientId.
+ *       • FOUNDER:
+ *           – May generate forms for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Anti‑spoofing:
+ *       • Ignores clientId from body; uses session‑resolved clientId only.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *       • Period range is validated.
+ *   - Audit logging:
+ *       • Logs GENERATE_FORM / ACCOUNTANT_GENERATE_FORM.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT/SA/CIS submission schemas
+ *       • PDF templates
+ *       • transaction CT/SA/CIS flags
+ *     MUST be reflected here and in the Forms UI.
+ * ============================================================
+ */
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -21,7 +60,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ✅ Session + RBAC
+    // ⭐ Session + RBAC
     const session = await getServerSession(req, res, authOptions);
     if (!session?.user) {
       return res
@@ -30,19 +69,20 @@ export default async function handler(req, res) {
     }
 
     const role = (session.user.role || "").toUpperCase();
-    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const isFounder = role === "FOUNDER";
     const isAccountant = role === "ACCOUNTANT";
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
       session.user.subscriptionStatus
     );
 
+    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res
         .status(403)
         .json({ success: false, message: "Upgrade required" });
     }
 
-    // ✅ Accountant-aware client ID — ignore clientId from body for security
+    // ⭐ Accountant-aware client ID — ignore clientId from body for security
     const resolvedClientId = isAccountant
       ? session.user.actingAsClientId
       : session.user.clientId || session.user.defaultClientId;
@@ -61,21 +101,20 @@ export default async function handler(req, res) {
 
     if (
       Number.isNaN(periodStartDate.getTime()) ||
-      Number.isNaN(periodEndDate.getTime())
+      Number.isNaN(periodEndDate.getTime()) ||
+      periodStartDate > periodEndDate
     ) {
       return res
         .status(400)
         .json({ success: false, message: "Invalid period start or end date." });
     }
 
-    // ✅ Audit log — form generation
+    // ⭐ Audit log — form generation
     await supabaseAdmin.from("audit").insert([
       {
         client_id: resolvedClientId,
         actor_email: session.user.email,
-        action: isAccountant
-          ? "ACCOUNTANT_GENERATE_FORM"
-          : "GENERATE_FORM",
+        action: isAccountant ? "ACCOUNTANT_GENERATE_FORM" : "GENERATE_FORM",
         details: `Generated form ${formCode} for ${periodStart} → ${periodEnd}`,
         timestamp: new Date().toISOString(),
       },
@@ -510,7 +549,7 @@ async function buildCISFormData(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                        PDF TEMPLATE DISPATCHER                              */
+/*                        PDF TEMPLATE DISPATCHER                             */
 /* -------------------------------------------------------------------------- */
 
 async function generatePdfForForm({

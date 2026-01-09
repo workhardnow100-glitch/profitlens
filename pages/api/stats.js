@@ -1,30 +1,70 @@
-// pages/api/stats.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
+/**
+ * ============================================================
+ * File: pages/api/stats.js
+ * Purpose:
+ *   Provide high‑level financial statistics for a specific client:
+ *     - Total revenue
+ *     - Total expenses
+ *     - Net profit
+ *     - Revenue/expenses by category
+ *     - Monthly profit curve
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: GET only.
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May view stats for actingAsClientId.
+ *       • USER:
+ *           – May view stats for their own clientId.
+ *       • FOUNDER:
+ *           – May view stats for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *       • Ignores malformed dates and non‑numeric amounts.
+ *   - Audit logging:
+ *       • Logs FETCH_STATS / ACCOUNTANT_FETCH_STATS.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • transaction schema
+ *       • category semantics
+ *     MUST be reflected here and in the Stats UI.
+ * ============================================================
+ */
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { requireRole } from "../../lib/rbac";
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorized" });
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  if (!guard.ok) return;
+
+  const role = guard.role;
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = req?.session?.user?.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
-  // ⭐ Accountants + founders bypass subscription checks
+  // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
   // ⭐ Accountant-aware client ID
-  const clientId = isAccountant
-    ? session.user.actingAsClientId
-    : session.user.clientId;
+  const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
 
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
@@ -37,12 +77,13 @@ export default async function handler(req, res) {
       .eq("client_id", clientId);
 
     if (error) {
-      console.error("Supabase fetch error:", error.message);
+      console.error("Supabase fetch error:", error);
       return res.status(500).json({ message: "Failed to load stats" });
     }
 
     let totalRevenue = 0;
     let totalExpenses = 0;
+
     const revenueByCategoryMap = {};
     const expensesByCategoryMap = {};
     const monthlyProfitMap = {};
@@ -59,7 +100,7 @@ export default async function handler(req, res) {
         revenueByCategoryMap[category] =
           (revenueByCategoryMap[category] || 0) + amount;
       } else {
-        totalExpenses += amount;
+        totalExpenses += amount; // negative number
         expensesByCategoryMap[category] =
           (expensesByCategoryMap[category] || 0) + Math.abs(amount);
       }
@@ -88,18 +129,18 @@ export default async function handler(req, res) {
       })
     );
 
-    // ⭐ Audit log (accountant-aware)
+    // ⭐ Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
-        actor_email: session.user.email,
+        actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FETCH_STATS" : "FETCH_STATS",
         details: `Returned ${transactions.length} transactions`,
         timestamp: new Date().toISOString(),
       },
     ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       revenue: totalRevenue.toFixed(2),
       expenses: Math.abs(totalExpenses).toFixed(2),
       netProfit: (totalRevenue + totalExpenses).toFixed(2),
@@ -109,6 +150,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("Error in /api/stats:", err);
-    res.status(500).json({ message: "Failed to load stats" });
+    return res.status(500).json({ message: "Failed to load stats" });
   }
 }

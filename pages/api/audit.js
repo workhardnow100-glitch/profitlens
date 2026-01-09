@@ -1,20 +1,57 @@
-// pages/api/audit.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
+/**
+ * ============================================================
+ * File: pages/api/audit.js
+ * Purpose:
+ *   Read and write audit log entries for a specific client.
+ *
+ *   Supports:
+ *     - POST: Create audit entry (business owners only)
+ *     - GET:  Fetch audit log for the current client
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Methods: GET, POST only.
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May READ audit logs for actingAsClientId.
+ *           – May NOT create audit entries.
+ *       • USER:
+ *           – May READ + WRITE audit logs for their own clientId.
+ *       • FOUNDER:
+ *           – May READ + WRITE for any client (via actingAsClientId/clientId).
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing to access audit.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - RLS Alignment:
+ *       • public.audit is client-scoped.
+ *       • This endpoint uses supabaseAdmin (service role) for controlled writes.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • accountant acting-as semantics
+ *       • subscription gating
+ *       • audit schema
+ *     MUST be reflected here and in the Audit UI.
+ * ============================================================
+ */
+
+import crypto from "crypto";
+import { requireRole } from "../../lib/rbac";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  if (!guard.ok) return;
 
-  // ⭐ Normalize role
-  const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const role = guard.role;
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = req?.session?.user?.subscriptionStatus || "incomplete";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
   // ⭐ Subscription gating (accountants + founders bypass)
@@ -23,9 +60,7 @@ export default async function handler(req, res) {
   }
 
   // ⭐ Accountant-aware client ID
-  const clientId = isAccountant
-    ? session.user.actingAsClientId
-    : session.user.clientId;
+  const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
 
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
@@ -36,7 +71,9 @@ export default async function handler(req, res) {
   ------------------------------------------------------- */
   if (req.method === "POST") {
     if (isAccountant) {
-      return res.status(403).json({ error: "Accountants cannot create audit entries" });
+      return res
+        .status(403)
+        .json({ error: "Accountants cannot create audit entries" });
     }
 
     const { action, details } = req.body;
@@ -48,7 +85,7 @@ export default async function handler(req, res) {
     const entry = {
       id: crypto.randomUUID(),
       client_id: clientId,
-      actor_email: session.user.email,
+      actor_email: req.session?.user?.email || "unknown",
       action,
       details: details || "",
       timestamp: new Date().toISOString(),
@@ -59,7 +96,7 @@ export default async function handler(req, res) {
     const { error } = await supabaseAdmin.from("audit").insert([entry]);
 
     if (error) {
-      console.error("❌ Audit insert error:", error.message);
+      console.error("❌ Audit insert error:", error);
       return res.status(500).json({ error: "Failed to log audit entry" });
     }
 
@@ -74,7 +111,7 @@ export default async function handler(req, res) {
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
-        actor_email: session.user.email,
+        actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_AUDIT" : "VIEW_AUDIT",
         details: "Viewed audit log",
         timestamp: new Date().toISOString(),
@@ -88,7 +125,7 @@ export default async function handler(req, res) {
       .order("timestamp", { ascending: false });
 
     if (error) {
-      console.error("❌ Audit fetch error:", error.message);
+      console.error("❌ Audit fetch error:", error);
       return res.status(500).json({ error: "Failed to fetch audit logs" });
     }
 

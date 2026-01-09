@@ -1,9 +1,44 @@
-// pages/api/dashboard.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
+/**
+ * ============================================================
+ * File: pages/api/dashboard.js
+ * Purpose:
+ *   Provide cockpit-grade dashboard data for a specific client:
+ *     - Category updates (PATCH)
+ *     - Bulk transaction deletion (DELETE)
+ *     - Dashboard metrics + recent transactions (GET)
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Methods: GET, PATCH, DELETE only.
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May READ dashboard data.
+ *           – May NOT modify or delete transactions.
+ *       • USER:
+ *           – May READ + MODIFY + DELETE their own client’s data.
+ *       • FOUNDER:
+ *           – May act on any client via actingAsClientId/clientId.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing to access dashboard.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All operations are client-scoped via client_id.
+ *   - Audit logging:
+ *       • Logs category updates, deletions, and dashboard fetches.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP / SYSTEM_CATEGORIES
+ *       • transaction schema
+ *     MUST be reflected here and in the Dashboard UI.
+ * ============================================================
+ */
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+import { requireRole } from "../../lib/rbac";
 
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
@@ -15,14 +50,17 @@ const ALLOWED_CATEGORIES = new Set([
 ]);
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
+  // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  if (!guard.ok) return;
 
-  const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const role = guard.role;
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = req?.session?.user?.subscriptionStatus || "incomplete";
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
   // ⭐ Subscription gating (accountants + founders bypass)
@@ -31,8 +69,7 @@ export default async function handler(req, res) {
   }
 
   // ⭐ Accountant-aware client ID
-  const clientId =
-    session.user.actingAsClientId || session.user.clientId;
+  const clientId = guard.actingAsClientId || guard.clientId;
 
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
@@ -43,13 +80,16 @@ export default async function handler(req, res) {
   ------------------------------------------------------- */
   if (req.method === "PATCH") {
     if (isAccountant) {
-      return res.status(403).json({ error: "Accountants cannot modify data" });
+      return res
+        .status(403)
+        .json({ error: "Accountants cannot modify data" });
     }
 
     try {
       const { id, category } = req.body || {};
-      if (!id || !category)
+      if (!id || !category) {
         return res.status(400).json({ error: "Missing id or category" });
+      }
 
       if (!ALLOWED_CATEGORIES.has(category)) {
         return res.status(400).json({
@@ -68,8 +108,10 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
-          action: isAccountant ? "ACCOUNTANT_UPDATE_CATEGORY" : "UPDATE_CATEGORY",
+          actor_email: req.session?.user?.email || "unknown",
+          action: isAccountant
+            ? "ACCOUNTANT_UPDATE_CATEGORY"
+            : "UPDATE_CATEGORY",
           details: `Updated transaction ${id} category to ${category}`,
           timestamp: new Date().toISOString(),
         },
@@ -77,7 +119,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true });
     } catch (err) {
-      console.error("PATCH error:", err?.message || err);
+      console.error("PATCH error:", err);
       return res.status(500).json({ error: "Failed to update category" });
     }
   }
@@ -87,7 +129,9 @@ export default async function handler(req, res) {
   ------------------------------------------------------- */
   if (req.method === "DELETE") {
     if (isAccountant) {
-      return res.status(403).json({ error: "Accountants cannot delete data" });
+      return res
+        .status(403)
+        .json({ error: "Accountants cannot delete data" });
     }
 
     try {
@@ -101,8 +145,10 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
-          action: isAccountant ? "ACCOUNTANT_DELETE_TRANSACTIONS" : "DELETE_TRANSACTIONS",
+          actor_email: req.session?.user?.email || "unknown",
+          action: isAccountant
+            ? "ACCOUNTANT_DELETE_TRANSACTIONS"
+            : "DELETE_TRANSACTIONS",
           details: `Deleted ${count} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -110,7 +156,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ success: true, deleted: count });
     } catch (err) {
-      console.error("DELETE error:", err?.message || err);
+      console.error("DELETE error:", err);
       return res.status(500).json({ error: "Failed to delete transactions" });
     }
   }
@@ -182,8 +228,10 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
-          action: isAccountant ? "ACCOUNTANT_FETCH_DASHBOARD" : "FETCH_DASHBOARD",
+          actor_email: req.session?.user?.email || "unknown",
+          action: isAccountant
+            ? "ACCOUNTANT_FETCH_DASHBOARD"
+            : "FETCH_DASHBOARD",
           details: `Returned ${transactions?.length ?? 0} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -201,7 +249,7 @@ export default async function handler(req, res) {
         categories: Object.keys(categoryBreakdown),
       });
     } catch (err) {
-      console.error("Dashboard API error:", err?.message || err);
+      console.error("Dashboard API error:", err);
       return res.status(500).json({ error: "Failed to load dashboard data" });
     }
   }

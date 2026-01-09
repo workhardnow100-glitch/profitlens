@@ -19,6 +19,45 @@
 // Stripe Connect onboarding, payouts, balance transactions,
 // and payment_settings updates belong in a separate webhook.
 // -------------------------------------------------------------
+/**
+ * ============================================================
+ * File: pages/api/payments/stripe-webhook.ts
+ * Purpose:
+ *   INVOICE PAYMENT WEBHOOK for EXTERNAL CLIENTS.
+ *
+ *   Handles payments made by external clients via Stripe
+ *   (Payment Links, Checkout Sessions, Payment Intents, Charges).
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Verified exclusively via Stripe webhook signature.
+ *       • No user/session context is trusted here.
+ *   - Stripe verification:
+ *       • Uses STRIPE_WEBHOOK_SECRET to validate the signature.
+ *       • Rejects on any signature mismatch.
+ *   - Idempotency / replay protection:
+ *       • Uses public.stripe_events to dedupe events by event_id.
+ *   - Data handling:
+ *       • Calls process_invoice_payment RPC to:
+ *           – Mark invoices as paid
+ *           – Create ledger transactions
+ *           – Create invoice_payments entries
+ *       • Sends receipt emails to external clients.
+ *   - RLS Alignment:
+ *       • Uses supabaseAdmin (service role) for controlled writes.
+ *       • Business logic is encapsulated in process_invoice_payment RPC.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • invoice payment semantics
+ *       • process_invoice_payment RPC signature
+ *       • metadata contract (invoice_id, user_id, client_id)
+ *     MUST be reflected in:
+ *       • invoice creation/payment link generation
+ *       • external client payment flows
+ * ============================================================
+ */
 
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
@@ -95,16 +134,18 @@ async function processInvoicePayment(
   const { invoiceId, userId, clientId } = metadata;
 
   if (!invoiceId || !userId) {
-    console.error("❌ Missing metadata — cannot match invoice", { invoiceId, userId, clientId });
+    console.error("❌ Missing metadata — cannot match invoice", {
+      invoiceId,
+      userId,
+      clientId,
+    });
     return;
   }
 
   const amountPaid = amountPence / 100;
 
-  // Business-level idempotency key
   const idempotencyKey = `invoice:${invoiceId}:user:${userId}:amount:${amountPaid}`;
 
-  // Call transactional RPC
   const { error } = await supabaseAdmin.rpc("process_invoice_payment", {
     p_invoice_id: invoiceId,
     p_user_id: userId,
@@ -119,7 +160,6 @@ async function processInvoicePayment(
     return;
   }
 
-  // Best-effort: fetch invoice + send email (outside transaction)
   try {
     const { data: invoice } = await supabaseAdmin
       .from("invoices")
@@ -139,7 +179,7 @@ async function processInvoicePayment(
       .maybeSingle();
 
     const { data: owner } = await supabaseAdmin
-      .from("users")
+      .from("app_users")
       .select("*")
       .eq("id", invoice.user_id)
       .maybeSingle();
@@ -155,7 +195,10 @@ async function processInvoicePayment(
 // -------------------------------------------------------------
 // MAIN WEBHOOK HANDLER
 // -------------------------------------------------------------
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   if (req.method !== "POST") return res.status(405).end();
 
   let event: Stripe.Event;
@@ -179,7 +222,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  // Replay protection
   const shouldProcess = await recordStripeEvent(event.id);
   if (!shouldProcess) {
     return res.status(200).json({ received: true, duplicate: true });

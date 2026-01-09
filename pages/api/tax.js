@@ -1,4 +1,42 @@
-// pages/api/tax.js
+/**
+ * ============================================================
+ * File: pages/api/tax.js
+ * Purpose:
+ *   Perform HMRC‑aligned tax calculations for a specific client:
+ *     - VAT (Boxes 1–9)
+ *     - CIS (gross income + deductions)
+ *     - Corporation Tax (estimated)
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May calculate tax for actingAsClientId.
+ *       • USER:
+ *           – May calculate tax for their own clientId.
+ *       • FOUNDER:
+ *           – May calculate tax for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Anti‑spoofing:
+ *       • body.clientId MUST match resolvedClientId.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *       • VAT/CIS/Corp logic is deterministic and side‑effect free.
+ *   - Audit logging:
+ *       • Logs CALCULATE_TAX / ACCOUNTANT_CALCULATE_TAX.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • VAT/CIS/Corp calculation rules
+ *       • transaction schema
+ *     MUST be reflected here and in the Tax UI.
+ * ============================================================
+ */
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -8,7 +46,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Session
+  // ⭐ Session
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -16,37 +54,46 @@ export default async function handler(req, res) {
 
   const user = session.user;
   const role = (user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = user.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    user.subscriptionStatus
+    subscriptionStatus
   );
 
-  // Subscription gating (accountants + founders bypass)
+  // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // Accountant-aware client ID
+  // ⭐ Accountant-aware client ID
   const resolvedClientId = isAccountant
     ? user.actingAsClientId
     : user.clientId || user.defaultClientId;
 
   const { clientId: bodyClientId, taxType, from, to } = req.body;
 
-  // Validate required parameters
+  // ⭐ Validate required parameters
   if (!bodyClientId || !taxType || !from || !to) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
-  // Prevent spoofing
+  // ⭐ Prevent spoofing
   if (bodyClientId !== resolvedClientId) {
     return res.status(403).json({
       error: "You are not authorized to access tax data for this client",
     });
   }
 
-  // Audit log
+  // ⭐ Validate date range
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  if (isNaN(fromDate) || isNaN(toDate) || fromDate > toDate) {
+    return res.status(400).json({ error: "Invalid date range" });
+  }
+
+  // ⭐ Audit log
   await supabaseAdmin.from("audit").insert([
     {
       client_id: resolvedClientId,
@@ -57,7 +104,7 @@ export default async function handler(req, res) {
     },
   ]);
 
-  // Fetch transactions
+  // ⭐ Fetch transactions
   const { data: transactions, error } = await supabaseAdmin
     .from("transactions")
     .select("*")
@@ -69,7 +116,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
-  // Route to correct calculator
+  // ⭐ Route to correct calculator
   let calculations = {};
 
   switch (taxType) {

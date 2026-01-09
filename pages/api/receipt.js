@@ -1,4 +1,43 @@
-// pages/api/receipt.js
+/**
+ * ============================================================
+ * File: pages/api/receipt.js
+ * Purpose:
+ *   Generate a PDF receipt for an HMRC MTD submission.
+ *
+ *   Returns:
+ *     - A streamed PDF containing:
+ *         • Client ID
+ *         • Submission reference
+ *         • Timestamp
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: GET only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May generate receipts for actingAsClientId.
+ *       • USER:
+ *           – May generate receipts for their own clientId.
+ *       • FOUNDER:
+ *           – May generate receipts for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • No database writes except audit log.
+ *       • PDF streamed directly to response (no temp files).
+ *   - Audit logging:
+ *       • Logs GENERATE_RECEIPT / ACCOUNTANT_GENERATE_RECEIPT.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • receipt format
+ *       • HMRC submission metadata
+ *     MUST be reflected here and in the MTD UI.
+ * ============================================================
+ */
+
 import PDFDocument from "pdfkit";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
@@ -13,10 +52,12 @@ export default async function handler(req, res) {
 
   // ⭐ Role normalization
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = session.user.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
   // ⭐ Subscription gating (accountants + founders bypass)

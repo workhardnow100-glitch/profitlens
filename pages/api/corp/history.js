@@ -1,4 +1,38 @@
-// pages/api/corp/history.js
+/**
+ * ============================================================
+ * File: pages/api/corp/history.js
+ * Purpose:
+ *   Return Corporation Tax history for a specific client:
+ *     - CT submissions (corp_submissions)
+ *     - CT payments (ct_payments)
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: POST only.
+ *   - Authentication:
+ *       • Uses NextAuth session.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May view CT history for actingAsClientId.
+ *       • USER:
+ *           – May view CT history for their own clientId.
+ *       • FOUNDER:
+ *           – May view CT history for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *   - Audit logging:
+ *       • Logs VIEW_CT_HISTORY / ACCOUNTANT_VIEW_CT_HISTORY.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • corp_submissions schema
+ *       • ct_payments schema
+ *     MUST be reflected here and in the CT History UI.
+ * ============================================================
+ */
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -16,10 +50,12 @@ export default async function handler(req, res) {
 
   // ⭐ Normalize role
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = session.user.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
   // ⭐ Subscription gating (accountants + founders bypass)

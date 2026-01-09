@@ -1,9 +1,44 @@
-// pages/api/profile.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
+/**
+ * ============================================================
+ * File: pages/api/profile.js
+ * Purpose:
+ *   Serve and update the client “Profile” cockpit:
+ *     - GET: Full client identity + transaction summary
+ *     - POST (updateClient): Update client identity fields
+ *     - POST (category): Update a single transaction category
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Methods: GET, POST only.
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May VIEW profile + summary.
+ *           – May NOT modify client identity or categories.
+ *       • USER:
+ *           – May VIEW + UPDATE their own client’s profile + categories.
+ *       • FOUNDER:
+ *           – May act on any client via actingAsClientId/clientId.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing to access profile.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All reads/writes are client-scoped via client_id.
+ *   - Audit logging:
+ *       • Logs VIEW_PROFILE, UPDATE_CLIENT_PROFILE, UPDATE_CATEGORY.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP / SYSTEM_CATEGORIES
+ *       • clients / transactions / hmrc_categories / accounts schema
+ *     MUST be reflected here and in the Profile UI.
+ * ============================================================
+ */
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+import { requireRole } from "../../lib/rbac";
 
 // Unified allowed category list
 const ALLOWED_CATEGORIES = new Set([
@@ -16,14 +51,17 @@ const ALLOWED_CATEGORIES = new Set([
 ]);
 
 export default async function handler(req, res) {
-  const session = await getServerSession(req, res, authOptions);
-  if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
+  // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  if (!guard.ok) return;
 
-  const role = (session.user.role || "").toUpperCase();
-  const isFounder = role === "ADMIN" || role === "FOUNDER";
+  const role = guard.role;
+  const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
+
+  const subscriptionStatus = req?.session?.user?.subscriptionStatus;
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    session.user.subscriptionStatus
+    subscriptionStatus
   );
 
   // ⭐ Accountants + founders bypass subscription checks
@@ -32,13 +70,13 @@ export default async function handler(req, res) {
   }
 
   // ⭐ Accountant-aware client ID
-  const clientId = isAccountant
-    ? session.user.actingAsClientId
-    : session.user.clientId;
+  const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
 
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
+
+  const actorEmail = req.session?.user?.email || "unknown";
 
   try {
     // ⭐ AUDIT LOG — View profile (all roles)
@@ -46,7 +84,7 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
+          actor_email: actorEmail,
           action: isAccountant ? "ACCOUNTANT_VIEW_PROFILE" : "VIEW_PROFILE",
           details: "Viewed client profile and transaction summary",
           timestamp: new Date().toISOString(),
@@ -75,9 +113,11 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
+          actor_email: actorEmail,
           action: "UPDATE_CLIENT_PROFILE",
-          details: `Updated client identity fields: ${Object.keys(updateFields).join(", ")}`,
+          details: `Updated client identity fields: ${Object.keys(
+            updateFields
+          ).join(", ")}`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -88,9 +128,9 @@ export default async function handler(req, res) {
     // ⭐ POST — Update transaction category (business owner only)
     if (req.method === "POST" && !req.body.updateClient) {
       if (isAccountant) {
-        return res
-          .status(403)
-          .json({ error: "Accountants cannot modify transaction categories" });
+        return res.status(403).json({
+          error: "Accountants cannot modify transaction categories",
+        });
       }
 
       const { transactionId, newCategory } = req.body;
@@ -120,7 +160,7 @@ export default async function handler(req, res) {
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          actor_email: session.user.email,
+          actor_email: actorEmail,
           action: "UPDATE_CATEGORY",
           details: `Updated category for transaction ${transactionId} → ${category}`,
           timestamp: new Date().toISOString(),
@@ -222,12 +262,13 @@ export default async function handler(req, res) {
           totalsByType[bt][categoryName] = 0;
         }
 
-        totalsByType[bt][categoryName] += Number(tx.amount || 0);
+        const amount = Number(tx.amount || 0);
+        totalsByType[bt][categoryName] += amount;
 
-        if (tx.amount > 0) {
-          totalIncome += tx.amount;
+        if (amount > 0) {
+          totalIncome += amount;
         } else {
-          totalExpenses += Math.abs(tx.amount);
+          totalExpenses += Math.abs(amount);
         }
       });
 
@@ -245,10 +286,11 @@ export default async function handler(req, res) {
       transactions.forEach((tx) => {
         const month = new Date(tx.date).toISOString().slice(0, 7);
         if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0 };
-        if (tx.amount > 0) {
-          byMonth[month].income += tx.amount;
+        const amount = Number(tx.amount || 0);
+        if (amount > 0) {
+          byMonth[month].income += amount;
         } else {
-          byMonth[month].expenses += Math.abs(tx.amount);
+          byMonth[month].expenses += Math.abs(amount);
         }
       });
 
@@ -273,7 +315,7 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: "Method not allowed" });
   } catch (err) {
-    console.error("Profile API error:", err.message || err);
+    console.error("Profile API error:", err);
     return res.status(500).json({ error: "Failed to load profile data" });
   }
 }

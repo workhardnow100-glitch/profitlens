@@ -1,13 +1,51 @@
-// pages/api/forecasts.js
+/**
+ * ============================================================
+ * File: pages/api/forecasts.js
+ * Purpose:
+ *   Generate forward-looking revenue/expense/net profit forecasts
+ *   for a specific client based on historical transactions.
+ *
+ *   Returns:
+ *     - High-level forecast cards (Projected Revenue/Expenses/Net)
+ *     - Time series (months, revenue, expenses, net)
+ *     - Category-level breakdown (revenue/expenses/net per category)
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: GET only (read-only analytics).
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May view forecasts for actingAsClientId.
+ *       • USER:
+ *           – May view forecasts for their own clientId/defaultClientId.
+ *       • FOUNDER:
+ *           – May view forecasts for any client via actingAsClientId/clientId.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing to access forecasts.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • Read-only access to transactions.
+ *       • Ignores reversals and ignored categories.
+ *   - Audit logging:
+ *       • Logs VIEW_FORECASTS / ACCOUNTANT_VIEW_FORECASTS.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP / SYSTEM_CATEGORIES
+ *       • transaction schema
+ *       • forecast logic
+ *     MUST be reflected here and in the Forecasts UI.
+ * ============================================================
+ */
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+import { requireRole } from "../../lib/rbac";
 
 function formatMonthKey(dateStr) {
   const d = new Date(dateStr);
@@ -40,39 +78,43 @@ const MAP = {
 };
 
 export default async function handler(req, res) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const session = await getServerSession(req, res, authOptions);
-    if (!session?.user) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+    if (!guard.ok) return;
 
-    const user = session.user;
-    const role = (user.role || "").toUpperCase();
-    const subscriptionStatus = user.subscriptionStatus || null;
-
-    const isFounder = role === "ADMIN" || role === "FOUNDER";
+    const role = guard.role;
+    const isFounder = role === "FOUNDER";
     const isAccountant = role === "ACCOUNTANT";
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
 
+    const subscriptionStatus = req?.session?.user?.subscriptionStatus || null;
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      subscriptionStatus
+    );
+
+    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    let clientId = null;
-    if (isAccountant) {
-      clientId = user.actingAsClientId || null;
-    } else {
-      clientId = user.clientId || user.defaultClientId || null;
-    }
+    // ⭐ Accountant-aware client ID
+    const clientId = isAccountant
+      ? guard.actingAsClientId
+      : guard.clientId || guard.defaultClientId;
 
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
+    // ⭐ Audit: view forecasts
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
-        actor_email: user.email || null,
+        actor_email: req.session?.user?.email || null,
         action: isAccountant ? "ACCOUNTANT_VIEW_FORECASTS" : "VIEW_FORECASTS",
         details: "Viewed forecasts",
         timestamp: new Date().toISOString(),
@@ -85,7 +127,7 @@ export default async function handler(req, res) {
       .eq("client_id", clientId);
 
     if (error) {
-      console.error("❌ Supabase fetch error:", error.message);
+      console.error("❌ Supabase fetch error:", error);
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
@@ -174,7 +216,7 @@ export default async function handler(req, res) {
       categories,
     });
   } catch (err) {
-    console.error("❌ Forecast API error:", err?.message || err);
+    console.error("❌ Forecast API error:", err);
     return res.status(500).json({ error: "Failed to generate forecast" });
   }
 }

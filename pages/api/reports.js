@@ -1,9 +1,46 @@
-// pages/api/reports.js
-import { getServerSession } from "next-auth/next";
-import { authOptions } from "./auth/[...nextauth]";
+/**
+ * ============================================================
+ * File: pages/api/reports.js
+ * Purpose:
+ *   Generate multi‑period financial reports for a specific client:
+ *     - Monthly, Quarterly, Yearly summaries
+ *     - Category breakdowns
+ *     - Client label grouping
+ *     - Transaction lists
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Method: GET only.
+ *   - Authentication:
+ *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
+ *   - RBAC:
+ *       • ACCOUNTANT:
+ *           – May view reports for actingAsClientId.
+ *       • USER:
+ *           – May view reports for their own clientId.
+ *       • FOUNDER:
+ *           – May view reports for any client.
+ *   - Subscription gating:
+ *       • USER must be subscribed/trialing.
+ *       • ACCOUNTANT + FOUNDER bypass subscription gating.
+ *   - Data handling:
+ *       • All reads are client‑scoped via client_id.
+ *       • Reversals + ignored categories excluded.
+ *   - Audit logging:
+ *       • Logs VIEW_REPORTS + FILTER_REPORTS.
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • CT_MAP / SYSTEM_CATEGORIES
+ *       • transaction schema
+ *       • reporting logic
+ *     MUST be reflected here and in the Reports UI.
+ * ============================================================
+ */
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
+import { requireRole } from "../../lib/rbac";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
@@ -24,7 +61,11 @@ function extractClientLabel(description = "") {
   const cleaned = String(description).trim();
   if (!cleaned) return "UNLABELED";
   const parts = cleaned.split(/\s+/);
-  if (parts.length >= 2 && /^[A-Za-z]+$/.test(parts[0]) && /^[A-Za-z]+$/.test(parts[1])) {
+  if (
+    parts.length >= 2 &&
+    /^[A-Za-z]+$/.test(parts[0]) &&
+    /^[A-Za-z]+$/.test(parts[1])
+  ) {
     return `${parts[0].toUpperCase()} ${parts[1].toUpperCase()}`;
   }
   return parts[0].toUpperCase();
@@ -32,12 +73,22 @@ function extractClientLabel(description = "") {
 
 function parseLabelToDate(label) {
   if (!label) return new Date(0);
+
   const qMatch = label.match(/^(\d{4})-Q([1-4])$/);
-  if (qMatch) return new Date(parseInt(qMatch[1], 10), (parseInt(qMatch[2], 10) - 1) * 3, 1);
-  const monthYear = Date.parse(label);
-  if (!isNaN(monthYear)) return new Date(monthYear);
+  if (qMatch) {
+    return new Date(
+      parseInt(qMatch[1], 10),
+      (parseInt(qMatch[2], 10) - 1) * 3,
+      1
+    );
+  }
+
+  const parsed = Date.parse(label);
+  if (!isNaN(parsed)) return new Date(parsed);
+
   const yMatch = label.match(/^(\d{4})$/);
   if (yMatch) return new Date(parseInt(yMatch[1], 10), 0, 1);
+
   return new Date(0);
 }
 
@@ -55,60 +106,79 @@ const MAP = {
 };
 
 export default async function handler(req, res) {
-  try {
-    const session = await getServerSession(req, res, authOptions);
-    if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-    const role = (session.user.role || "").toUpperCase();
-    const isFounder = role === "ADMIN" || role === "FOUNDER";
+  try {
+    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+    if (!guard.ok) return;
+
+    const role = guard.role;
+    const isFounder = role === "FOUNDER";
     const isAccountant = role === "ACCOUNTANT";
+
+    const subscriptionStatus = req?.session?.user?.subscriptionStatus;
     const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      session.user.subscriptionStatus
+      subscriptionStatus
     );
 
-    // ⭐ Correct subscription gating
+    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
     // ⭐ Accountant-aware client ID
-    const clientId = isAccountant
-      ? session.user.actingAsClientId
-      : session.user.clientId;
+    const clientId = isAccountant ? guard.actingAsClientId : guard.clientId;
 
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } =
-      req.query;
+    const {
+      from,
+      to,
+      page = DEFAULT_PAGE,
+      limit = DEFAULT_LIMIT,
+      client: clientFilter,
+    } = req.query;
 
-    // ⭐ Audit log (all roles)
+    // ⭐ Audit log (view)
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
-        actor_email: session.user.email,
+        actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
         details: `Viewed reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
         timestamp: new Date().toISOString(),
       },
     ]);
 
+    // ⭐ Build filters
     const filters = {
-      ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
-      ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
+      ...(from && !isNaN(new Date(from)) && {
+        gte: new Date(from).toISOString(),
+      }),
+      ...(to && !isNaN(new Date(to)) && {
+        lte: new Date(to).toISOString(),
+      }),
     };
 
     let txQuery = supabaseAdmin
       .from("transactions")
-      .select("id, date, description, amount, business_category, type, is_reversal")
+      .select(
+        "id, date, description, amount, business_category, type, is_reversal"
+      )
       .eq("client_id", clientId);
 
     if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
     if (filters.lte) txQuery = txQuery.lte("date", filters.lte);
 
     const { data: transactions = [], error: txErr } = await txQuery;
-    if (txErr) return res.status(500).json({ error: "Failed to fetch transactions" });
+    if (txErr) {
+      return res.status(500).json({ error: "Failed to fetch transactions" });
+    }
 
     const monthly = {};
     const quarterly = {};
@@ -122,7 +192,10 @@ export default async function handler(req, res) {
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const month = date.toLocaleString("en-US", { month: "short", year: "numeric" });
+      const month = date.toLocaleString("en-US", {
+        month: "short",
+        year: "numeric",
+      });
       const quarter = getQuarter(tx.date);
       const year = String(date.getFullYear());
 
@@ -160,12 +233,15 @@ export default async function handler(req, res) {
 
         bucket.net = bucket.revenue - bucket.expenses;
 
-        bucket.categories[category] = (bucket.categories[category] || 0) + amount;
+        bucket.categories[category] =
+          (bucket.categories[category] || 0) + amount;
 
         bucket.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description ? String(tx.description).trim() : "Unlabeled",
+          description: tx.description
+            ? String(tx.description).trim()
+            : "Unlabeled",
           amount: formatCurrency(tx.amount),
           category,
         });
@@ -204,7 +280,9 @@ export default async function handler(req, res) {
 
     const returnedTxs = (clientFilter
       ? transactions.filter(
-          (tx) => extractClientLabel(tx.description) === clientFilter && !tx.is_reversal
+          (tx) =>
+            extractClientLabel(tx.description) === clientFilter &&
+            !tx.is_reversal
         )
       : transactions.filter((tx) => !tx.is_reversal)
     ).map((tx) => {
@@ -225,7 +303,7 @@ export default async function handler(req, res) {
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
-        actor_email: session.user.email,
+        actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
         details: `Filtered reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
         timestamp: new Date().toISOString(),

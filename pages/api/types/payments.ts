@@ -1,9 +1,9 @@
 export type PaymentStats = {
   stripePaymentsCount: number;
-  stripePaymentsAmount: string;
+  stripePaymentsAmount: string;      // stored as DECIMAL in DB → string in TS
   invoicePaymentsCount: number;
-  invoicePaymentsAmount: string;
+  invoicePaymentsAmount: string;     // same reason
   transactionsCount: number;
-  transactionsAmount: string;
+  transactionsAmount: string;        // DECIMAL → string
   invoicesCount: number;
 };

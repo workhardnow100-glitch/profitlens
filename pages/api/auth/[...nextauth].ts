@@ -1,3 +1,64 @@
+/**
+ * ============================================================
+ * File: pages/api/auth/[...nextauth].ts
+ * Purpose:
+ *   Central authentication and session orchestration for ProfitLens.
+ *
+ * Security / RBAC / SOC2 Notes:
+ *   - Uses NextAuth with:
+ *       • Email magic links (subscription + client_id enforced)
+ *       • Credentials provider for founder PIN login
+ *   - All user identity is sourced from public.app_users (NOT next_auth.users).
+ *   - Roles supported:
+ *       • FOUNDER  – full override, no clientId required
+ *       • ADMIN    – privileged, but still client-scoped
+ *       • ACCOUNTANT – can act on behalf of multiple clients
+ *       • USER     – normal business owner
+ *   - Subscription gating:
+ *       • Magic links are blocked if:
+ *           – Non-accountant user has no client_id or inactive subscription
+ *           – Accountant has no active subscription
+ *       • All such blocks are logged to public.audit.
+ *   - Token / session model:
+ *       • JWT stores: sub, email, role, clientId, subscriptionStatus, actingAsClientId
+ *       • Session.user exposes:
+ *           – id, email, role, clientId
+ *           – subscriptionStatus
+ *           – accessibleClients[]
+ *           – actingAsClientId
+ *   - Accountant access model:
+ *       • accessibleClients[] loaded from public.accountant_clients
+ *       • actingAsClientId:
+ *           – persisted from JWT if still valid
+ *           – otherwise defaults to first accessible client
+ *           – null if no clients
+ *   - Founder model:
+ *       • Founder PIN login via CredentialsProvider
+ *       • Founder bypasses clientId requirements
+ *   - Audit logging:
+ *       • Successful credentials login recorded in public.audit
+ *       • Magic link blocks recorded in public.audit
+ *
+ * RLS Alignment:
+ *   - clientId / actingAsClientId / accessibleClients are used by:
+ *       • lib/rbac.requireRole
+ *       • API routes to scope queries to:
+ *           – owner clients
+ *           – accountant clients
+ *           – founder override
+ *
+ * Change Control:
+ *   - Any change to:
+ *       • role semantics
+ *       • subscriptionStatus semantics
+ *       • clientId / actingAsClientId wiring
+ *     MUST be reflected in:
+ *       • lib/rbac.ts
+ *       • RLS policies in public.*
+ *       • Frontend subscription gating hooks
+ * ============================================================
+ */
+
 import NextAuth, { type NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
@@ -244,15 +305,14 @@ export const authOptions: NextAuthOptions = {
           },
         ]);
 
-     return {
-  id: String(user.id),
-  email: user.email,
-  name: user.name ?? null,
-  role: user.role ?? "USER",
-  client_id: user.client_id ?? null,            // ⭐ add this
-  acting_client_id: user.acting_client_id ?? null, // ⭐ add this
-};
-
+        return {
+          id: String(user.id),
+          email: user.email,
+          name: user.name ?? null,
+          role: user.role ?? "USER",
+          client_id: user.client_id ?? null,
+          acting_client_id: user.acting_client_id ?? null,
+        };
       },
     }),
   ],
@@ -297,7 +357,6 @@ export const authOptions: NextAuthOptions = {
           token.sub = dbUser.id;
           token.role = dbUser.role ?? "USER";
           token.clientId = dbUser.client_id ?? null;
-
           token.subscriptionStatus =
             dbUser.subscription_status ?? "incomplete";
           token.actingAsClientId = dbUser.acting_client_id ?? null;
@@ -308,7 +367,7 @@ export const authOptions: NextAuthOptions = {
     },
 
     /* -------------------------------------------------------
-       ⭐ FIXED SESSION CALLBACK — privileged roles unified
+       ⭐ SESSION CALLBACK — unify privileged roles
     ------------------------------------------------------- */
     async session({ session, token }) {
       session.user = {
@@ -316,41 +375,30 @@ export const authOptions: NextAuthOptions = {
         email: token.email ?? "unknown@example.com",
         role: token.role ?? "USER",
         clientId: token.clientId ?? null,
-
         subscriptionStatus: token.subscriptionStatus ?? "incomplete",
       };
 
-      // ⭐ FIX: ACCOUNTANT, FOUNDER, ADMIN all treated as privileged
       const role = (session.user.role || "").toUpperCase();
-const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
+      const privilegedRoles = ["ACCOUNTANT", "FOUNDER", "ADMIN"];
 
-if (privilegedRoles.includes(role)) {
-
+      if (privilegedRoles.includes(role)) {
         const { data: accessRows } = await supabaseAdmin
           .from("accountant_clients")
           .select("client_id")
           .eq("accountant_email", session.user.email);
 
         const accessibleClients = accessRows?.map((r) => r.client_id) || [];
-
         session.user.accessibleClients = accessibleClients;
 
-const persisted = token.actingAsClientId;
+        const persisted = token.actingAsClientId as string | null;
 
-// If persisted is valid, use it
-if (persisted && accessibleClients.includes(persisted)) {
-  session.user.actingAsClientId = persisted;
-}
-// If no persisted value, default to first client
-else if (accessibleClients.length > 0) {
-  session.user.actingAsClientId = accessibleClients[0];
-}
-// If accountant has no clients
-else {
-  session.user.actingAsClientId = null;
-}
-
-
+        if (persisted && accessibleClients.includes(persisted)) {
+          session.user.actingAsClientId = persisted;
+        } else if (accessibleClients.length > 0) {
+          session.user.actingAsClientId = accessibleClients[0];
+        } else {
+          session.user.actingAsClientId = null;
+        }
       } else {
         const cid = session.user.clientId ?? "unknown-client";
         session.user.accessibleClients = [cid];
