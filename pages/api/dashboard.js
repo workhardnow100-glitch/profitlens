@@ -51,7 +51,8 @@ const ALLOWED_CATEGORIES = new Set([
 
 export default async function handler(req, res) {
   // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN"]);
+  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
+
   if (!guard.ok) return;
 
   const role = guard.role;
