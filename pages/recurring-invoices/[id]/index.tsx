@@ -58,7 +58,7 @@ export default function RecurringInvoiceDetailPage() {
   const [runResult, setRunResult] = useState<any | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  // Load clients
+// Load clients
 useEffect(() => {
   if (!user) return;
 
@@ -75,6 +75,7 @@ useEffect(() => {
 // Load schedule
 useEffect(() => {
   if (!user) return;
+  if (!router.isReady) return;        // ⭐ ensures id is stable
   if (!id || typeof id !== "string") return;
 
   async function load() {
@@ -114,7 +115,8 @@ useEffect(() => {
   }
 
   load();
-}, [id]);   // ⭐ FIXED
+}, [router.isReady, id]);   // ⭐ FIXED & STABLE
+
 
 
 
