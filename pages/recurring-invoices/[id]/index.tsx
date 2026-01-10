@@ -59,9 +59,8 @@ export default function RecurringInvoiceDetailPage() {
   const [runError, setRunError] = useState<string | null>(null);
 
   // Load clients
- useEffect(() => {
+useEffect(() => {
   if (!user) return;
-  if (!loadingClients) return;
 
   (async () => {
     const res = await fetch("/api/external-clients");
@@ -69,7 +68,8 @@ export default function RecurringInvoiceDetailPage() {
     setExternalClients(data.externalClients || []);
     setLoadingClients(false);
   })();
-}, [user, loadingClients]);
+}, [user]);
+
 
 
 // Load schedule
