@@ -1,5 +1,5 @@
 import { useSession } from "next-auth/react";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 export function useUser() {
   const { data: session, status } = useSession();
@@ -22,7 +22,6 @@ export function useUser() {
     }
   }, [session, status]);
 
-  // ⭐ Normalize actingAsClientId so it is ALWAYS null when not selected
   const normalizedActingId =
     session?.user?.actingAsClientId &&
     session.user.actingAsClientId !== "null" &&
@@ -31,18 +30,21 @@ export function useUser() {
       ? session.user.actingAsClientId
       : null;
 
-  const user = {
-    id: session?.user?.id ?? null,
-    email: session?.user?.email ?? "unknown@example.com",
-    role: session?.user?.role?.toLowerCase() ?? "user",
-    clientId: session?.user?.clientId ?? null,
-    actingAsClientId: normalizedActingId,
-    subscriptionStatus: session?.user?.subscriptionStatus ?? "incomplete",
-  };
+  // ⭐ FIX: memoize the user object so it stops changing every render
+  const user = useMemo(() => {
+    return {
+      id: session?.user?.id ?? null,
+      email: session?.user?.email ?? "unknown@example.com",
+      role: session?.user?.role?.toLowerCase() ?? "user",
+      clientId: session?.user?.clientId ?? null,
+      actingAsClientId: normalizedActingId,
+      subscriptionStatus: session?.user?.subscriptionStatus ?? "incomplete",
+    };
+  }, [session?.user, normalizedActingId]);
 
   return {
     user,
-    status, // ⭐ REQUIRED by Tax Hub
+    status,
     isLoading: status === "loading",
     isAuthenticated: !!session?.user,
     isPremium: ["basic", "pro"].includes(user.subscriptionStatus),
