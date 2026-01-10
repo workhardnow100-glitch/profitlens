@@ -99,14 +99,12 @@ useEffect(() => {
     setNextRunDate(r.next_run_date?.slice(0, 10) || "");
     setEndDate(r.end_date?.slice(0, 10) || "");
 
-    // ⭐ FIX: convert pence → pounds for UI
     setLineItems(
       (r.template_line_items || []).map(li => ({
         ...li,
         unit_price: Number.isInteger(li.unit_price)
-  ? li.unit_price / 100
-  : li.unit_price,
-
+          ? li.unit_price / 100
+          : li.unit_price,
       }))
     );
 
@@ -116,7 +114,8 @@ useEffect(() => {
   }
 
   load();
-}, [user, id]);
+}, [id]);   // ⭐ FIXED
+
 
 
 
