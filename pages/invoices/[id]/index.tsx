@@ -76,22 +76,23 @@ export default function InvoiceViewPage() {
   // -----------------------------
   // Load invoice
   // -----------------------------
-  useEffect(() => {
-    if (!id || !user) return;
+ useEffect(() => {
+  if (!id || !user) return;
 
-    async function loadInvoice() {
-      const res = await fetch(`/api/invoices/${id}`);
-      const data = await res.json();
+  async function loadInvoice() {
+    const res = await fetch(`/api/invoices/${id}`);
+    const data = await res.json();
 
-      setInvoice(data.invoice);
-      setExternalClient(data.externalClient);
-      setLineItems(data.lineItems);
-      setPayments(data.payments);
-      setLoadingInvoice(false);
-    }
+    setInvoice(data.invoice);
+    setExternalClient(data.externalClient);
+    setLineItems(data.lineItems);
+    setPayments(data.payments);
+    setLoadingInvoice(false);
+  }
 
-    loadInvoice();
-  }, [id, user]);
+  loadInvoice();
+}, [id]);
+
 
   if (loading || loadingInvoice) {
     return <div className="p-6">Loading invoice…</div>;
