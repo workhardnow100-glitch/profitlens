@@ -358,7 +358,7 @@ export default function InvoicesPage() {
                   </td>
 
                   <td className="px-4 py-2 text-right">
-                    £{inv.paidAmount.toFixed(2)} / £{inv.grossAmount.toFixed(2)}
+                    £{(inv.paidAmount / 100).toFixed(2)} / £{(inv.grossAmount / 100).toFixed(2)}
                     {balance > 0 && (
                       <div className="text-xs text-gray-500">
                         Balance £{(balance / 100).toFixed(2)}
