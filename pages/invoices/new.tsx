@@ -138,11 +138,10 @@ export default function NewInvoicePage() {
   }, [user?.id]);
 
   // -----------------------------
-  // Fetch next available invoice number
+  // FIXED: Fetch next available invoice number (no defaultsLoaded block)
   // -----------------------------
   useEffect(() => {
     if (!user?.id) return;
-    if (!defaultsLoaded.current) return;
     if (invoiceNumber) return;
 
     async function fetchNextNumber() {
@@ -153,7 +152,7 @@ export default function NewInvoicePage() {
           return;
         }
         const data = await res.json();
-        if (data.nextNumber && !invoiceNumber) {
+        if (data.nextNumber) {
           setInvoiceNumber(data.nextNumber);
         }
       } catch (err) {
@@ -162,7 +161,7 @@ export default function NewInvoicePage() {
     }
 
     fetchNextNumber();
-  }, [user?.id, invoiceNumber]);
+  }, [user?.id]);
 
   // -----------------------------
   // Live duplicate invoice number check (debounced)
@@ -229,32 +228,30 @@ export default function NewInvoicePage() {
   );
   const grossTotal = subtotal + vatTotal;
 
-// -----------------------------
-// Line item handlers
-// -----------------------------
-const handleLineChange = (
-  id: string,
-  field: string,   // <-- FIXED: no more LineItemTemplate reference
-  value: any
-) => {
-  setLineItems((items) =>
-    items.map((li) =>
-      li.id === id
-        ? {
-            ...li,
-            [field]:
-              field === "description"
-                ? value
-                : field === "unit_price"
-                ? parseFloat(value || "0") // keep pounds as pounds, prevent NaN
-                : Number(value || 0),
-          }
-        : li
-    )
-  );
-};
-
-
+  // -----------------------------
+  // Line item handlers
+  // -----------------------------
+  const handleLineChange = (
+    id: string,
+    field: string,
+    value: any
+  ) => {
+    setLineItems((items) =>
+      items.map((li) =>
+        li.id === id
+          ? {
+              ...li,
+              [field]:
+                field === "description"
+                  ? value
+                  : field === "unit_price"
+                  ? parseFloat(value || "0")
+                  : Number(value || 0),
+            }
+          : li
+      )
+    );
+  };
 
   const addLine = () =>
     setLineItems((items) => [
@@ -290,7 +287,7 @@ const handleLineChange = (
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clientId: externalClientId, // correct FK
+          clientId: externalClientId,
           invoiceNumber: invoiceNumber || undefined,
           issueDate,
           dueDate,
@@ -314,7 +311,6 @@ const handleLineChange = (
       });
 
       if (res.status === 409) {
-        // Duplicate invoice number – fetch next available and inform user
         try {
           const nextRes = await fetch("/api/invoices/next-number");
           const nextData = await nextRes.json();
