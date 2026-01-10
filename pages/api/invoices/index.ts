@@ -35,7 +35,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       // ACCESS CONTROL
       if (role === "USER") {
-        // User can only create invoices for their own business
         const { data: client } = await supabaseAdmin
           .from("external_clients")
           .select("owner_id")
@@ -75,7 +74,28 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const totalPence = Math.round(grossTotal * 100);
 
       const status = markSent ? "sent" : "draft";
-      const finalInvoiceNumber = invoiceNumber || `INV-${Date.now()}`;
+
+      // ---------------------------------------------------------
+      // ⭐ FIX APPLIED: unified invoice number generator
+      // ---------------------------------------------------------
+      let finalInvoiceNumber = invoiceNumber;
+
+      if (!finalInvoiceNumber) {
+        const nextRes = await fetch(
+          `${process.env.NEXT_PUBLIC_BASE_URL}/api/invoices/next-number`,
+          {
+            headers: { cookie: req.headers.cookie || "" },
+          }
+        );
+
+        if (!nextRes.ok) {
+          return res.status(500).json({ error: "Failed to generate invoice number" });
+        }
+
+        const nextData = await nextRes.json();
+        finalInvoiceNumber = nextData.nextNumber;
+      }
+      // ---------------------------------------------------------
 
       //
       // 1) Insert invoice
@@ -154,7 +174,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       let query = supabaseAdmin.from("invoices").select("*");
 
-      // ACCESS CONTROL
       if (role === "USER") {
         query = query.eq("user_id", userId);
       }
