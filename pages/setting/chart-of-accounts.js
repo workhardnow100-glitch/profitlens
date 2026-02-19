@@ -24,6 +24,9 @@ export default function ChartOfAccounts() {
   const [filterType, setFilterType] = useState("ALL");
   const [filterBucket, setFilterBucket] = useState("ALL");
 
+  // NEW: dynamic CoA toggle
+  const [usedOnly, setUsedOnly] = useState(true);
+
   // Access guard
   useEffect(() => {
     if (isLoading) return;
@@ -42,8 +45,9 @@ export default function ChartOfAccounts() {
     }
   }, [isLoading, isAuthenticated, user, router]);
 
+  // NEW: fetch with usedOnly flag
   const { data, error, mutate } = useSWR(
-    "/api/chart-of-accounts",
+    `/api/chart-of-accounts?usedOnly=${usedOnly}`,
     fetcher
   );
 
@@ -109,9 +113,9 @@ export default function ChartOfAccounts() {
           Chart of Accounts
         </h2>
         <p className="text-slate-600 mt-2 max-w-2xl">
-          Your full accounting structure. These accounts are used to
-          classify transactions and feed your tax working papers. You can
-          regenerate the CoA at any time or export it to Excel.
+          Your accounting structure. These accounts classify transactions
+          and feed your tax working papers. You can regenerate the CoA at
+          any time or export it to Excel.
         </p>
 
         {/* Action buttons */}
@@ -130,6 +134,28 @@ export default function ChartOfAccounts() {
             Export to Excel
           </button>
         </div>
+
+        {/* NEW: Used Only toggle */}
+        <div className="mt-6 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={usedOnly}
+            onChange={(e) => setUsedOnly(e.target.checked)}
+          />
+          <label className="text-sm text-slate-700">
+            Show only used accounts
+          </label>
+        </div>
+
+        {/* NEW: Add missing accounts (placeholder for now) */}
+        {!usedOnly && (
+          <button
+            className="mt-2 text-blue-600 underline text-sm"
+            onClick={() => alert("Coming soon: Add missing accounts")}
+          >
+            Add all missing accounts
+          </button>
+        )}
 
         {/* Filters */}
         <div className="mt-6 flex flex-wrap gap-4">
@@ -178,11 +204,12 @@ export default function ChartOfAccounts() {
               "HMRC Bucket",
               "Description",
               "System",
+              "Used",
             ]}
           >
             {error && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-red-500">
+                <td colSpan={7} className="px-4 py-2 text-red-500">
                   Failed to load chart of accounts
                 </td>
               </tr>
@@ -190,7 +217,7 @@ export default function ChartOfAccounts() {
 
             {!data && !error && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-slate-500">
+                <td colSpan={7} className="px-4 py-2 text-slate-500">
                   Loading accounts...
                 </td>
               </tr>
@@ -198,7 +225,7 @@ export default function ChartOfAccounts() {
 
             {data && filteredAccounts.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-2 text-slate-500">
+                <td colSpan={7} className="px-4 py-2 text-slate-500">
                   No accounts match your filters.
                 </td>
               </tr>
@@ -212,6 +239,13 @@ export default function ChartOfAccounts() {
                 <td>{acc.hmrc_bucket}</td>
                 <td>{acc.description || "—"}</td>
                 <td>{acc.is_system ? "Yes" : "No"}</td>
+                <td>
+                  {acc.has_activity ? (
+                    <span className="text-green-600 font-medium">Yes</span>
+                  ) : (
+                    <span className="text-slate-400">No</span>
+                  )}
+                </td>
               </tr>
             ))}
           </ResponsiveTable>

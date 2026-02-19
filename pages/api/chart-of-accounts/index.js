@@ -31,7 +31,6 @@ function classifyAccountType(bucket) {
     case "disallowable":
       return "EXPENSE";
     case "system":
-      return "SYSTEM";
     case "ignore":
     default:
       return "SYSTEM";
@@ -69,16 +68,11 @@ async function getOrCreateCoaHeader(clientId, userId) {
 
   if (existing) return existing;
 
-const { data: created, error: insertError } = await supabaseAdmin
-  .from("chart_of_accounts")
-  .insert([
-    {
-      client_id: clientId
-      // created_by removed — avoids FK violation
-    },
-  ])
-  .select("*")
-  .single();
+  const { data: created, error: insertError } = await supabaseAdmin
+    .from("chart_of_accounts")
+    .insert([{ client_id: clientId }])
+    .select("*")
+    .single();
 
   if (insertError) throw new Error(insertError.message);
   return created;
@@ -112,6 +106,7 @@ async function generateCoaForClient(clientId, userId) {
       hmrc_bucket: bucket,
       description: null,
       is_system: true,
+      has_activity: false, // <-- NEW FIELD
     };
   });
 
@@ -150,6 +145,8 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
+      const usedOnly = req.query.usedOnly === "true"; // <-- (A) NEW
+
       const { data: header, error: headerError } = await supabaseAdmin
         .from("chart_of_accounts")
         .select("id, client_id, created_at, updated_at")
@@ -164,11 +161,17 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: headerError.message });
       }
 
-      const { data: entries, error: entriesError } = await supabaseAdmin
+      let query = supabaseAdmin
         .from("chart_of_account_entries")
         .select("*")
         .eq("coa_id", header.id)
         .order("account_code", { ascending: true });
+
+      if (usedOnly) {
+        query = query.eq("has_activity", true); // <-- (B) NEW
+      }
+
+      const { data: entries, error: entriesError } = await query;
 
       if (entriesError) {
         console.error("CoA entries fetch error:", entriesError.message);
