@@ -69,16 +69,16 @@ async function getOrCreateCoaHeader(clientId, userId) {
 
   if (existing) return existing;
 
-  const { data: created, error: insertError } = await supabaseAdmin
-    .from("chart_of_accounts")
-    .insert([
-      {
-        client_id: clientId,
-        created_by: userId || null,
-      },
-    ])
-    .select("*")
-    .single();
+const { data: created, error: insertError } = await supabaseAdmin
+  .from("chart_of_accounts")
+  .insert([
+    {
+      client_id: clientId
+      // created_by removed — avoids FK violation
+    },
+  ])
+  .select("*")
+  .single();
 
   if (insertError) throw new Error(insertError.message);
   return created;
