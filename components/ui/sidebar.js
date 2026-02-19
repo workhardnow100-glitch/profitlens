@@ -686,34 +686,50 @@ export function SidebarMenu() {
             </SidebarMenuItem>
 
             {/* Invoice Settings */}
-            <SidebarMenuItem>
-              <Link
-                href="/settings/invoices"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/settings/invoices"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <FileText size={16} />
-                <span>Invoice Settings</span>
-              </Link>
-            </SidebarMenuItem>
+<SidebarMenuItem>
+  <Link
+    href="/settings/invoices"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/settings/invoices"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Invoice Settings</span>
+  </Link>
+</SidebarMenuItem>
 
-            {/* Payment Settings */}
-            <SidebarMenuItem>
-              <Link
-                href="/settings/payments"
-                className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-                  router.pathname === "/settings/payments"
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                <PoundSterling size={16} />
-                <span>Payment Settings</span>
-              </Link>
-            </SidebarMenuItem>
+{/* Chart of Accounts */}
+<SidebarMenuItem>
+  <Link
+    href="/settings/chart-of-accounts"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/settings/chart-of-accounts"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Chart of Accounts</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Payment Settings */}
+<SidebarMenuItem>
+  <Link
+    href="/settings/payments"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/settings/payments"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <PoundSterling size={16} />
+    <span>Payment Settings</span>
+  </Link>
+</SidebarMenuItem>
+
 
           </SidebarGroupContent>
         </div>
