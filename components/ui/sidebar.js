@@ -700,10 +700,25 @@ export function SidebarMenu() {
   </Link>
 </SidebarMenuItem>
 
+{/* Trial Balance */}
+<SidebarMenuItem>
+  <Link
+    href="/reports/trial-balance"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/reports/trial-balance"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Trial Balance</span>
+  </Link>
+</SidebarMenuItem>
+
 {/* Chart of Accounts */}
 <SidebarMenuItem>
   <Link
-    href="/setting/chart-of-accounts"
+    href="/settings/chart-of-accounts"
     className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
       router.pathname === "/settings/chart-of-accounts"
         ? "bg-blue-50 text-blue-700 font-semibold"
@@ -729,6 +744,7 @@ export function SidebarMenu() {
     <span>Payment Settings</span>
   </Link>
 </SidebarMenuItem>
+
 
 
           </SidebarGroupContent>
