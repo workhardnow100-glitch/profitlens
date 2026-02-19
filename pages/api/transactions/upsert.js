@@ -68,12 +68,10 @@ export default async function handler(req, res) {
     // ---------------------------------------------------------
     // 2) ACCESS CONTROL
     // ---------------------------------------------------------
-    // USER → must own the transaction
     if (role === "user" && tx.client_id !== clientId) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // ACCOUNTANT → must be acting on assigned client
     if (isAccountant && tx.client_id !== clientId) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -159,6 +157,17 @@ export default async function handler(req, res) {
     if (error) {
       console.error("Upsert error:", error);
       return res.status(500).json({ error: error.message });
+    }
+
+    // ---------------------------------------------------------
+    // 5.1) Mark CoA entry as used (dynamic CoA)
+    // ---------------------------------------------------------
+    if (fields.business_category) {
+      await supabaseAdmin
+        .from("chart_of_account_entries")
+        .update({ has_activity: true })
+        .eq("account_name", fields.business_category)
+        .eq("coa_id", tx.coa_id || null);
     }
 
     // ---------------------------------------------------------
