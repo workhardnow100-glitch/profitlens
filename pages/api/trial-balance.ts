@@ -1,7 +1,7 @@
 // pages/api/trial-balance.ts
 
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../lib/supabase-client"; // ✅ correct import for your project
+import { supabaseAdmin } from "../../lib/supabase-admin"; // correct import
 
 export default async function handler(
   req: NextApiRequest,
@@ -13,15 +13,15 @@ export default async function handler(
     }
 
     const clientId = req.query.clientId as string;
-    const startDate = req.query.startDate as string | undefined;
-    const endDate = req.query.endDate as string | undefined;
+    const startDate = req.query.startDate as string | null;
+    const endDate = req.query.endDate as string | null;
 
     if (!clientId) {
       return res.status(400).json({ error: "Missing clientId" });
     }
 
-    // ✅ Directly call RPC using your existing supabase client
-    const { data, error } = await supabase.rpc("trial_balance_for_client", {
+    // ⭐ FIX: send parameters in correct order
+    const { data, error } = await supabaseAdmin.rpc("trial_balance_for_client", {
       p_client_id: clientId,
       p_start_date: startDate ?? null,
       p_end_date: endDate ?? null,
