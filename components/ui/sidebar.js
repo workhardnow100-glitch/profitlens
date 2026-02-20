@@ -711,7 +711,7 @@ export function SidebarMenu() {
     }`}
   >
     <FileText size={16} />
-    <span>Chart of Accounts</span>
+    <span>Manage Chart of Accounts</span>
   </Link>
 </SidebarMenuItem>
 
