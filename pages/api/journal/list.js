@@ -22,7 +22,7 @@ function getAllMonthsForYear(year) {
       month: "long",
       year: "numeric",
     });
-    months.push({ label, start, end });
+    months.push({ label, start, end, monthIndex: m });
   }
   return months;
 }
@@ -50,6 +50,10 @@ export default async function handler(req, res) {
 
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
+  const yearParam = req.query.year;
+  const now = new Date();
+  const currentYear = yearParam ? Number(yearParam) : now.getFullYear();
+
   // Load journals via RPC
   const { data: journals, error } = await supabaseAdmin.rpc(
     "list_journals_for_client",
@@ -74,22 +78,35 @@ export default async function handler(req, res) {
 
   const periodLocked = !!lockRecord;
 
-  // Load full lock history
+  // Full lock history (with notes)
   const { data: history } = await supabaseAdmin
     .from("journal_period_locks")
-    .select("period_start, period_end, locked_at, locked_by")
+    .select("period_start, period_end, locked_at, locked_by, note")
     .eq("client_id", clientId)
     .order("period_start", { ascending: false });
 
-  // Build a map of locked months for highlighting journals
+  // Locked months map
   const lockedMonthsMap = {};
   (history || []).forEach((h) => {
     lockedMonthsMap[`${h.period_start}_${h.period_end}`] = true;
   });
 
-  // Build month selector options for the current year
-  const currentYear = new Date().getFullYear();
+  // Month selector options for selected year
   const availableMonths = getAllMonthsForYear(currentYear);
+
+  // Timeline: 12 months for selected year with lock info
+  const timeline = availableMonths.map((m) => {
+    const match = (history || []).find(
+      (h) => h.period_start === m.start && h.period_end === m.end
+    );
+    return {
+      label: m.label,
+      start: m.start,
+      end: m.end,
+      locked: !!match,
+      note: match?.note || null,
+    };
+  });
 
   return res.status(200).json({
     journals: journals || [],
@@ -99,5 +116,7 @@ export default async function handler(req, res) {
     history: history || [],
     availableMonths,
     lockedMonthsMap,
+    year: currentYear,
+    timeline,
   });
 }
