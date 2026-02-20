@@ -6,16 +6,60 @@ import useSWR from "swr";
 import ResponsiveLayout from "../../components/ResponsiveLayout";
 import ResponsiveCard from "../../components/ResponsiveCard";
 import ResponsiveTable from "../../components/ResponsiveTable";
+import { useUser } from "../../hooks/useUser";
 
 const fetcher = (url) => fetch(url).then((res) => res.json());
 
 export default function ViewJournal() {
   const router = useRouter();
   const { id } = router.query;
+  const { user, isLoading, isAuthenticated } = useUser();
 
-  const { data, mutate } = useSWR(id ? `/api/journal/get?id=${id}` : null, fetcher);
+  // Unified client resolution (same as SA/Corp)
+  const clientId = user?.actingAsClientId ?? user?.clientId;
+
+  // Load journal + lines
+  const { data, mutate } = useSWR(
+    id ? `/api/journal/get?id=${id}&clientId=${clientId}` : null,
+    fetcher
+  );
+
   const journal = data?.journal;
   const lines = data?.lines || [];
+  const periodLocked = data?.periodLocked || false; // ⭐ NEW
+
+  // AUTH GUARD (SOC2)
+  if (isLoading) {
+    return (
+      <ResponsiveLayout>
+        <div className="p-8">Loading journal…</div>
+      </ResponsiveLayout>
+    );
+  }
+
+  if (!isAuthenticated || !user) {
+    return (
+      <ResponsiveLayout>
+        <div className="p-8">Redirecting…</div>
+      </ResponsiveLayout>
+    );
+  }
+
+  // SUBSCRIPTION GUARD
+  const isFounder = user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return (
+      <ResponsiveLayout>
+        <div className="p-8 text-red-600">
+          Your subscription does not allow access to Journals.
+        </div>
+      </ResponsiveLayout>
+    );
+  }
 
   if (!journal) {
     return (
@@ -26,6 +70,11 @@ export default function ViewJournal() {
   }
 
   async function reverseJournal() {
+    if (periodLocked) {
+      alert("This period is locked. Journals cannot be reversed.");
+      return;
+    }
+
     if (!confirm("Reverse this journal?")) return;
 
     const res = await fetch("/api/journal/manage", {
@@ -33,18 +82,27 @@ export default function ViewJournal() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "reverse",
-        payload: { id },
+        payload: { id, clientId },
       }),
     });
 
     if (res.ok) mutate();
+    else {
+      const json = await res.json();
+      alert(json.error || "Failed to reverse journal.");
+    }
   }
 
   return (
-    <ResponsiveLayout>
+    <ResponsiveLayout currentPageName="Journal">
       <div className="p-8 space-y-6">
-        <h1 className="text-2xl font-bold text-slate-800">
+        <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
           Journal #{journal.id.slice(0, 8)}
+          {periodLocked && (
+            <span className="text-red-600 text-sm font-semibold">
+              (Period Locked)
+            </span>
+          )}
         </h1>
 
         <ResponsiveCard title="Journal Details">
@@ -62,9 +120,7 @@ export default function ViewJournal() {
         </ResponsiveCard>
 
         <ResponsiveCard title="Lines">
-          <ResponsiveTable
-            headers={["Account", "Debit (£)", "Credit (£)"]}
-          >
+          <ResponsiveTable headers={["Account", "Debit (£)", "Credit (£)"]}>
             {lines.map((l) => (
               <tr key={l.id} className="border-t">
                 <td>{l.account_name}</td>
@@ -78,9 +134,14 @@ export default function ViewJournal() {
         {!journal.reversed && (
           <button
             onClick={reverseJournal}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            disabled={periodLocked}
+            className={`px-4 py-2 rounded text-white ${
+              periodLocked
+                ? "bg-slate-400 cursor-not-allowed"
+                : "bg-red-600 hover:bg-red-700"
+            }`}
           >
-            Reverse Journal
+            {periodLocked ? "Locked" : "Reverse Journal"}
           </button>
         )}
       </div>

@@ -38,12 +38,22 @@ export default function NewJournalPage() {
     }
   }, [isLoading, isAuthenticated, user, router]);
 
+  // Unified client resolution (same pattern as SA/Corp)
+  const clientId = user?.actingAsClientId ?? user?.clientId;
+
   // Load accounts
   const { data: coaData } = useSWR(
-    "/api/chart-of-accounts?usedOnly=false",
+    clientId ? "/api/chart-of-accounts?usedOnly=false" : null,
     fetcher
   );
   const accounts = coaData?.accounts || [];
+
+  // Period lock awareness (reuse journal list API)
+  const { data: journalMeta } = useSWR(
+    clientId ? `/api/journal/list?clientId=${clientId}` : null,
+    fetcher
+  );
+  const periodLocked = journalMeta?.periodLocked || false;
 
   const totalDebit = useMemo(
     () => lines.reduce((sum, l) => sum + (Number(l.debit) || 0), 0),
@@ -78,9 +88,17 @@ export default function NewJournalPage() {
     setErrorMsg(null);
     setSuccessMsg(null);
 
+    if (periodLocked) {
+      setErrorMsg(
+        "This period is locked. New journals cannot be posted in a locked period."
+      );
+      return;
+    }
+
     const cleanedLines = lines
       .map((l) => ({
         account_id: l.account_id,
+        line_description: l.line_description || "",
         debit: Number(l.debit) || 0,
         credit: Number(l.credit) || 0,
       }))
@@ -147,15 +165,57 @@ export default function NewJournalPage() {
     );
   }
 
+  // Subscription guard (SOC2)
+  const isFounder = user.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    user.subscriptionStatus
+  );
+
+  if (!(isFounder || isSubscribedOrTrial)) {
+    return (
+      <ResponsiveLayout>
+        <div className="p-8 text-red-600">
+          Your subscription does not allow posting journals.
+        </div>
+      </ResponsiveLayout>
+    );
+  }
+
+  const formDisabled = submitting || periodLocked;
+
   return (
-    <ResponsiveLayout>
+    <ResponsiveLayout currentPageName="Post Journal">
       <div className="p-8 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Post Journal</h1>
+          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
+            Post Journal
+            {periodLocked && (
+              <span className="text-red-600 text-sm font-semibold">
+                (Period Locked)
+              </span>
+            )}
+          </h1>
           <p className="text-slate-600 mt-2 max-w-2xl">
             Create a manual journal entry. Debits and credits must balance.
+            {periodLocked && (
+              <span className="text-red-600 ml-2">
+                Journals cannot be posted in a locked period.
+              </span>
+            )}
           </p>
         </div>
+
+        {errorMsg && (
+          <div className="p-3 rounded bg-red-50 text-red-700 text-sm">
+            {errorMsg}
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="p-3 rounded bg-emerald-50 text-emerald-700 text-sm">
+            {successMsg}
+          </div>
+        )}
 
         <ResponsiveCard title="Journal Details">
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -170,6 +230,7 @@ export default function NewJournalPage() {
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
                   required
+                  disabled={formDisabled}
                 />
               </div>
 
@@ -183,6 +244,7 @@ export default function NewJournalPage() {
                   value={reference}
                   onChange={(e) => setReference(e.target.value)}
                   placeholder="Optional reference"
+                  disabled={formDisabled}
                 />
               </div>
 
@@ -196,6 +258,7 @@ export default function NewJournalPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Accrual for utilities"
+                  disabled={formDisabled}
                 />
               </div>
             </div>
@@ -219,6 +282,7 @@ export default function NewJournalPage() {
                         onChange={(e) =>
                           updateLine(index, "account_id", e.target.value)
                         }
+                        disabled={formDisabled}
                       >
                         <option value="">Select account</option>
                         {accounts.map((acc) => (
@@ -240,6 +304,7 @@ export default function NewJournalPage() {
                           updateLine(index, "line_description", e.target.value)
                         }
                         placeholder="Optional"
+                        disabled={formDisabled}
                       />
                     </td>
 
@@ -252,6 +317,7 @@ export default function NewJournalPage() {
                         onChange={(e) =>
                           updateLine(index, "debit", e.target.value)
                         }
+                        disabled={formDisabled}
                       />
                     </td>
 
@@ -264,88 +330,60 @@ export default function NewJournalPage() {
                         onChange={(e) =>
                           updateLine(index, "credit", e.target.value)
                         }
+                        disabled={formDisabled}
                       />
                     </td>
 
                     <td className="px-2 py-2 text-right">
-                      {lines.length > 1 && (
-                        <button
-                          type="button"
-                          className="text-red-600 text-xs underline"
-                          onClick={() => removeLine(index)}
-                        >
-                          Remove
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        className="text-red-600 text-xs underline"
+                        onClick={() => removeLine(index)}
+                        disabled={formDisabled || lines.length <= 2}
+                      >
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))}
-
-                <tr>
-                  <td colSpan={5} className="px-2 py-2">
-                    <button
-                      type="button"
-                      className="text-blue-600 text-sm underline"
-                      onClick={addLine}
-                    >
-                      Add line
-                    </button>
-                  </td>
-                </tr>
-
-                <tr className="border-t bg-slate-50">
-                  <td colSpan={2} className="px-2 py-2 text-right font-medium">
-                    Totals
-                  </td>
-                  <td className="px-2 py-2 text-right font-semibold">
-                    £
-                    {totalDebit.toLocaleString("en-GB", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td className="px-2 py-2 text-right font-semibold">
-                    £
-                    {totalCredit.toLocaleString("en-GB", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td />
-                </tr>
               </ResponsiveTable>
+
+              <div className="flex justify-between items-center mt-4">
+                <button
+                  type="button"
+                  className="text-blue-600 text-sm underline"
+                  onClick={addLine}
+                  disabled={formDisabled}
+                >
+                  Add line
+                </button>
+
+                <div className="text-sm text-slate-700">
+                  <span className="mr-4">
+                    Total Debit: <strong>£{totalDebit.toFixed(2)}</strong>
+                  </span>
+                  <span>
+                    Total Credit: <strong>£{totalCredit.toFixed(2)}</strong>
+                  </span>
+                </div>
+              </div>
             </ResponsiveCard>
 
-            {errorMsg && (
-              <p className="text-sm text-red-600">{errorMsg}</p>
-            )}
-            {successMsg && (
-              <p className="text-sm text-green-600">{successMsg}</p>
-            )}
-
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                className="px-4 py-2 border rounded text-sm hover:bg-slate-100"
-                onClick={() => router.push("/accounting-overview")}
-              >
-                Cancel
-              </button>
+            <div className="flex justify-end">
               <button
                 type="submit"
-                disabled={submitting}
-                className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+                className={`px-4 py-2 rounded text-white text-sm ${
+                  formDisabled
+                    ? "bg-slate-400 cursor-not-allowed"
+                    : "bg-emerald-600 hover:bg-emerald-700"
+                }`}
+                disabled={formDisabled}
               >
                 {submitting ? "Posting…" : "Post Journal"}
               </button>
             </div>
           </form>
         </ResponsiveCard>
-
-        <p className="text-xs text-slate-500 mt-4 max-w-2xl">
-          Journals feed directly into your trial balance, profit &amp; loss,
-          and balance sheet. Always ensure debits and credits are correct.
-        </p>
       </div>
     </ResponsiveLayout>
   );
