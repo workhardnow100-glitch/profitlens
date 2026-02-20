@@ -759,7 +759,6 @@ export function SidebarMenu() {
     <span>Balance Sheet</span>
   </Link>
 </SidebarMenuItem>
-
 {/* Chart of Accounts */}
 <SidebarMenuItem>
   <Link
@@ -772,6 +771,37 @@ export function SidebarMenu() {
   >
     <FileText size={16} />
     <span>Chart of Accounts</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Journals */}
+<SidebarMenuItem>
+  <Link
+    href="/journal"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/journal" ||
+      router.pathname.startsWith("/journal/")
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Journals</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Post Journal */}
+<SidebarMenuItem>
+  <Link
+    href="/journal/new"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/journal/new"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Post Journal</span>
   </Link>
 </SidebarMenuItem>
 
@@ -789,6 +819,7 @@ export function SidebarMenu() {
     <span>Trial Balance</span>
   </Link>
 </SidebarMenuItem>
+
 
 
 {/* Payment Settings */}
