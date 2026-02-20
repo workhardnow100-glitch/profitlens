@@ -6,6 +6,33 @@ import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { ALLOWED_BUSINESS_CATEGORIES } from "../../lib/category/Engine";
 
+// --- COA HELPERS (aligned with your CoA API) ---
+const INCOME_TYPES = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
+const ALLOWABLE_TYPES = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
+const DISALLOWABLE_TYPES = new Set(CT_MAP.disallowable.map((c) => c.toLowerCase()));
+const IGNORE_TYPES = new Set(CT_MAP.ignore.map((c) => c.toLowerCase()));
+
+function classifyBucket(name: string) {
+  const key = (name || "").toLowerCase();
+  if (INCOME_TYPES.has(key)) return "income";
+  if (ALLOWABLE_TYPES.has(key)) return "allowable";
+  if (DISALLOWABLE_TYPES.has(key)) return "disallowable";
+  if (IGNORE_TYPES.has(key)) return "ignore";
+  return "ignore";
+}
+
+function classifyAccountType(bucket: string) {
+  switch (bucket) {
+    case "income":
+      return "INCOME";
+    case "allowable":
+    case "disallowable":
+      return "expense".toUpperCase(); // "EXPENSE"
+    default:
+      return "SYSTEM";
+  }
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -19,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyOverview());
     }
 
-    // 🔹 Fetch COA ID
+    // 🔹 Fetch COA header
     const { data: coa, error: coaError } = await supabaseAdmin
       .from("chart_of_accounts")
       .select("id")
@@ -30,19 +57,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyOverview());
     }
 
-    // 🔹 Fetch COA entries
-    const { data: coaEntries } = await supabaseAdmin
+    // 🔹 Fetch COA entries (full row, needed for auto‑sync)
+    const { data: coaEntries, error: coaEntriesError } = await supabaseAdmin
       .from("chart_of_account_entries")
-      .select("id, is_system, account_code")
+      .select("*")
       .eq("coa_id", coa.id);
 
-    const totalAccounts = coaEntries?.length ?? 0;
-    const activeAccounts = coaEntries?.filter((a) => !a.is_system).length ?? 0;
-    const systemAccounts = coaEntries?.filter((a) => a.is_system).length ?? 0;
-    const uncategorisedAccounts =
-      coaEntries?.filter((a) => a.account_code === "9020").length ?? 0;
-    const suspenseAccounts =
-      coaEntries?.filter((a) => a.account_code === "9999").length ?? 0;
+    if (coaEntriesError) {
+      console.error("CoA entries fetch error:", coaEntriesError.message);
+      return res.status(200).json(emptyOverview());
+    }
 
     // 🔹 Fetch transactions
     const { data: transactions, error } = await supabaseAdmin
@@ -54,18 +78,131 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyOverview());
     }
 
-    // Prepare CT_MAP sets
+    // =====================================================================================
+    // ⭐ AUTO‑SYNC COA FROM TRANSACTIONS (Option A)
+    // =====================================================================================
+
+    const usedCategories = new Set(
+      transactions
+        .map((t: any) => t.business_category as string | null)
+        .filter((c): c is string => !!c && ALLOWED_BUSINESS_CATEGORIES.has(c))
+    );
+
+    const existingMap = new Map<string, any>(
+      (coaEntries || []).map((e: any) => [String(e.account_name).toLowerCase(), e])
+    );
+
+    const newEntries: any[] = [];
+    const updates: { id: string; has_activity: boolean; is_system: boolean }[] = [];
+
+    for (const category of Array.from(usedCategories)) {
+
+  const key = category.toLowerCase();
+  const existing = existingMap.get(key);
+
+  if (!existing) {
+    const bucket = classifyBucket(category);
+    const accountType = classifyAccountType(bucket);
+
+    newEntries.push({
+      coa_id: coa.id,
+      account_code: null,
+      account_name: category,
+      account_type: accountType,
+      hmrc_bucket: bucket,
+      description: null,
+      is_system: false,
+      has_activity: true,
+    });
+  } else {
+    if (!existing.has_activity || existing.is_system) {
+      updates.push({
+        id: existing.id,
+        has_activity: true,
+        is_system: false,
+      });
+    }
+  }
+}
+
+    // Insert missing entries
+    if (newEntries.length > 0) {
+      const { data: inserted, error: insertError } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .insert(newEntries)
+        .select("*");
+
+      if (insertError) {
+        console.error("CoA insert error:", insertError.message);
+      } else {
+        for (const e of inserted || []) {
+          existingMap.set(String(e.account_name).toLowerCase(), e);
+        }
+      }
+    }
+
+    // Update existing entries
+    for (const u of updates) {
+      const { error: updateError } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .update({
+          has_activity: true,
+          is_system: false,
+        })
+        .eq("id", u.id);
+
+      if (updateError) {
+        console.error("CoA update error:", updateError.message);
+      }
+    }
+
+    // Assign account codes to any entries missing them
+    const allEntries: any[] = Array.from(existingMap.values());
+    let incomeCode = 4000;
+    let expenseCode = 5000;
+    let systemCode = 9000;
+
+    for (const entry of allEntries) {
+      if (!entry.account_code) {
+        if (entry.account_type === "INCOME") {
+          entry.account_code = String(incomeCode++);
+        } else if (entry.account_type === "EXPENSE") {
+          entry.account_code = String(expenseCode++);
+        } else {
+          entry.account_code = String(systemCode++);
+        }
+
+        const { error: codeError } = await supabaseAdmin
+          .from("chart_of_account_entries")
+          .update({ account_code: entry.account_code })
+          .eq("id", entry.id);
+
+        if (codeError) {
+          console.error("CoA code update error:", codeError.message);
+        }
+      }
+    }
+
+    // Recompute COA summary after sync
+    const totalAccounts = allEntries.length;
+    const activeAccounts = allEntries.filter((a) => !a.is_system).length;
+    const systemAccounts = allEntries.filter((a) => a.is_system).length;
+    const uncategorisedAccounts = allEntries.filter((a) => a.account_code === "9020").length;
+    const suspenseAccounts = allEntries.filter((a) => a.account_code === "9999").length;
+
+    // =====================================================================================
+    // ⭐ P&L + TB + BALANCE SHEET ENGINE
+    // =====================================================================================
+
     const incomeSet = new Set(CT_MAP.income);
     const allowableSet = new Set(CT_MAP.allowable);
     const disallowableSet = new Set(CT_MAP.disallowable);
     const ignoreSet = new Set(CT_MAP.ignore);
 
-    // Time boundaries
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
-    // Aggregates
     let incomeTotal = 0;
     let expenseTotal = 0;
 
@@ -77,24 +214,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let uncategorisedCount = 0;
     let negativeBalanceCount = 0;
 
-    // Tax/liability buckets
     let vatLiability = 0;
     let cisLiability = 0;
     let ctLiability = 0;
     let saLiability = 0;
 
-    // 🔹 Classify and aggregate
-    for (const tx of transactions) {
+    for (const tx of transactions as any[]) {
       const date = tx.date ? new Date(tx.date) : null;
-      const category = tx.business_category ?? "";
+      const category: string = tx.business_category ?? "";
       const amount = Number(tx.amount ?? 0);
 
-      // Negative balance alert
-      if (tx.balance !== null && Number(tx.balance) < 0) {
+      if (tx.balance !== null && tx.balance !== undefined && Number(tx.balance) < 0) {
         negativeBalanceCount += 1;
       }
 
-      // 🔸 Tax liabilities (computed regardless of ignore bucket)
+      // Tax buckets
       switch (category) {
         case "VAT Collected":
           vatLiability += amount;
@@ -121,29 +255,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         case "SA Refund":
           saLiability += amount;
           break;
-        default:
-          break;
       }
 
-      // Uncategorised
       if (!category || !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
         uncategorisedCount += 1;
         continue;
       }
 
-      // Ignore bucket (for P&L/TB)
-      if (ignoreSet.has(category)) {
-        continue;
-      }
+      if (ignoreSet.has(category)) continue;
 
       const isIncome = incomeSet.has(category);
       const isAllowable = allowableSet.has(category);
       const isDisallowable = disallowableSet.has(category);
 
-      // Income
       if (isIncome) {
         incomeTotal += amount;
-
         if (date) {
           if (date >= startOfMonth) revenueMtd += amount;
           if (date >= startOfYear) revenueYtd += amount;
@@ -151,11 +277,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         continue;
       }
 
-      // Expenses (allowable + disallowable)
       if (isAllowable || isDisallowable) {
         const absAmount = Math.abs(amount);
         expenseTotal += absAmount;
-
         if (date) {
           if (date >= startOfMonth) expensesMtd += absAmount;
           if (date >= startOfYear) expensesYtd += absAmount;
@@ -168,10 +292,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const netProfitYtd = revenueYtd - expensesYtd;
     const netProfit = incomeTotal - expenseTotal;
 
-    // 🔥 BALANCE SHEET ENGINE (single bank)
+    // Single‑bank balance sheet
     let bankAssets = 0;
-
-    const withBalance = (transactions ?? []).filter(
+    const withBalance = (transactions as any[]).filter(
       (t) => t.balance !== null && t.balance !== undefined
     );
 
