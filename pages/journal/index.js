@@ -1,3 +1,5 @@
+/// page/journal/index.js
+
 "use client";
 
 import React from "react";
@@ -25,6 +27,7 @@ export default function JournalList() {
   const [selectedYear, setSelectedYear] = React.useState(
     new Date().getFullYear()
   );
+
   const { data, mutate } = useSWR(
     `/api/journal/list?year=${selectedYear}`,
     fetcher
@@ -39,6 +42,9 @@ export default function JournalList() {
   const availableMonths = data?.availableMonths || [];
   const lockedMonthsMap = data?.lockedMonthsMap || {};
   const timeline = data?.timeline || [];
+
+  const pendingUnlockRequest = data?.pendingUnlockRequest || false;
+  const trustStatus = data?.trustStatus || "none"; // "none" | "client" | "global"
 
   const isAdmin = user?.role === "admin";
   const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
@@ -169,9 +175,20 @@ export default function JournalList() {
       return;
     }
 
-    alert(json.message || "Unlock requested.");
+    // Auto-approved accountants
+    if (json.autoApproved) {
+      alert("Unlock auto-approved. The period is now open.");
+      setUnlockReason("");
+      setShowUnlockRequestModal(false);
+      mutate();
+      return;
+    }
+
+    // Pending
+    alert("Unlock request submitted and is pending admin approval.");
     setUnlockReason("");
     setShowUnlockRequestModal(false);
+    mutate();
   }
 
   function isJournalInLockedPeriod(journalDate) {
@@ -267,6 +284,26 @@ export default function JournalList() {
                 )}
               </p>
 
+              {/* Trusted Accountant Banners */}
+              {isAccountant && trustStatus === "global" && (
+                <div className="p-2 rounded bg-blue-100 text-blue-800 text-xs font-medium">
+                  You are globally trusted. Unlock requests will be auto-approved.
+                </div>
+              )}
+
+              {isAccountant && trustStatus === "client" && (
+                <div className="p-2 rounded bg-green-100 text-green-800 text-xs font-medium">
+                  You are trusted for this client. Unlock requests will be auto-approved.
+                </div>
+              )}
+
+              {/* Pending Unlock Banner */}
+              {periodLocked && isAccountant && pendingUnlockRequest && (
+                <div className="p-2 rounded bg-amber-100 text-amber-800 text-xs font-medium">
+                  Unlock request submitted and awaiting admin approval.
+                </div>
+              )}
+
               {/* Lock Button */}
               <button
                 type="button"
@@ -287,8 +324,8 @@ export default function JournalList() {
                 </button>
               )}
 
-              {/* Request Unlock (Accountant Only) */}
-              {periodLocked && isAccountant && (
+              {/* Request Unlock (Accountant Only, no duplicates) */}
+              {periodLocked && isAccountant && !pendingUnlockRequest && (
                 <button
                   type="button"
                   onClick={() => setShowUnlockRequestModal(true)}

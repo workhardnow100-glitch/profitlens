@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
+  // Determine client ID
   let clientId = null;
   if (role === "ACCOUNTANT") {
     clientId = session.user.actingAsClientId;
@@ -50,11 +51,66 @@ export default async function handler(req, res) {
 
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
+  // -------------------------------------------------------------
+  // TRUST LOOKUP (for accountants only)
+  // -------------------------------------------------------------
+  let trustStatus = "none"; // "none" | "client" | "global"
+  let pendingUnlockRequest = false;
+
+  if (role === "ACCOUNTANT") {
+    const accountantId = session.user.id;
+
+    // 1. GLOBAL TRUST
+    const { data: globalTrust } = await supabaseAdmin
+      .from("accountant_unlock_trust")
+      .select("id")
+      .eq("accountant_id", accountantId)
+      .is("client_id", null)
+      .eq("global_trusted", true)
+      .maybeSingle();
+
+    if (globalTrust) {
+      trustStatus = "global";
+    }
+
+    // 2. PER-CLIENT TRUST
+    if (trustStatus === "none") {
+      const { data: clientTrust } = await supabaseAdmin
+        .from("accountant_unlock_trust")
+        .select("id")
+        .eq("accountant_id", accountantId)
+        .eq("client_id", clientId)
+        .eq("trusted", true)
+        .maybeSingle();
+
+      if (clientTrust) {
+        trustStatus = "client";
+      }
+    }
+
+    // 3. PENDING UNLOCK REQUEST FOR CURRENT PERIOD
+    const { start: currentStart, end: currentEnd } = getMonthRange();
+
+    const { data: pendingReq } = await supabaseAdmin
+      .from("journal_unlock_requests")
+      .select("id")
+      .eq("client_id", clientId)
+      .eq("requested_by", accountantId)
+      .eq("period_start", currentStart)
+      .eq("period_end", currentEnd)
+      .eq("status", "pending")
+      .maybeSingle();
+
+    pendingUnlockRequest = !!pendingReq;
+  }
+
+  // -------------------------------------------------------------
+  // LOAD JOURNALS
+  // -------------------------------------------------------------
   const yearParam = req.query.year;
   const now = new Date();
   const currentYear = yearParam ? Number(yearParam) : now.getFullYear();
 
-  // Load journals via RPC
   const { data: journals, error } = await supabaseAdmin.rpc(
     "list_journals_for_client",
     { p_client_id: clientId }
@@ -65,7 +121,9 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to load journals" });
   }
 
-  // Current month lock detection
+  // -------------------------------------------------------------
+  // CURRENT MONTH LOCK STATE
+  // -------------------------------------------------------------
   const { start, end } = getMonthRange();
 
   const { data: lockRecord } = await supabaseAdmin
@@ -78,7 +136,9 @@ export default async function handler(req, res) {
 
   const periodLocked = !!lockRecord;
 
-  // Full lock history (with notes)
+  // -------------------------------------------------------------
+  // FULL LOCK HISTORY
+  // -------------------------------------------------------------
   const { data: history } = await supabaseAdmin
     .from("journal_period_locks")
     .select("period_start, period_end, locked_at, locked_by, note")
@@ -91,10 +151,10 @@ export default async function handler(req, res) {
     lockedMonthsMap[`${h.period_start}_${h.period_end}`] = true;
   });
 
-  // Month selector options for selected year
+  // Month selector options
   const availableMonths = getAllMonthsForYear(currentYear);
 
-  // Timeline: 12 months for selected year with lock info
+  // Timeline
   const timeline = availableMonths.map((m) => {
     const match = (history || []).find(
       (h) => h.period_start === m.start && h.period_end === m.end
@@ -108,6 +168,9 @@ export default async function handler(req, res) {
     };
   });
 
+  // -------------------------------------------------------------
+  // FINAL RESPONSE
+  // -------------------------------------------------------------
   return res.status(200).json({
     journals: journals || [],
     periodLocked,
@@ -118,5 +181,9 @@ export default async function handler(req, res) {
     lockedMonthsMap,
     year: currentYear,
     timeline,
+
+    // NEW FIELDS FOR UI
+    trustStatus,             // "none" | "client" | "global"
+    pendingUnlockRequest,    // true | false
   });
 }
