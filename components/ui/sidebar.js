@@ -730,6 +730,51 @@ export function SidebarMenu() {
   </Link>
 </SidebarMenuItem>
 
+{/* Profit & Loss */}
+<SidebarMenuItem>
+  <Link
+    href="/reports/pnl"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/reports/pnl"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Profit &amp; Loss</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Balance Sheet */}
+<SidebarMenuItem>
+  <Link
+    href="/reports/balance-sheet"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/reports/balance-sheet"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Balance Sheet</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Chart of Accounts */}
+<SidebarMenuItem>
+  <Link
+    href="/chart-of-accounts"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/chart-of-accounts"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Chart of Accounts</span>
+  </Link>
+</SidebarMenuItem>
+
 {/* Trial Balance */}
 <SidebarMenuItem>
   <Link
