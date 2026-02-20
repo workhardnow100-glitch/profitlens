@@ -13,21 +13,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const session = await getServerSession(req, res, authOptions);
+    const clientId = session?.user?.clientId;
 
-    const clientId = session?.user?.clientId as string | undefined;
     if (!clientId) {
-      return res.status(400).json({ error: "Missing client context" });
+      return res.status(200).json(emptyOverview());
     }
 
-    // 1) Load all transactions for this client
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select("id, date, amount, business_category, balance")
       .eq("client_id", clientId);
 
-    if (error) {
-      console.error("accounting-overview transactions error:", error);
-      return res.status(500).json({ error: "Failed to load accounting overview" });
+    if (error || !transactions) {
+      return res.status(200).json(emptyOverview());
     }
 
     // Prepare CT_MAP sets
@@ -54,7 +52,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let negativeBalanceCount = 0;
 
     // 2) Classify and aggregate
-    for (const tx of transactions ?? []) {
+    for (const tx of transactions) {
       const date = tx.date ? new Date(tx.date) : null;
       const category = tx.business_category ?? "";
       const amount = Number(tx.amount ?? 0);
@@ -101,16 +99,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         }
         continue;
       }
-
-      // Anything else → review bucket (ignored for P&L)
     }
 
     const netProfitMtd = revenueMtd - expensesMtd;
     const netProfitYtd = revenueYtd - expensesYtd;
     const netProfit = incomeTotal - expenseTotal;
 
-    // 3) Build cockpit response
-    const response = {
+    return res.status(200).json({
       financial_health: {
         assets: 0,
         liabilities: 0,
@@ -172,11 +167,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         { label: "Upload Statement", link: "/upload" },
         { label: "Run VAT Return", link: "/vat" },
       ],
-    };
-
-    return res.status(200).json(response);
+    });
   } catch (err) {
     console.error("Accounting overview handler error:", err);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(200).json(emptyOverview());
   }
+}
+
+function emptyOverview() {
+  return {
+    financial_health: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      revenue_mtd: 0,
+      revenue_ytd: 0,
+      expenses_mtd: 0,
+      expenses_ytd: 0,
+      net_profit_mtd: 0,
+      net_profit_ytd: 0,
+    },
+    trial_balance: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      income: 0,
+      expenses: 0,
+    },
+    profit_and_loss: {
+      revenue: 0,
+      cost_of_sales: 0,
+      gross_profit: 0,
+      operating_expenses: 0,
+      net_profit: 0,
+    },
+    balance_sheet: {
+      total_assets: 0,
+      total_liabilities: 0,
+      net_assets: 0,
+      equity: 0,
+    },
+    coa_summary: {
+      total_accounts: 0,
+      active_accounts: 0,
+      system_accounts: 0,
+      uncategorised_accounts: 0,
+      suspense_accounts: 0,
+    },
+    alerts: [],
+    quick_actions: [],
+  };
 }
