@@ -150,7 +150,7 @@ export default function AccountingOverviewPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Trial Balance Snapshot</h2>
-          <Link href="/trial-balance" className="text-sm text-blue-600 hover:underline">
+          <Link href="reports/trial-balance" className="text-sm text-blue-600 hover:underline">
             View full Trial Balance
           </Link>
         </div>
