@@ -700,6 +700,36 @@ export function SidebarMenu() {
   </Link>
 </SidebarMenuItem>
 
+{/* Chart of Accounts */}
+<SidebarMenuItem>
+  <Link
+    href="/settings/chart-of-accounts"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/settings/chart-of-accounts"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Chart of Accounts</span>
+  </Link>
+</SidebarMenuItem>
+
+{/* Accounting Overview — NEW */}
+<SidebarMenuItem>
+  <Link
+    href="/accounting-overview"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/accounting-overview"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Accounting Overview</span>
+  </Link>
+</SidebarMenuItem>
+
 {/* Trial Balance */}
 <SidebarMenuItem>
   <Link
@@ -715,20 +745,6 @@ export function SidebarMenu() {
   </Link>
 </SidebarMenuItem>
 
-{/* Chart of Accounts */}
-<SidebarMenuItem>
-  <Link
-    href="/setting/chart-of-accounts"
-    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
-      router.pathname === "/settings/chart-of-accounts"
-        ? "bg-blue-50 text-blue-700 font-semibold"
-        : "text-slate-700 hover:bg-slate-100"
-    }`}
-  >
-    <FileText size={16} />
-    <span>Chart of Accounts</span>
-  </Link>
-</SidebarMenuItem>
 
 {/* Payment Settings */}
 <SidebarMenuItem>
