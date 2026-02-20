@@ -39,65 +39,79 @@ export default async function handler(req, res) {
 
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
-  const { periodStart, periodEnd } = req.body || {};
-  let start = periodStart;
-  let end = periodEnd;
+  const { periodStart, periodEnd, periods, note } = req.body || {};
+  let ranges = [];
 
-  if (!start || !end) {
-    const r = getMonthRange();
-    start = r.start;
-    end = r.end;
+  if (Array.isArray(periods) && periods.length > 0) {
+    ranges = periods
+      .map((p) => ({
+        start: p.periodStart,
+        end: p.periodEnd,
+      }))
+      .filter((p) => p.start && p.end);
+  } else {
+    let start = periodStart;
+    let end = periodEnd;
+
+    if (!start || !end) {
+      const r = getMonthRange();
+      start = r.start;
+      end = r.end;
+    }
+    ranges = [{ start, end }];
+  }
+
+  if (ranges.length === 0) {
+    return res.status(400).json({ error: "No valid periods provided" });
   }
 
   try {
-    const { data: existing } = await supabaseAdmin
-      .from("journal_period_locks")
-      .select("id")
-      .eq("client_id", clientId)
-      .eq("period_start", start)
-      .eq("period_end", end)
-      .maybeSingle();
+    for (const r of ranges) {
+      const { data: existing } = await supabaseAdmin
+        .from("journal_period_locks")
+        .select("id")
+        .eq("client_id", clientId)
+        .eq("period_start", r.start)
+        .eq("period_end", r.end)
+        .maybeSingle();
 
-    if (existing) {
-      return res.status(200).json({
-        locked: true,
-        periodStart: start,
-        periodEnd: end,
-        message: "Period already locked",
-      });
-    }
+      if (existing) {
+        continue;
+      }
 
-    const { error: insertErr } = await supabaseAdmin
-      .from("journal_period_locks")
-      .insert([
+      const { error: insertErr } = await supabaseAdmin
+        .from("journal_period_locks")
+        .insert([
+          {
+            client_id: clientId,
+            period_start: r.start,
+            period_end: r.end,
+            locked_by: session.user.id,
+            note: note || null,
+          },
+        ]);
+
+      if (insertErr) throw insertErr;
+
+      await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
-          period_start: start,
-          period_end: end,
-          locked_by: session.user.id,
+          actor_email: session.user.email,
+          action:
+            role === "ACCOUNTANT"
+              ? "ACCOUNTANT_JOURNAL_PERIOD_LOCK"
+              : "JOURNAL_PERIOD_LOCK",
+          details: `Locked journal period ${r.start} → ${r.end}${
+            note ? ` (note: ${note})` : ""
+          }`,
+          timestamp: new Date().toISOString(),
         },
       ]);
-
-    if (insertErr) throw insertErr;
-
-    await supabaseAdmin.from("audit").insert([
-      {
-        client_id: clientId,
-        actor_email: session.user.email,
-        action:
-          role === "ACCOUNTANT"
-            ? "ACCOUNTANT_JOURNAL_PERIOD_LOCK"
-            : "JOURNAL_PERIOD_LOCK",
-        details: `Locked journal period ${start} → ${end}`,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
+    }
 
     return res.status(200).json({
       locked: true,
-      periodStart: start,
-      periodEnd: end,
-      message: "Period locked",
+      message: "Periods locked",
     });
   } catch (err) {
     console.error("Lock period error:", err);

@@ -1,4 +1,4 @@
-// pages/api/journal/list.js
+// pages/api/journal/lock-period.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
@@ -13,21 +13,10 @@ function getMonthRange(date = new Date()) {
   return { start, end };
 }
 
-function getAllMonthsForYear(year) {
-  const months = [];
-  for (let m = 0; m < 12; m++) {
-    const start = new Date(year, m, 1).toISOString().slice(0, 10);
-    const end = new Date(year, m + 1, 0).toISOString().slice(0, 10);
-    const label = new Date(year, m, 1).toLocaleString("en-GB", {
-      month: "long",
-      year: "numeric",
-    });
-    months.push({ label, start, end });
-  }
-  return months;
-}
-
 export default async function handler(req, res) {
+  if (req.method !== "POST")
+    return res.status(405).json({ error: "Method not allowed" });
+
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
@@ -50,54 +39,82 @@ export default async function handler(req, res) {
 
   if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
-  // Load journals via RPC
-  const { data: journals, error } = await supabaseAdmin.rpc(
-    "list_journals_for_client",
-    { p_client_id: clientId }
-  );
+  const { periodStart, periodEnd, periods, note } = req.body || {};
+  let ranges = [];
 
-  if (error) {
-    console.error("Journal list error:", error);
-    return res.status(500).json({ error: "Failed to load journals" });
+  if (Array.isArray(periods) && periods.length > 0) {
+    ranges = periods
+      .map((p) => ({
+        start: p.periodStart,
+        end: p.periodEnd,
+      }))
+      .filter((p) => p.start && p.end);
+  } else {
+    let start = periodStart;
+    let end = periodEnd;
+
+    if (!start || !end) {
+      const r = getMonthRange();
+      start = r.start;
+      end = r.end;
+    }
+    ranges = [{ start, end }];
   }
 
-  // Current month lock detection
-  const { start, end } = getMonthRange();
+  if (ranges.length === 0) {
+    return res.status(400).json({ error: "No valid periods provided" });
+  }
 
-  const { data: lockRecord } = await supabaseAdmin
-    .from("journal_period_locks")
-    .select("id")
-    .eq("client_id", clientId)
-    .eq("period_start", start)
-    .eq("period_end", end)
-    .maybeSingle();
+  try {
+    for (const r of ranges) {
+      const { data: existing } = await supabaseAdmin
+        .from("journal_period_locks")
+        .select("id")
+        .eq("client_id", clientId)
+        .eq("period_start", r.start)
+        .eq("period_end", r.end)
+        .maybeSingle();
 
-  const periodLocked = !!lockRecord;
+      if (existing) {
+        continue;
+      }
 
-  // Load full lock history
-  const { data: history } = await supabaseAdmin
-    .from("journal_period_locks")
-    .select("period_start, period_end, locked_at, locked_by")
-    .eq("client_id", clientId)
-    .order("period_start", { ascending: false });
+      const { error: insertErr } = await supabaseAdmin
+        .from("journal_period_locks")
+        .insert([
+          {
+            client_id: clientId,
+            period_start: r.start,
+            period_end: r.end,
+            locked_by: session.user.id,
+            note: note || null,
+          },
+        ]);
 
-  // Build a map of locked months for highlighting journals
-  const lockedMonthsMap = {};
-  (history || []).forEach((h) => {
-    lockedMonthsMap[`${h.period_start}_${h.period_end}`] = true;
-  });
+      if (insertErr) throw insertErr;
 
-  // Build month selector options for the current year
-  const currentYear = new Date().getFullYear();
-  const availableMonths = getAllMonthsForYear(currentYear);
+      await supabaseAdmin.from("audit").insert([
+        {
+          client_id: clientId,
+          actor_email: session.user.email,
+          action:
+            role === "ACCOUNTANT"
+              ? "ACCOUNTANT_JOURNAL_PERIOD_LOCK"
+              : "JOURNAL_PERIOD_LOCK",
+          details: `Locked journal period ${r.start} → ${r.end}${
+            note ? ` (note: ${note})` : ""
+          }`,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
 
-  return res.status(200).json({
-    journals: journals || [],
-    periodLocked,
-    periodStart: start,
-    periodEnd: end,
-    history: history || [],
-    availableMonths,
-    lockedMonthsMap,
-  });
+    return res.status(200).json({
+      locked: true,
+      message: "Periods locked",
+    });
+  } catch (err) {
+    console.error("Lock period error:", err);
+    return res.status(500).json({ error: "Failed to lock period" });
+  }
 }
