@@ -37,10 +37,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       .eq("coa_id", coa.id);
 
     const totalAccounts = coaEntries?.length ?? 0;
-    const activeAccounts = coaEntries?.filter(a => !a.is_system).length ?? 0;
-    const systemAccounts = coaEntries?.filter(a => a.is_system).length ?? 0;
-    const uncategorisedAccounts = coaEntries?.filter(a => a.account_code === "9020").length ?? 0;
-    const suspenseAccounts = coaEntries?.filter(a => a.account_code === "9999").length ?? 0;
+    const activeAccounts = coaEntries?.filter((a) => !a.is_system).length ?? 0;
+    const systemAccounts = coaEntries?.filter((a) => a.is_system).length ?? 0;
+    const uncategorisedAccounts =
+      coaEntries?.filter((a) => a.account_code === "9020").length ?? 0;
+    const suspenseAccounts =
+      coaEntries?.filter((a) => a.account_code === "9999").length ?? 0;
 
     // 🔹 Fetch transactions
     const { data: transactions, error } = await supabaseAdmin
@@ -75,29 +77,73 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let uncategorisedCount = 0;
     let negativeBalanceCount = 0;
 
+    // Tax/liability buckets
+    let vatLiability = 0;
+    let cisLiability = 0;
+    let ctLiability = 0;
+    let saLiability = 0;
+
     // 🔹 Classify and aggregate
     for (const tx of transactions) {
       const date = tx.date ? new Date(tx.date) : null;
       const category = tx.business_category ?? "";
       const amount = Number(tx.amount ?? 0);
 
+      // Negative balance alert
       if (tx.balance !== null && Number(tx.balance) < 0) {
         negativeBalanceCount += 1;
       }
 
+      // 🔸 Tax liabilities (computed regardless of ignore bucket)
+      switch (category) {
+        case "VAT Collected":
+          vatLiability += amount;
+          break;
+        case "VAT Paid":
+        case "VAT Adjustment":
+          vatLiability -= Math.abs(amount);
+          break;
+        case "CIS Deducted":
+          cisLiability += amount;
+          break;
+        case "CIS Suffered":
+          cisLiability -= Math.abs(amount);
+          break;
+        case "Corporation Tax Payment":
+          ctLiability -= Math.abs(amount);
+          break;
+        case "Corporation Tax Refund":
+          ctLiability += amount;
+          break;
+        case "SA Payment":
+          saLiability -= Math.abs(amount);
+          break;
+        case "SA Refund":
+          saLiability += amount;
+          break;
+        default:
+          break;
+      }
+
+      // Uncategorised
       if (!category || !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
         uncategorisedCount += 1;
         continue;
       }
 
-      if (ignoreSet.has(category)) continue;
+      // Ignore bucket (for P&L/TB)
+      if (ignoreSet.has(category)) {
+        continue;
+      }
 
       const isIncome = incomeSet.has(category);
       const isAllowable = allowableSet.has(category);
       const isDisallowable = disallowableSet.has(category);
 
+      // Income
       if (isIncome) {
         incomeTotal += amount;
+
         if (date) {
           if (date >= startOfMonth) revenueMtd += amount;
           if (date >= startOfYear) revenueYtd += amount;
@@ -105,9 +151,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         continue;
       }
 
+      // Expenses (allowable + disallowable)
       if (isAllowable || isDisallowable) {
         const absAmount = Math.abs(amount);
         expenseTotal += absAmount;
+
         if (date) {
           if (date >= startOfMonth) expensesMtd += absAmount;
           if (date >= startOfYear) expensesYtd += absAmount;
@@ -129,13 +177,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     if (withBalance.length > 0) {
       withBalance.sort(
-        (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+        (a, b) =>
+          new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
       );
       bankAssets = Number(withBalance[0].balance) || 0;
     }
 
+    const totalTaxLiabilities =
+      vatLiability + cisLiability + ctLiability + saLiability;
+
     const totalAssets = bankAssets;
-    const totalLiabilities = 0;
+    const totalLiabilities = totalTaxLiabilities;
     const netAssets = totalAssets - totalLiabilities;
     const equity = netAssets;
 
@@ -190,6 +242,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           count: negativeBalanceCount,
           severity: negativeBalanceCount > 0 ? "medium" : "low",
           link: "/transactions?filter=negative_balance",
+        },
+        {
+          type: "tax_liabilities",
+          count:
+            (vatLiability !== 0 ? 1 : 0) +
+            (cisLiability !== 0 ? 1 : 0) +
+            (ctLiability !== 0 ? 1 : 0) +
+            (saLiability !== 0 ? 1 : 0),
+          severity: totalTaxLiabilities > 0 ? "high" : "low",
+          link: "/tax",
         },
       ],
       quick_actions: [
