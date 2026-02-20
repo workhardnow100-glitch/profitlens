@@ -378,7 +378,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
       ],
       quick_actions: [
-        { label: "Add Account", link: "/settings/chart-of-accounts" },
+        { label: "Add Account", link: "/setting/chart-of-accounts" },
         { label: "Post Journal", link: "/journal/new" },
         { label: "View Transactions", link: "/transactions" },
         { label: "Reconcile Bank", link: "/bank-reconciliation" },
