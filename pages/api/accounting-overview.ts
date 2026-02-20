@@ -19,6 +19,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyOverview());
     }
 
+    // 🔹 Fetch COA ID
+    const { data: coa, error: coaError } = await supabaseAdmin
+      .from("chart_of_accounts")
+      .select("id")
+      .eq("client_id", clientId)
+      .single();
+
+    if (coaError || !coa) {
+      return res.status(200).json(emptyOverview());
+    }
+
+    // 🔹 Fetch COA entries
+    const { data: coaEntries } = await supabaseAdmin
+      .from("chart_of_account_entries")
+      .select("id, is_system, account_code")
+      .eq("coa_id", coa.id);
+
+    const totalAccounts = coaEntries?.length ?? 0;
+    const activeAccounts = coaEntries?.filter(a => !a.is_system).length ?? 0;
+    const systemAccounts = coaEntries?.filter(a => a.is_system).length ?? 0;
+    const uncategorisedAccounts = coaEntries?.filter(a => a.account_code === "9020").length ?? 0;
+    const suspenseAccounts = coaEntries?.filter(a => a.account_code === "9999").length ?? 0;
+
+    // 🔹 Fetch transactions
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select("id, date, amount, business_category, balance")
@@ -51,36 +75,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     let uncategorisedCount = 0;
     let negativeBalanceCount = 0;
 
-    // 2) Classify and aggregate
+    // 🔹 Classify and aggregate
     for (const tx of transactions) {
       const date = tx.date ? new Date(tx.date) : null;
       const category = tx.business_category ?? "";
       const amount = Number(tx.amount ?? 0);
 
-      // Negative balance alert
       if (tx.balance !== null && Number(tx.balance) < 0) {
         negativeBalanceCount += 1;
       }
 
-      // Uncategorised
       if (!category || !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
         uncategorisedCount += 1;
         continue;
       }
 
-      // Ignore bucket
-      if (ignoreSet.has(category)) {
-        continue;
-      }
+      if (ignoreSet.has(category)) continue;
 
       const isIncome = incomeSet.has(category);
       const isAllowable = allowableSet.has(category);
       const isDisallowable = disallowableSet.has(category);
 
-      // Income
       if (isIncome) {
         incomeTotal += amount;
-
         if (date) {
           if (date >= startOfMonth) revenueMtd += amount;
           if (date >= startOfYear) revenueYtd += amount;
@@ -88,11 +105,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         continue;
       }
 
-      // Expenses (allowable + disallowable)
       if (isAllowable || isDisallowable) {
         const absAmount = Math.abs(amount);
         expenseTotal += absAmount;
-
         if (date) {
           if (date >= startOfMonth) expensesMtd += absAmount;
           if (date >= startOfYear) expensesYtd += absAmount;
@@ -105,7 +120,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const netProfitYtd = revenueYtd - expensesYtd;
     const netProfit = incomeTotal - expenseTotal;
 
-    // 🔥 BALANCE SHEET ENGINE (single bank account)
+    // 🔥 BALANCE SHEET ENGINE (single bank)
     let bankAssets = 0;
 
     const withBalance = (transactions ?? []).filter(
@@ -120,10 +135,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const totalAssets = bankAssets;
-    const totalLiabilities = 0; // VAT/CIS/CT/SA/Loans will be added later
+    const totalLiabilities = 0;
     const netAssets = totalAssets - totalLiabilities;
-
-    // Equity = retained earnings (simple model for now)
     const equity = netAssets;
 
     return res.status(200).json({
@@ -159,11 +172,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         equity: equity,
       },
       coa_summary: {
-        total_accounts: 0,
-        active_accounts: 0,
-        system_accounts: 0,
-        uncategorised_accounts: 0,
-        suspense_accounts: 0,
+        total_accounts: totalAccounts,
+        active_accounts: activeAccounts,
+        system_accounts: systemAccounts,
+        uncategorised_accounts: uncategorisedAccounts,
+        suspense_accounts: suspenseAccounts,
       },
       alerts: [
         {
