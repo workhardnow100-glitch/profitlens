@@ -124,7 +124,19 @@ export function SidebarMenu() {
   const [toolsOpen, setToolsOpen] = useState(true);
 
   const [clients, setClients] = useState([]);
-  const [me, setMe] = useState(null);
+const [me, setMe] = useState(null);
+
+/* ⭐ Add this SWR hook here */
+const { data: unlockCountData } = useSWR(
+  user?.role === "admin" || user?.role === "founder"
+    ? "/api/admin/unlock-requests-count"
+    : null,
+  (url) => fetch(url).then((r) => r.json()),
+  { refreshInterval: 15000 }
+);
+
+const pendingUnlockCount = unlockCountData?.pending || 0;
+
 
   useEffect(() => {
     async function load() {
@@ -836,6 +848,36 @@ export function SidebarMenu() {
     <span>Payment Settings</span>
   </Link>
 </SidebarMenuItem>
+
+{/* Unlock Requests (Admin Only) */}
+{(session?.user?.role === "admin" || session?.user?.role === "founder") && (
+  <SidebarMenuItem>
+    <Link
+      href="/admin/unlock-requests"
+      className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+        router.pathname === "/admin/unlock-requests"
+          ? "bg-blue-50 text-blue-700 font-semibold"
+          : "text-slate-700 hover:bg-slate-100"
+      }`}
+    >
+      <ShieldCheck size={16} />
+
+      <span className="flex items-center gap-2">
+        Unlock Requests
+
+        {/* Optional pending badge */}
+        {pendingUnlockCount > 0 && (
+          <span className="ml-2 inline-flex items-center justify-center 
+            text-xs font-semibold bg-red-600 text-white rounded-full 
+            h-5 px-2">
+            {pendingUnlockCount}
+          </span>
+        )}
+      </span>
+    </Link>
+  </SidebarMenuItem>
+)}
+
 
 
 
