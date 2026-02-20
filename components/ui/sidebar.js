@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { useUser } from "../../hooks/useUser";
+import useSWR from "swr";
 
 // Structural wrappers
 export const SidebarProvider = ({ children }) => <>{children}</>;
