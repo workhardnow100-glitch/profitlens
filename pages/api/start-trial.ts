@@ -4,6 +4,9 @@ import { supabaseAdmin } from "../../lib/supabase-admin";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { randomUUID } from "crypto";
 
+// ⭐ NEW: Import the onboarding helper
+import { ensureClientCoa } from "../../lib/onboarding";
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -45,6 +48,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         console.error("Supabase client insert error:", clientError.message);
         return res.status(500).json({ error: clientError.message });
       }
+
+      // ⭐ NEW: Clone default COA for this client
+      await ensureClientCoa(clientId);
 
       // Create stub user
       const { error: userInsertError } = await supabaseAdmin.from("app_users").insert({
