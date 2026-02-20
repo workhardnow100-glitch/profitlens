@@ -851,7 +851,7 @@ const pendingUnlockCount = unlockCountData?.pending || 0;
 </SidebarMenuItem>
 
 {/* Unlock Requests (Admin Only) */}
-{(session?.user?.role === "admin" || session?.user?.role === "founder") && (
+{(user?.role === "admin" || user?.role === "founder") && (
   <SidebarMenuItem>
     <Link
       href="/admin/unlock-requests"
@@ -866,7 +866,6 @@ const pendingUnlockCount = unlockCountData?.pending || 0;
       <span className="flex items-center gap-2">
         Unlock Requests
 
-        {/* Optional pending badge */}
         {pendingUnlockCount > 0 && (
           <span className="ml-2 inline-flex items-center justify-center 
             text-xs font-semibold bg-red-600 text-white rounded-full 
@@ -878,6 +877,7 @@ const pendingUnlockCount = unlockCountData?.pending || 0;
     </Link>
   </SidebarMenuItem>
 )}
+
 
 
 
