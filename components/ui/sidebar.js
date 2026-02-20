@@ -703,7 +703,7 @@ export function SidebarMenu() {
 {/* Chart of Accounts */}
 <SidebarMenuItem>
   <Link
-    href="/settings/chart-of-accounts"
+    href="/setting/chart-of-accounts" /// keep as setting/ 
     className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
       router.pathname === "/settings/chart-of-accounts"
         ? "bg-blue-50 text-blue-700 font-semibold"
