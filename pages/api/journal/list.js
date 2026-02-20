@@ -1,89 +1,24 @@
-// pages/journal/[id].js
-"use client";
+// pages/api/journal/list.js
+import { getServerSession } from "next-auth/next";
+import { authOptions } from "../auth/[...nextauth]";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
-import { useRouter } from "next/router";
-import useSWR from "swr";
-import ResponsiveLayout from "../../components/ResponsiveLayout";
-import ResponsiveCard from "../../components/ResponsiveCard";
-import ResponsiveTable from "../../components/ResponsiveTable";
+export default async function handler(req, res) {
+  const session = await getServerSession(req, res, authOptions);
+  if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-const fetcher = (url) => fetch(url).then((res) => res.json());
+  const clientId = session.user.actingAsClientId || session.user.clientId;
+  if (!clientId) return res.status(400).json({ error: "Invalid client ID" });
 
-export default function ViewJournal() {
-  const router = useRouter();
-  const { id } = router.query;
-
-  const { data, mutate } = useSWR(id ? `/api/journal/get?id=${id}` : null, fetcher);
-  const journal = data?.journal;
-  const lines = data?.lines || [];
-
-  if (!journal) {
-    return (
-      <ResponsiveLayout>
-        <div className="p-8">Loading journal…</div>
-      </ResponsiveLayout>
-    );
-  }
-
-  async function reverseJournal() {
-    if (!confirm("Reverse this journal?")) return;
-
-    const res = await fetch("/api/journal/manage", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "reverse",
-        payload: { id },
-      }),
-    });
-
-    if (res.ok) mutate();
-  }
-
-  return (
-    <ResponsiveLayout>
-      <div className="p-8 space-y-6">
-        <h1 className="text-2xl font-bold text-slate-800">
-          Journal #{journal.id.slice(0, 8)}
-        </h1>
-
-        <ResponsiveCard title="Journal Details">
-          <p><strong>Date:</strong> {journal.date}</p>
-          <p><strong>Reference:</strong> {journal.reference || "—"}</p>
-          <p><strong>Description:</strong> {journal.description || "—"}</p>
-          <p>
-            <strong>Status:</strong>{" "}
-            {journal.reversed ? (
-              <span className="text-red-600 font-medium">Reversed</span>
-            ) : (
-              <span className="text-green-600 font-medium">Posted</span>
-            )}
-          </p>
-        </ResponsiveCard>
-
-        <ResponsiveCard title="Lines">
-          <ResponsiveTable
-            headers={["Account", "Debit (£)", "Credit (£)"]}
-          >
-            {lines.map((l) => (
-              <tr key={l.id} className="border-t">
-                <td>{l.account_name}</td>
-                <td className="text-right">£{l.debit}</td>
-                <td className="text-right">£{l.credit}</td>
-              </tr>
-            ))}
-          </ResponsiveTable>
-        </ResponsiveCard>
-
-        {!journal.reversed && (
-          <button
-            onClick={reverseJournal}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-          >
-            Reverse Journal
-          </button>
-        )}
-      </div>
-    </ResponsiveLayout>
+  const { data, error } = await supabaseAdmin.rpc(
+    "list_journals_for_client",
+    { p_client_id: clientId }
   );
+
+  if (error) {
+    console.error(error);
+    return res.status(500).json({ error: "Failed to load journals" });
+  }
+
+  return res.status(200).json({ journals: data });
 }
