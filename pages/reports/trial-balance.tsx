@@ -1,22 +1,27 @@
-// pages/trial-balance.tsx
-import { getServerSession } from "next-auth";
-import { authOptions } from "../api/auth/[...nextauth]";
+// pages/reports/trial-balance.tsx
+"use client";
+
+import { useEffect, useState } from "react";
 import { TrialBalanceTable } from "../../components/trial-balance/TrialBalanceTable";
 
-export default async function TrialBalancePage() {
-  // 🔹 Load the logged‑in user's session
-  const session = await getServerSession(authOptions);
+export default function TrialBalancePage() {
+  const [clientId, setClientId] = useState<string | null>(null);
 
-  // 🔹 Extract clientId from session
-  const clientId = session?.user?.clientId;
+  useEffect(() => {
+    const load = async () => {
+      const res = await fetch("/api/auth/session");
+      const session = await res.json();
+      setClientId(session?.user?.clientId ?? null);
+    };
+
+    load();
+  }, []);
 
   if (!clientId) {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-semibold">Trial Balance</h1>
-        <p className="text-red-600 mt-2">
-          No client selected. Please log in again.
-        </p>
+        <p className="text-gray-600 mt-2">Loading client data…</p>
       </div>
     );
   }
@@ -28,7 +33,6 @@ export default async function TrialBalancePage() {
         A summary of all account balances for this client.
       </p>
 
-      {/* 🔥 Now uses the REAL logged‑in client */}
       <TrialBalanceTable clientId={clientId} />
     </div>
   );
