@@ -105,11 +105,32 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const netProfitYtd = revenueYtd - expensesYtd;
     const netProfit = incomeTotal - expenseTotal;
 
+    // 🔥 BALANCE SHEET ENGINE (single bank account)
+    let bankAssets = 0;
+
+    const withBalance = (transactions ?? []).filter(
+      (t) => t.balance !== null && t.balance !== undefined
+    );
+
+    if (withBalance.length > 0) {
+      withBalance.sort(
+        (a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
+      );
+      bankAssets = Number(withBalance[0].balance) || 0;
+    }
+
+    const totalAssets = bankAssets;
+    const totalLiabilities = 0; // VAT/CIS/CT/SA/Loans will be added later
+    const netAssets = totalAssets - totalLiabilities;
+
+    // Equity = retained earnings (simple model for now)
+    const equity = netAssets;
+
     return res.status(200).json({
       financial_health: {
-        assets: 0,
-        liabilities: 0,
-        equity: 0,
+        assets: totalAssets,
+        liabilities: totalLiabilities,
+        equity: equity,
         revenue_mtd: revenueMtd,
         revenue_ytd: revenueYtd,
         expenses_mtd: expensesMtd,
@@ -118,9 +139,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         net_profit_ytd: netProfitYtd,
       },
       trial_balance: {
-        assets: 0,
-        liabilities: 0,
-        equity: 0,
+        assets: totalAssets,
+        liabilities: totalLiabilities,
+        equity: equity,
         income: incomeTotal,
         expenses: expenseTotal,
       },
@@ -132,10 +153,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         net_profit: netProfit,
       },
       balance_sheet: {
-        total_assets: 0,
-        total_liabilities: 0,
-        net_assets: 0,
-        equity: 0,
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        net_assets: netAssets,
+        equity: equity,
       },
       coa_summary: {
         total_accounts: 0,
