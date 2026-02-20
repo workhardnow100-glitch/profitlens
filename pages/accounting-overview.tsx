@@ -108,7 +108,15 @@ export default function AccountingOverviewPage() {
     );
   }
 
-  const { financial_health, trial_balance, profit_and_loss, balance_sheet, coa_summary, alerts, quick_actions } = data;
+  const {
+    financial_health,
+    trial_balance,
+    profit_and_loss,
+    balance_sheet,
+    coa_summary,
+    alerts,
+    quick_actions,
+  } = data;
 
   return (
     <div className="p-6 space-y-8">
@@ -197,11 +205,11 @@ export default function AccountingOverviewPage() {
           </Link>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <StatCard label="Total Accounts" value={coa_summary.total_accounts} />
-          <StatCard label="Active Accounts" value={coa_summary.active_accounts} />
-          <StatCard label="System Accounts" value={coa_summary.system_accounts} />
-          <StatCard label="Uncategorised" value={coa_summary.uncategorised_accounts} />
-          <StatCard label="Suspense" value={coa_summary.suspense_accounts} />
+          <StatCard label="Total Accounts" value={coa_summary.total_accounts} type="number" />
+          <StatCard label="Active Accounts" value={coa_summary.active_accounts} type="number" />
+          <StatCard label="System Accounts" value={coa_summary.system_accounts} type="number" />
+          <StatCard label="Uncategorised" value={coa_summary.uncategorised_accounts} type="number" />
+          <StatCard label="Suspense" value={coa_summary.suspense_accounts} type="number" />
         </div>
       </section>
 
@@ -238,13 +246,28 @@ export default function AccountingOverviewPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+/* ⭐ UPDATED STATCARD — supports currency + number */
+function StatCard({
+  label,
+  value,
+  type = "currency",
+}: {
+  label: string;
+  value: number;
+  type?: "currency" | "number";
+}) {
+  const formatted =
+    type === "currency"
+      ? `£${value.toLocaleString("en-GB", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`
+      : value.toLocaleString("en-GB");
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
       <div className="text-xs text-gray-500">{label}</div>
-      <div className="mt-1 text-base font-semibold">
-        £{value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      </div>
+      <div className="mt-1 text-base font-semibold">{formatted}</div>
     </div>
   );
 }
@@ -260,6 +283,7 @@ function AlertRow({ alert }: { alert: Alert }) {
   const labelMap: Record<string, string> = {
     uncategorised_transactions: "Uncategorised transactions",
     negative_balance: "Negative balances",
+    tax_liabilities: "Tax liabilities",
   };
 
   const label = labelMap[alert.type] ?? alert.type;
