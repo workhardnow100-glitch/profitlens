@@ -2,7 +2,7 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { sendEmail } from "../../../lib/email/sendEmail";
+import { sendEmail } from "../../../lib/email";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
