@@ -11,17 +11,28 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  const role = (session.user.role || "").toUpperCase();
-  const isAdmin = session.user.role === "admin";
+  // ⭐ FIX: normalize role to lowercase (matches useUser)
+  const role = (session.user.role || "").toLowerCase();
 
-  // Only founders/admins can unlock periods
-  if (!isAdmin) {
+  const isFounder = role === "founder";
+  const isAdmin = role === "admin";
+  const isAccountant = role === "accountant";
+
+  // ⭐ FIX: trusted accountant override
+  const trustStatus = session.user.trustStatus || "none";
+  const isTrustedAccountant =
+    isAccountant && (trustStatus === "global" || trustStatus === "client");
+
+  const isOverride = isFounder || isAdmin || isTrustedAccountant;
+
+  // ⭐ FIX: allow founder + admin + trusted accountant
+  if (!isOverride) {
     return res.status(403).json({ error: "Only admins can unlock periods" });
   }
 
-  // Accountant scoping
+  // ⭐ FIX: accountant scoping
   let clientId = null;
-  if (role === "ACCOUNTANT") {
+  if (role === "accountant") {
     clientId = session.user.actingAsClientId;
   } else {
     clientId = session.user.clientId || session.user.defaultClientId;
