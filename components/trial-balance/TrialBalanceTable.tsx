@@ -31,8 +31,13 @@ export function TrialBalanceTable({ clientId }: { clientId: string }) {
     return <div className="text-gray-500">Loading trial balance…</div>;
   }
 
-  const totalDebit = rows.reduce((sum, r) => sum + r.debit, 0);
-  const totalCredit = rows.reduce((sum, r) => sum + r.credit, 0);
+  // ⭐ FILTER OUT SYSTEM ACCOUNTS (9000+)
+  const filteredRows = rows.filter(
+    (r) => Number(r.account_code) < 9000
+  );
+
+  const totalDebit = filteredRows.reduce((sum, r) => sum + r.debit, 0);
+  const totalCredit = filteredRows.reduce((sum, r) => sum + r.credit, 0);
 
   return (
     <div className="overflow-x-auto border rounded-lg bg-white">
@@ -49,7 +54,7 @@ export function TrialBalanceTable({ clientId }: { clientId: string }) {
         </thead>
 
         <tbody>
-          {rows.map((r) => (
+          {filteredRows.map((r) => (
             <tr key={r.account_code} className="border-b">
               <td className="py-2 px-3">{r.account_code}</td>
               <td className="py-2 px-3">{r.account_name}</td>
