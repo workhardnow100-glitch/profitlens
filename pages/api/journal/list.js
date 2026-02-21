@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
   // -------------------------------------------------------------
-  // ROLE FIX — correct founder/admin detection
+  // CORRECT ROLE DETECTION
   // -------------------------------------------------------------
   const role = (session.user.role || "").toUpperCase();
 
@@ -44,7 +44,6 @@ export default async function handler(req, res) {
     session.user.subscriptionStatus
   );
 
-  // Founder/Admin OR subscribed users can access
   if (!(isFounder || isAdmin || isSubscribedOrTrial)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
@@ -95,7 +94,7 @@ export default async function handler(req, res) {
       if (clientTrust) trustStatus = "client";
     }
 
-    // PENDING UNLOCK REQUEST FOR CURRENT PERIOD
+    // PENDING UNLOCK REQUEST FOR CURRENT MONTH
     const { start: currentStart, end: currentEnd } = getMonthRange();
 
     const { data: pendingReq } = await supabaseAdmin
@@ -129,19 +128,19 @@ export default async function handler(req, res) {
   }
 
   // -------------------------------------------------------------
-  // CURRENT MONTH LOCK STATE (UI depends on this)
+  // FIX: DETECT MOST RECENT LOCKED PERIOD (NOT JUST CURRENT MONTH)
   // -------------------------------------------------------------
-  const { start, end } = getMonthRange();
-
-  const { data: lockRecord } = await supabaseAdmin
+  const { data: latestLock } = await supabaseAdmin
     .from("journal_period_locks")
     .select("*")
     .eq("client_id", clientId)
-    .eq("period_start", start)
-    .eq("period_end", end)
+    .order("period_start", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  const periodLocked = !!lockRecord;
+  const periodLocked = !!latestLock;
+  const periodStart = latestLock?.period_start || null;
+  const periodEnd = latestLock?.period_end || null;
 
   // -------------------------------------------------------------
   // FULL LOCK HISTORY
@@ -181,10 +180,10 @@ export default async function handler(req, res) {
   return res.status(200).json({
     journals: journals || [],
 
-    // ⭐ FIXED: UI now receives correct lock state
+    // ⭐ FIXED: UI now receives the REAL locked period
     periodLocked,
-    periodStart: start,
-    periodEnd: end,
+    periodStart,
+    periodEnd,
 
     history: history || [],
     availableMonths,
@@ -192,7 +191,6 @@ export default async function handler(req, res) {
     year: currentYear,
     timeline,
 
-    // TRUST + UNLOCK
     trustStatus,
     pendingUnlockRequest,
   });
