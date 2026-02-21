@@ -31,19 +31,30 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
+  // -------------------------------------------------------------
+  // ROLE FIX — correct founder/admin detection
+  // -------------------------------------------------------------
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = session.user.role === "admin";
+
+  const isFounder = role === "FOUNDER";
+  const isAdmin = role === "ADMIN";
+  const isAccountant = role === "ACCOUNTANT";
+
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  // Founder/Admin OR subscribed users can access
+  if (!(isFounder || isAdmin || isSubscribedOrTrial)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // Determine client ID
+  // -------------------------------------------------------------
+  // DETERMINE CLIENT ID
+  // -------------------------------------------------------------
   let clientId = null;
-  if (role === "ACCOUNTANT") {
+
+  if (isAccountant) {
     clientId = session.user.actingAsClientId;
   } else {
     clientId = session.user.clientId || session.user.defaultClientId;
@@ -57,10 +68,10 @@ export default async function handler(req, res) {
   let trustStatus = "none"; // "none" | "client" | "global"
   let pendingUnlockRequest = false;
 
-  if (role === "ACCOUNTANT") {
+  if (isAccountant) {
     const accountantId = session.user.id;
 
-    // 1. GLOBAL TRUST
+    // GLOBAL TRUST
     const { data: globalTrust } = await supabaseAdmin
       .from("accountant_unlock_trust")
       .select("id")
@@ -69,11 +80,9 @@ export default async function handler(req, res) {
       .eq("global_trusted", true)
       .maybeSingle();
 
-    if (globalTrust) {
-      trustStatus = "global";
-    }
+    if (globalTrust) trustStatus = "global";
 
-    // 2. PER-CLIENT TRUST
+    // CLIENT TRUST
     if (trustStatus === "none") {
       const { data: clientTrust } = await supabaseAdmin
         .from("accountant_unlock_trust")
@@ -83,12 +92,10 @@ export default async function handler(req, res) {
         .eq("trusted", true)
         .maybeSingle();
 
-      if (clientTrust) {
-        trustStatus = "client";
-      }
+      if (clientTrust) trustStatus = "client";
     }
 
-    // 3. PENDING UNLOCK REQUEST FOR CURRENT PERIOD
+    // PENDING UNLOCK REQUEST FOR CURRENT PERIOD
     const { start: currentStart, end: currentEnd } = getMonthRange();
 
     const { data: pendingReq } = await supabaseAdmin
@@ -122,13 +129,13 @@ export default async function handler(req, res) {
   }
 
   // -------------------------------------------------------------
-  // CURRENT MONTH LOCK STATE
+  // CURRENT MONTH LOCK STATE (UI depends on this)
   // -------------------------------------------------------------
   const { start, end } = getMonthRange();
 
   const { data: lockRecord } = await supabaseAdmin
     .from("journal_period_locks")
-    .select("id")
+    .select("*")
     .eq("client_id", clientId)
     .eq("period_start", start)
     .eq("period_end", end)
@@ -173,17 +180,20 @@ export default async function handler(req, res) {
   // -------------------------------------------------------------
   return res.status(200).json({
     journals: journals || [],
+
+    // ⭐ FIXED: UI now receives correct lock state
     periodLocked,
     periodStart: start,
     periodEnd: end,
+
     history: history || [],
     availableMonths,
     lockedMonthsMap,
     year: currentYear,
     timeline,
 
-    // NEW FIELDS FOR UI
-    trustStatus,             // "none" | "client" | "global"
-    pendingUnlockRequest,    // true | false
+    // TRUST + UNLOCK
+    trustStatus,
+    pendingUnlockRequest,
   });
 }
