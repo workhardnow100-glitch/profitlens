@@ -1,4 +1,3 @@
-// pages/journal/[id].js
 "use client";
 
 import { useRouter } from "next/router";
@@ -15,10 +14,8 @@ export default function ViewJournal() {
   const { id } = router.query;
   const { user, isLoading, isAuthenticated } = useUser();
 
-  // Unified client resolution (same as SA/Corp)
   const clientId = user?.actingAsClientId ?? user?.clientId;
 
-  // Load journal + lines
   const { data, mutate } = useSWR(
     id ? `/api/journal/get?id=${id}&clientId=${clientId}` : null,
     fetcher
@@ -26,9 +23,14 @@ export default function ViewJournal() {
 
   const journal = data?.journal;
   const lines = data?.lines || [];
-  const periodLocked = data?.periodLocked || false; // ⭐ NEW
+  const periodLocked = data?.periodLocked || false;
 
-  // AUTH GUARD (SOC2)
+  const isFounder = user?.role === "admin";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    user?.subscriptionStatus
+  );
+  const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
+
   if (isLoading) {
     return (
       <ResponsiveLayout>
@@ -44,12 +46,6 @@ export default function ViewJournal() {
       </ResponsiveLayout>
     );
   }
-
-  // SUBSCRIPTION GUARD
-  const isFounder = user.role === "admin";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-    user.subscriptionStatus
-  );
 
   if (!(isFounder || isSubscribedOrTrial)) {
     return (
@@ -82,20 +78,50 @@ export default function ViewJournal() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "reverse",
-        payload: { id, clientId },
+        payload: { id },
       }),
     });
 
-    if (res.ok) mutate();
-    else {
-      const json = await res.json();
+    const json = await res.json();
+    if (!res.ok) {
       alert(json.error || "Failed to reverse journal.");
+      return;
     }
+
+    mutate();
+  }
+
+  async function deleteJournal() {
+    if (periodLocked) {
+      alert("This period is locked. Journals cannot be deleted.");
+      return;
+    }
+
+    if (!confirm("Delete this journal? This cannot be undone.")) return;
+
+    const res = await fetch("/api/journal/manage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete",
+        payload: { id },
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || "Failed to delete journal.");
+      return;
+    }
+
+    router.push("/journal");
   }
 
   return (
     <ResponsiveLayout currentPageName="Journal">
       <div className="p-8 space-y-6">
+
+        {/* HEADER */}
         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
           Journal #{journal.id.slice(0, 8)}
           {periodLocked && (
@@ -105,6 +131,54 @@ export default function ViewJournal() {
           )}
         </h1>
 
+        {/* ⭐ ACTION BUTTONS UNDER TITLE */}
+        <div className="flex flex-wrap gap-3">
+
+          {/* BACK */}
+          <button
+            className="px-4 py-2 text-sm rounded bg-slate-500 text-white hover:bg-slate-600"
+            onClick={() => router.push("/journal")}
+          >
+            Back to Journals
+          </button>
+
+          {/* EDIT */}
+          {!journal.reversed && !periodLocked && (
+            <button
+              className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+              onClick={() => router.push(`/journal/edit/${journal.id}`)}
+            >
+              Edit Journal
+            </button>
+          )}
+
+          {/* REVERSE */}
+          {!journal.reversed && (
+            <button
+              onClick={reverseJournal}
+              disabled={periodLocked}
+              className={`px-4 py-2 text-sm rounded text-white ${
+                periodLocked
+                  ? "bg-slate-400 cursor-not-allowed"
+                  : "bg-amber-500 hover:bg-amber-600"
+              }`}
+            >
+              {periodLocked ? "Locked" : "Reverse Journal"}
+            </button>
+          )}
+
+          {/* DELETE */}
+          {!journal.reversed && !periodLocked && (
+            <button
+              onClick={deleteJournal}
+              className="px-4 py-2 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+            >
+              Delete Journal
+            </button>
+          )}
+        </div>
+
+        {/* JOURNAL DETAILS */}
         <ResponsiveCard title="Journal Details">
           <p><strong>Date:</strong> {journal.date}</p>
           <p><strong>Reference:</strong> {journal.reference || "—"}</p>
@@ -119,6 +193,7 @@ export default function ViewJournal() {
           </p>
         </ResponsiveCard>
 
+        {/* LINES */}
         <ResponsiveCard title="Lines">
           <ResponsiveTable headers={["Account", "Debit (£)", "Credit (£)"]}>
             {lines.map((l) => (
@@ -131,19 +206,6 @@ export default function ViewJournal() {
           </ResponsiveTable>
         </ResponsiveCard>
 
-        {!journal.reversed && (
-          <button
-            onClick={reverseJournal}
-            disabled={periodLocked}
-            className={`px-4 py-2 rounded text-white ${
-              periodLocked
-                ? "bg-slate-400 cursor-not-allowed"
-                : "bg-red-600 hover:bg-red-700"
-            }`}
-          >
-            {periodLocked ? "Locked" : "Reverse Journal"}
-          </button>
-        )}
       </div>
     </ResponsiveLayout>
   );

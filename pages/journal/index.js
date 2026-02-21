@@ -1,5 +1,4 @@
 /// page/journal/index.js
-
 "use client";
 
 import React from "react";
@@ -44,7 +43,7 @@ export default function JournalList() {
   const timeline = data?.timeline || [];
 
   const pendingUnlockRequest = data?.pendingUnlockRequest || false;
-  const trustStatus = data?.trustStatus || "none"; // "none" | "client" | "global"
+  const trustStatus = data?.trustStatus || "none";
 
   const isAdmin = user?.role === "admin";
   const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
@@ -175,7 +174,6 @@ export default function JournalList() {
       return;
     }
 
-    // Auto-approved accountants
     if (json.autoApproved) {
       alert("Unlock auto-approved. The period is now open.");
       setUnlockReason("");
@@ -184,7 +182,6 @@ export default function JournalList() {
       return;
     }
 
-    // Pending
     alert("Unlock request submitted and is pending admin approval.");
     setUnlockReason("");
     setShowUnlockRequestModal(false);
@@ -218,7 +215,7 @@ export default function JournalList() {
             <p className="text-slate-600">All manual journals for this client.</p>
           </div>
 
-          {/* YEAR + PERIOD LOCK CARD */}
+          {/* PERIOD LOCK CONTROLS */}
           <ResponsiveCard title="Period Lock Controls">
             <div className="space-y-3 text-sm">
               {/* Year Selector */}
@@ -324,7 +321,7 @@ export default function JournalList() {
                 </button>
               )}
 
-              {/* Request Unlock (Accountant Only, no duplicates) */}
+              {/* Request Unlock (Accountant Only) */}
               {periodLocked && isAccountant && !pendingUnlockRequest && (
                 <button
                   type="button"
@@ -461,13 +458,89 @@ export default function JournalList() {
                     )}
                   </td>
 
-                  <td>
+                  {/* ⭐ NEW ACTION BUTTONS */}
+                  <td className="space-x-2 whitespace-nowrap">
+
+                    {/* VIEW */}
                     <button
-                      className="text-blue-600 underline text-sm"
+                      className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
                       onClick={() => router.push(`/journal/${j.id}`)}
                     >
                       View
                     </button>
+
+                    {/* EDIT */}
+                    {!j.reversed && !locked && (
+                      <button
+                        className="px-3 py-1 text-sm rounded bg-blue-500 text-white hover:bg-blue-600"
+                        onClick={() => router.push(`/journal/edit/${j.id}`)}
+                      >
+                        Edit
+                      </button>
+                    )}
+
+                    {/* REVERSE */}
+                    {!j.reversed && !locked && (
+                      <button
+                        className="px-3 py-1 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
+                        onClick={async () => {
+                          if (!confirm("Reverse this journal?")) return;
+
+                          const res = await fetch("/api/journal/manage", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "reverse",
+                              payload: { id: j.id },
+                            }),
+                          });
+
+                          const json = await res.json();
+                          if (!res.ok) {
+                            alert(json.error || "Failed to reverse journal.");
+                            return;
+                          }
+
+                          mutate();
+                        }}
+                      >
+                        Reverse
+                      </button>
+                    )}
+
+                    {/* DELETE */}
+                    {!j.reversed && !locked && (
+                      <button
+                        className="px-3 py-1 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+                        onClick={async () => {
+                          if (
+                            !confirm(
+                              "Delete this journal? This cannot be undone."
+                            )
+                          )
+                            return;
+
+                          const res = await fetch("/api/journal/manage", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "delete",
+                              payload: { id: j.id },
+                            }),
+                          });
+
+                          const json = await res.json();
+                          if (!res.ok) {
+                            alert(json.error || "Failed to delete journal.");
+                            return;
+                          }
+
+                          mutate();
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
