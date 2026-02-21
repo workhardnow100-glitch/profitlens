@@ -33,11 +33,14 @@ export default function EditJournal() {
   const [lines, setLines] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
 
-  const isFounder = user?.role === "FOUNDER";
-  const isAdmin = user?.role === "ADMIN";
-  const isAccountant = user?.role === "ACCOUNTANT";
+// ⭐ FIX: use lowercase role checks (because useUser lowercases roles)
+  const isFounder = user?.role === "founder";
+  const isAdmin = user?.role === "admin";
+  const isAccountant = user?.role === "accountant";
+
   const isTrustedAccountant =
     isAccountant && (trustStatus === "global" || trustStatus === "client");
+
   const isOverride = isFounder || isAdmin || isTrustedAccountant;
 
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(

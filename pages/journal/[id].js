@@ -1,3 +1,6 @@
+///page/journal/[id].js
+
+
 "use client";
 
 import { useRouter } from "next/router";
@@ -26,11 +29,14 @@ export default function ViewJournal() {
   const periodLocked = data?.periodLocked || false;
   const trustStatus = data?.trustStatus || "none";
 
-  const isFounder = user?.role === "FOUNDER";
-  const isAdmin = user?.role === "ADMIN";
-  const isAccountant = user?.role === "ACCOUNTANT";
+  // ⭐ FIX: use lowercase role checks (because useUser lowercases roles)
+  const isFounder = user?.role === "founder";
+  const isAdmin = user?.role === "admin";
+  const isAccountant = user?.role === "accountant";
+
   const isTrustedAccountant =
     isAccountant && (trustStatus === "global" || trustStatus === "client");
+
   const isOverride = isFounder || isAdmin || isTrustedAccountant;
 
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
