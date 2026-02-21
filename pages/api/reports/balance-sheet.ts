@@ -5,8 +5,10 @@ import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 type BSLine = {
+  id?: string;
   label: string;
   amount: number;
+  isCustom?: boolean;
 };
 
 type BSStructure = {
@@ -34,10 +36,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyBalanceSheet());
     }
 
-    // 1. Ledger lines
+    const yearParam = req.query.year
+      ? parseInt(String(req.query.year), 10)
+      : undefined;
+
+    // 1. Ledger lines (optionally year-aware if your RPC supports it)
     const { data: ledgerLines, error: ledgerError } = await supabaseAdmin.rpc(
       "balance_sheet_lines_for_client",
-      { p_client_id: clientId }
+      { p_client_id: clientId } // extend with year if you add it in SQL
     );
 
     if (ledgerError) {
@@ -45,11 +51,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyBalanceSheet());
     }
 
-    // 2. Custom lines
-    const { data: customLines, error: customError } = await supabaseAdmin
+    // 2. Custom lines (filter by year if provided)
+    let customQuery = supabaseAdmin
       .from("balance_sheet_custom_lines")
       .select("*")
-      .eq("client_id", clientId);
+      .eq("client_id", clientId)
+      .order("sort_order", { ascending: true });
+
+    if (yearParam) {
+      customQuery = customQuery.eq("year", yearParam);
+    }
+
+    const { data: customLines, error: customError } = await customQuery;
 
     if (customError) {
       console.error("Balance sheet custom lines error:", customError);
@@ -96,16 +109,22 @@ function mapLedgerToUKStructure(lines: any[]): BSStructure {
     // Assets
     if (code >= 1000 && code <= 1999) {
       if (code === 1100) {
-        structure.assets.current.push({ label: "Cash", amount: balance });
+        structure.assets.current.push({
+          label: "Cash",
+          amount: balance,
+          isCustom: false,
+        });
       } else if (code === 1200) {
         structure.assets.current.push({
           label: "Accounts Receivable",
           amount: balance,
+          isCustom: false,
         });
       } else {
         structure.assets.current.push({
           label: row.account_name,
           amount: balance,
+          isCustom: false,
         });
       }
       continue;
@@ -117,11 +136,13 @@ function mapLedgerToUKStructure(lines: any[]): BSStructure {
         structure.liabilities.current.push({
           label: "Accounts Payable",
           amount: balance,
+          isCustom: false,
         });
       } else {
         structure.liabilities.current.push({
           label: row.account_name,
           amount: balance,
+          isCustom: false,
         });
       }
       continue;
@@ -132,6 +153,7 @@ function mapLedgerToUKStructure(lines: any[]): BSStructure {
       structure.equity.push({
         label: row.account_name,
         amount: balance,
+        isCustom: false,
       });
       continue;
     }
@@ -145,16 +167,17 @@ function mergeCustomLines(structure: BSStructure, custom: any[]) {
     const section = line.section as "assets" | "liabilities" | "equity";
     const subsection = line.subsection as "current" | "non_current";
 
+    const item: BSLine = {
+      id: line.id,
+      label: line.label,
+      amount: Number(line.amount),
+      isCustom: true,
+    };
+
     if (section === "equity") {
-      structure.equity.push({
-        label: line.label,
-        amount: Number(line.amount),
-      });
+      structure.equity.push(item);
     } else {
-      structure[section][subsection].push({
-        label: line.label,
-        amount: Number(line.amount),
-      });
+      structure[section][subsection].push(item);
     }
   }
 }
