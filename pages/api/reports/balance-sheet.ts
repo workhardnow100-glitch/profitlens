@@ -14,55 +14,115 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const clientId = session?.user?.clientId;
 
     if (!clientId) {
-      return res.status(200).json(emptyBs());
+      return res.status(200).json(emptyBalanceSheet());
     }
 
-    const { data, error } = await supabaseAdmin.rpc("balance_sheet_for_client", {
-      p_client_id: clientId,
+    // 1. Fetch all balance sheet account lines
+    const { data: lines, error: linesError } = await supabaseAdmin.rpc(
+      "balance_sheet_lines_for_client",
+      { p_client_id: clientId }
+    );
+
+    if (linesError || !lines) {
+      console.error("Balance Sheet RPC error:", linesError);
+      return res.status(200).json(emptyBalanceSheet());
+    }
+
+    // 2. Fetch current year profit from P&L
+    const { data: pnl, error: pnlError } = await supabaseAdmin.rpc(
+      "profit_and_loss_for_client",
+      { p_client_id: clientId }
+    );
+
+    const currentYearProfit = pnl && pnl[0] ? pnl[0].net_profit_ytd : 0;
+
+    // 3. Categorise lines into Assets / Liabilities / Equity
+    const assetsCurrent: any[] = [];
+    const assetsNonCurrent: any[] = [];
+    const liabilitiesCurrent: any[] = [];
+    const liabilitiesNonCurrent: any[] = [];
+    const equity: any[] = [];
+
+    for (const row of lines) {
+      const code = parseInt(row.account_code, 10);
+      const balance = Number(row.balance);
+
+      // Assets
+      if (code >= 1000 && code <= 1999) {
+        if (code < 1500) assetsCurrent.push(row);
+        else assetsNonCurrent.push(row);
+        continue;
+      }
+
+      // Liabilities
+      if (code >= 2000 && code <= 2999) {
+        if (code < 2500) liabilitiesCurrent.push(row);
+        else liabilitiesNonCurrent.push(row);
+        continue;
+      }
+
+      // Equity
+      if (code >= 3000 && code <= 3999) {
+        equity.push(row);
+        continue;
+      }
+    }
+
+    // 4. Inject current year profit into equity section
+    equity.push({
+      account_code: "P&L",
+      account_name: "Current Year Profit",
+      balance: currentYearProfit,
     });
 
-    if (error || !data || !data[0]) {
-      console.error("Balance Sheet RPC error:", error);
-      return res.status(200).json(emptyBs());
-    }
+    // 5. Compute totals
+    const totalAssets =
+      sum(assetsCurrent) + sum(assetsNonCurrent);
 
-    const row = data[0];
+    const totalLiabilities =
+      sum(liabilitiesCurrent) + sum(liabilitiesNonCurrent);
+
+    const totalEquity = sum(equity);
+
+    const netAssets = totalAssets - totalLiabilities;
 
     return res.status(200).json({
-      summary: {
-        total_assets: row.total_assets,
-        total_liabilities: row.total_liabilities,
-        net_assets: row.net_assets,
-        equity: row.equity,
-        breakdown: {
-          bank_assets: row.bank_assets,
-          vat_liability: row.vat_liability,
-          cis_liability: row.cis_liability,
-          ct_liability: row.ct_liability,
-          sa_liability: row.sa_liability,
-        },
+      assets: {
+        current: assetsCurrent,
+        non_current: assetsNonCurrent,
+      },
+      liabilities: {
+        current: liabilitiesCurrent,
+        non_current: liabilitiesNonCurrent,
+      },
+      equity,
+      totals: {
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        net_assets: netAssets,
+        equity: totalEquity,
       },
     });
   } catch (err) {
     console.error("Balance sheet API error:", err);
-    return res.status(200).json(emptyBs());
+    return res.status(200).json(emptyBalanceSheet());
   }
 }
 
-function emptyBs() {
+function sum(rows: any[]) {
+  return rows.reduce((acc, r) => acc + Number(r.balance || 0), 0);
+}
+
+function emptyBalanceSheet() {
   return {
-    summary: {
+    assets: { current: [], non_current: [] },
+    liabilities: { current: [], non_current: [] },
+    equity: [],
+    totals: {
       total_assets: 0,
       total_liabilities: 0,
       net_assets: 0,
       equity: 0,
-      breakdown: {
-        bank_assets: 0,
-        vat_liability: 0,
-        cis_liability: 0,
-        ct_liability: 0,
-        sa_liability: 0,
-      },
     },
   };
 }

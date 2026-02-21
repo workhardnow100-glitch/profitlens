@@ -1,99 +1,118 @@
-// pages/reports/balance-sheet.tsx
 import { useEffect, useState } from "react";
 
-type BalanceSheetBreakdown = {
-  bank_assets: number;
-  vat_liability: number;
-  cis_liability: number;
-  ct_liability: number;
-  sa_liability: number;
-};
-
-type BalanceSheetSummary = {
-  total_assets: number;
-  total_liabilities: number;
-  net_assets: number;
-  equity: number;
-  breakdown: BalanceSheetBreakdown;
-};
-
-type BalanceSheetResponse = {
-  summary: BalanceSheetSummary;
-};
-
 export default function BalanceSheetPage() {
-  const [data, setData] = useState<BalanceSheetResponse | null>(null);
+  const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = async () => {
+    async function load() {
       try {
         const res = await fetch("/api/reports/balance-sheet");
-        if (!res.ok) throw new Error("Failed to load balance sheet");
         const json = await res.json();
         setData(json);
-      } catch (err: any) {
-        setError(err.message ?? "Failed to load balance sheet");
+      } catch (err) {
+        console.error("Balance sheet load error:", err);
       } finally {
         setLoading(false);
       }
-    };
+    }
     load();
   }, []);
 
-  const summary = data?.summary;
+  if (loading) {
+    return <div className="p-6">Loading balance sheet…</div>;
+  }
+
+  if (!data) {
+    return <div className="p-6">No data available.</div>;
+  }
+
+  const { assets, liabilities, equity, totals } = data;
 
   return (
-    <div className="p-6 space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Balance Sheet</h1>
-        <p className="text-gray-600 text-sm">
-          Assets, liabilities, and equity for this client.
-        </p>
-      </header>
+    <div className="p-8 max-w-4xl mx-auto">
+      <h1 className="text-3xl font-bold mb-6">Balance Sheet</h1>
 
-      {loading && <p>Loading balance sheet…</p>}
-      {error && <p className="text-red-600 text-sm">Error: {error}</p>}
+      {/* ASSETS */}
+      <Section title="Assets">
+        <Subsection title="Current Assets" rows={assets.current} />
+        <Subsection title="Non‑current Assets" rows={assets.non_current} />
 
-      {!loading && !error && summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card title="Position">
-            <Row label="Total Assets" value={summary.total_assets} />
-            <Row label="Total Liabilities" value={summary.total_liabilities} />
-            <Row label="Net Assets" value={summary.net_assets} bold />
-            <Row label="Equity" value={summary.equity} bold />
-          </Card>
+        <TotalRow label="Total Assets" value={totals.total_assets} />
+      </Section>
 
-          <Card title="Breakdown">
-            <Row label="Bank Assets" value={summary.breakdown.bank_assets} />
-            <Row label="VAT Liability" value={summary.breakdown.vat_liability} />
-            <Row label="CIS Liability" value={summary.breakdown.cis_liability} />
-            <Row label="Corporation Tax Liability" value={summary.breakdown.ct_liability} />
-            <Row label="Self Assessment Liability" value={summary.breakdown.sa_liability} />
-          </Card>
+      {/* LIABILITIES */}
+      <Section title="Liabilities">
+        <Subsection title="Current Liabilities" rows={liabilities.current} />
+        <Subsection title="Non‑current Liabilities" rows={liabilities.non_current} />
+
+        <TotalRow label="Total Liabilities" value={totals.total_liabilities} />
+      </Section>
+
+      {/* EQUITY */}
+      <Section title="Equity">
+        <Subsection title="Equity" rows={equity} />
+
+        <TotalRow label="Total Equity" value={totals.equity} />
+      </Section>
+
+      {/* NET ASSETS */}
+      <div className="mt-10 p-4 bg-gray-100 rounded">
+        <div className="flex justify-between text-lg font-semibold">
+          <span>Net Assets</span>
+          <span>£{format(totals.net_assets)}</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: any) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-gray-800 mb-3">{title}</h2>
-      <div className="space-y-1">{children}</div>
+    <div className="mb-10">
+      <h2 className="text-2xl font-semibold mb-4">{title}</h2>
+      {children}
     </div>
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
+function Subsection({ title, rows }: any) {
+  if (!rows || rows.length === 0) return null;
+
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-600">{label}</span>
-      <span className={bold ? "font-semibold text-gray-900" : "text-gray-900"}>
-        £{value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-      </span>
+    <div className="mb-4">
+      <h3 className="text-lg font-medium mb-2">{title}</h3>
+
+      <table className="w-full mb-4">
+        <tbody>
+          {rows.map((row: any) => (
+            <tr key={row.account_code} className="border-b">
+              <td className="py-2 text-gray-700">
+                {row.account_code} — {row.account_name}
+              </td>
+              <td className="py-2 text-right font-medium">
+                £{format(row.balance)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
+}
+
+function TotalRow({ label, value }: any) {
+  return (
+    <div className="flex justify-between text-lg font-semibold border-t pt-3 mt-3">
+      <span>{label}</span>
+      <span>£{format(value)}</span>
+    </div>
+  );
+}
+
+function format(num: number) {
+  return Number(num || 0).toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
