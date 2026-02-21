@@ -88,11 +88,17 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 function Row({ label, value, bold }: { label: string; value: number; bold?: boolean }) {
+  // ⭐ SAFETY FIX: prevent undefined.toLocaleString() crash
+  const safeValue = Number(value ?? 0);
+
   return (
     <div className="flex items-center justify-between text-sm">
       <span className="text-gray-600">{label}</span>
       <span className={bold ? "font-semibold text-gray-900" : "text-gray-900"}>
-        £{value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        £{safeValue.toLocaleString("en-GB", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}
       </span>
     </div>
   );
