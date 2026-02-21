@@ -1,3 +1,4 @@
+// pages/api/accounting-overview.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
@@ -16,6 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyOverview());
     }
 
+    // 1) Main overview numbers from merged ledger RPC
     const { data, error } = await supabaseAdmin.rpc(
       "accounting_overview_for_client",
       { p_client_id: clientId }
@@ -27,6 +29,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const o = data[0];
+
+    // 2) COA metrics (real chart_of_account_entries)
+    const { data: coa, error: coaError } = await supabaseAdmin
+      .from("chart_of_accounts")
+      .select("id")
+      .eq("client_id", clientId)
+      .single();
+
+    let totalAccounts = 0;
+    let activeAccounts = 0;
+    let systemAccounts = 0;
+    let uncategorisedAccounts = 0;
+    let suspenseAccounts = 0;
+
+    if (!coaError && coa) {
+      const { data: coaEntries, error: coaEntriesError } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("account_code, account_type, is_system, has_activity")
+        .eq("coa_id", coa.id);
+
+      if (!coaEntriesError && coaEntries) {
+        totalAccounts = coaEntries.length;
+        activeAccounts = coaEntries.filter((a) => a.has_activity).length;
+        systemAccounts = coaEntries.filter((a) => a.is_system).length;
+        uncategorisedAccounts = coaEntries.filter(
+          (a) => a.account_code === "9020"
+        ).length;
+        suspenseAccounts = coaEntries.filter(
+          (a) => a.account_code === "9999"
+        ).length;
+      }
+    }
 
     return res.status(200).json({
       financial_health: {
@@ -61,11 +95,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         equity: o.equity,
       },
       coa_summary: {
-        total_accounts: 0,
-        active_accounts: 0,
-        system_accounts: 0,
-        uncategorised_accounts: 0,
-        suspense_accounts: 0,
+        total_accounts: totalAccounts,
+        active_accounts: activeAccounts,
+        system_accounts: systemAccounts,
+        uncategorised_accounts: uncategorisedAccounts,
+        suspense_accounts: suspenseAccounts,
       },
       alerts: [],
       quick_actions: [
