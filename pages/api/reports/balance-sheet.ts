@@ -17,86 +17,29 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyBs());
     }
 
-    const { data: transactions, error } = await supabaseAdmin
-      .from("transactions")
-      .select("id, date, amount, business_category, balance")
-      .eq("client_id", clientId);
+    const { data, error } = await supabaseAdmin.rpc("balance_sheet_for_client", {
+      p_client_id: clientId,
+    });
 
-    if (error || !transactions) {
+    if (error || !data || !data[0]) {
+      console.error("Balance Sheet RPC error:", error);
       return res.status(200).json(emptyBs());
     }
 
-    let vatLiability = 0;
-    let cisLiability = 0;
-    let ctLiability = 0;
-    let saLiability = 0;
-
-    for (const tx of transactions as any[]) {
-      const category: string = tx.business_category ?? "";
-      const amount = Number(tx.amount ?? 0);
-
-      switch (category) {
-        case "VAT Collected":
-          vatLiability += amount;
-          break;
-        case "VAT Paid":
-        case "VAT Adjustment":
-          vatLiability -= Math.abs(amount);
-          break;
-        case "CIS Deducted":
-          cisLiability += amount;
-          break;
-        case "CIS Suffered":
-          cisLiability -= Math.abs(amount);
-          break;
-        case "Corporation Tax Payment":
-          ctLiability -= Math.abs(amount);
-          break;
-        case "Corporation Tax Refund":
-          ctLiability += amount;
-          break;
-        case "SA Payment":
-          saLiability -= Math.abs(amount);
-          break;
-        case "SA Refund":
-          saLiability += amount;
-          break;
-      }
-    }
-
-    let bankAssets = 0;
-    const withBalance = (transactions as any[]).filter(
-      (t) => t.balance !== null && t.balance !== undefined
-    );
-
-    if (withBalance.length > 0) {
-      withBalance.sort(
-        (a, b) =>
-          new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime()
-      );
-      bankAssets = Number(withBalance[0].balance) || 0;
-    }
-
-    const totalTaxLiabilities =
-      vatLiability + cisLiability + ctLiability + saLiability;
-
-    const totalAssets = bankAssets;
-    const totalLiabilities = totalTaxLiabilities;
-    const netAssets = totalAssets - totalLiabilities;
-    const equity = netAssets;
+    const row = data[0];
 
     return res.status(200).json({
       summary: {
-        total_assets: totalAssets,
-        total_liabilities: totalLiabilities,
-        net_assets: netAssets,
-        equity,
+        total_assets: row.total_assets,
+        total_liabilities: row.total_liabilities,
+        net_assets: row.net_assets,
+        equity: row.equity,
         breakdown: {
-          bank_assets: bankAssets,
-          vat_liability: vatLiability,
-          cis_liability: cisLiability,
-          ct_liability: ctLiability,
-          sa_liability: saLiability,
+          bank_assets: row.bank_assets,
+          vat_liability: row.vat_liability,
+          cis_liability: row.cis_liability,
+          ct_liability: row.ct_liability,
+          sa_liability: row.sa_liability,
         },
       },
     });
