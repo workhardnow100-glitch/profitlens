@@ -1,4 +1,4 @@
-// pages/api/journal/manage.js
+//// pages/api/journal/manage.js
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
