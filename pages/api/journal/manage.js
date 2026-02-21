@@ -27,13 +27,13 @@ export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
-  const role = (session.user.role || "").toUpperCase();
+  // ⭐ FIX: normalize role to lowercase (matches useUser)
+  const role = (session.user.role || "").toLowerCase();
 
-  const isFounder = role === "FOUNDER";
-  const isAdmin = role === "ADMIN";
-  const isAccountant = role === "ACCOUNTANT";
+  const isFounder = role === "founder";
+  const isAdmin = role === "admin";
+  const isAccountant = role === "accountant";
 
-  // optional: trustStatus on the user (if you set this at login/session time)
   const trustStatus = session.user.trustStatus || "none";
   const isTrustedAccountant =
     isAccountant && (trustStatus === "global" || trustStatus === "client");
@@ -48,8 +48,9 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
+  // ⭐ FIX: use normalized role here
   let clientId = null;
-  if (role === "ACCOUNTANT") {
+  if (role === "accountant") {
     clientId = session.user.actingAsClientId;
   } else {
     clientId = session.user.clientId || session.user.defaultClientId;
@@ -97,7 +98,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing journal data" });
     }
 
-    // 🔒 Block posting into locked month (except override)
     const locked = await isDateLocked(clientId, date);
     if (locked && !isOverride) {
       return res
@@ -155,7 +155,7 @@ export default async function handler(req, res) {
       if (coaUpdateErr) throw coaUpdateErr;
 
       await audit(
-        role === "ACCOUNTANT" ? "ACCOUNTANT_JOURNAL_CREATE" : "JOURNAL_CREATE",
+        isAccountant ? "ACCOUNTANT_JOURNAL_CREATE" : "JOURNAL_CREATE",
         `Created journal ${journal.id} on ${date}`
       );
 
@@ -184,7 +184,6 @@ export default async function handler(req, res) {
       if (journal.reversed)
         return res.status(400).json({ error: "Already reversed" });
 
-      // 🔒 Block reversing if original journal date is in locked month (except override)
       const locked = await isDateLocked(clientId, journal.date);
       if (locked && !isOverride) {
         return res.status(400).json({
@@ -242,7 +241,7 @@ export default async function handler(req, res) {
       if (markErr) throw markErr;
 
       await audit(
-        role === "ACCOUNTANT" ? "ACCOUNTANT_JOURNAL_REVERSE" : "JOURNAL_REVERSE",
+        isAccountant ? "ACCOUNTANT_JOURNAL_REVERSE" : "JOURNAL_REVERSE",
         `Reversed journal ${id} with reversal ${rev.id}`
       );
 
@@ -269,14 +268,12 @@ export default async function handler(req, res) {
       if (jErr) throw jErr;
       if (!journal) return res.status(404).json({ error: "Not found" });
 
-      // 🔒 Non-override users cannot delete reversed journals
       if (journal.reversed && !isOverride) {
         return res
           .status(400)
           .json({ error: "Cannot delete reversed journal" });
       }
 
-      // 🔒 Block deleting if journal date is in locked month (except override)
       const locked = await isDateLocked(clientId, journal.date);
       if (locked && !isOverride) {
         return res.status(400).json({
@@ -292,7 +289,7 @@ export default async function handler(req, res) {
       if (delErr) throw delErr;
 
       await audit(
-        role === "ACCOUNTANT" ? "ACCOUNTANT_JOURNAL_DELETE" : "JOURNAL_DELETE",
+        isAccountant ? "ACCOUNTANT_JOURNAL_DELETE" : "JOURNAL_DELETE",
         `Deleted journal ${id}`
       );
 
