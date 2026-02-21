@@ -17,7 +17,7 @@ export default function EditJournal() {
 
   const clientId = user?.actingAsClientId ?? user?.clientId;
 
-  const { data, mutate } = useSWR(
+  const { data } = useSWR(
     id ? `/api/journal/get?id=${id}&clientId=${clientId}` : null,
     fetcher
   );
@@ -25,6 +25,7 @@ export default function EditJournal() {
   const journal = data?.journal;
   const periodLocked = data?.periodLocked || false;
   const originalLines = data?.lines || [];
+  const trustStatus = data?.trustStatus || "none";
 
   const [date, setDate] = React.useState("");
   const [reference, setReference] = React.useState("");
@@ -32,13 +33,18 @@ export default function EditJournal() {
   const [lines, setLines] = React.useState([]);
   const [submitting, setSubmitting] = React.useState(false);
 
-  const isFounder = user?.role === "admin";
-  const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
+  const isFounder = user?.role === "FOUNDER";
+  const isAdmin = user?.role === "ADMIN";
+  const isAccountant = user?.role === "ACCOUNTANT";
+  const isTrustedAccountant =
+    isAccountant && (trustStatus === "global" || trustStatus === "client");
+  const isOverride = isFounder || isAdmin || isTrustedAccountant;
+
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     user?.subscriptionStatus
   );
 
-  const formDisabled = periodLocked || journal?.reversed;
+  const formDisabled = !isOverride && (periodLocked || journal?.reversed);
 
   React.useEffect(() => {
     if (journal) {
@@ -73,7 +79,7 @@ export default function EditJournal() {
     );
   }
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  if (!(isFounder || isAdmin || isSubscribedOrTrial || isTrustedAccountant)) {
     return (
       <ResponsiveLayout>
         <div className="p-8 text-red-600">
@@ -150,12 +156,12 @@ export default function EditJournal() {
   }
 
   async function deleteJournal() {
-    if (periodLocked) {
-      alert("This period is locked. Journals cannot be deleted.");
+    if (
+      !confirm(
+        "Delete this journal? This cannot be undone and will remove it from the ledger."
+      )
+    )
       return;
-    }
-
-    if (!confirm("Delete this journal? This cannot be undone.")) return;
 
     const res = await fetch("/api/journal/manage", {
       method: "POST",
@@ -178,7 +184,6 @@ export default function EditJournal() {
   return (
     <ResponsiveLayout currentPageName="Edit Journal">
       <div className="p-8 space-y-6">
-
         {/* HEADER */}
         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
           Edit Journal #{journal.id.slice(0, 8)}
@@ -196,7 +201,6 @@ export default function EditJournal() {
 
         {/* ACTION BUTTONS */}
         <div className="flex flex-wrap gap-3">
-
           <button
             className="px-4 py-2 text-sm rounded bg-slate-500 text-white hover:bg-slate-600"
             onClick={() => router.push("/journal")}
@@ -234,7 +238,6 @@ export default function EditJournal() {
         {/* FORM */}
         <ResponsiveCard title="Journal Details">
           <div className="space-y-4">
-
             <div>
               <label className="block text-xs text-slate-500 mb-1">Date</label>
               <input

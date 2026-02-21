@@ -24,12 +24,18 @@ export default function ViewJournal() {
   const journal = data?.journal;
   const lines = data?.lines || [];
   const periodLocked = data?.periodLocked || false;
+  const trustStatus = data?.trustStatus || "none";
 
-  const isFounder = user?.role === "admin";
+  const isFounder = user?.role === "FOUNDER";
+  const isAdmin = user?.role === "ADMIN";
+  const isAccountant = user?.role === "ACCOUNTANT";
+  const isTrustedAccountant =
+    isAccountant && (trustStatus === "global" || trustStatus === "client");
+  const isOverride = isFounder || isAdmin || isTrustedAccountant;
+
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     user?.subscriptionStatus
   );
-  const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
 
   if (isLoading) {
     return (
@@ -47,7 +53,7 @@ export default function ViewJournal() {
     );
   }
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  if (!(isFounder || isAdmin || isSubscribedOrTrial || isTrustedAccountant)) {
     return (
       <ResponsiveLayout>
         <div className="p-8 text-red-600">
@@ -66,12 +72,11 @@ export default function ViewJournal() {
   }
 
   async function reverseJournal() {
-    if (periodLocked) {
-      alert("This period is locked. Journals cannot be reversed.");
+    if (
+      !isOverride &&
+      !confirm("Reverse this journal? This will create a reversing entry.")
+    )
       return;
-    }
-
-    if (!confirm("Reverse this journal?")) return;
 
     const res = await fetch("/api/journal/manage", {
       method: "POST",
@@ -92,12 +97,12 @@ export default function ViewJournal() {
   }
 
   async function deleteJournal() {
-    if (periodLocked) {
-      alert("This period is locked. Journals cannot be deleted.");
+    if (
+      !confirm(
+        "Delete this journal? This cannot be undone and will remove it from the ledger."
+      )
+    )
       return;
-    }
-
-    if (!confirm("Delete this journal? This cannot be undone.")) return;
 
     const res = await fetch("/api/journal/manage", {
       method: "POST",
@@ -120,7 +125,6 @@ export default function ViewJournal() {
   return (
     <ResponsiveLayout currentPageName="Journal">
       <div className="p-8 space-y-6">
-
         {/* HEADER */}
         <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-3">
           Journal #{journal.id.slice(0, 8)}
@@ -129,11 +133,15 @@ export default function ViewJournal() {
               (Period Locked)
             </span>
           )}
+          {journal.reversed && (
+            <span className="text-red-600 text-sm font-semibold">
+              (Reversed)
+            </span>
+          )}
         </h1>
 
-        {/* ⭐ ACTION BUTTONS UNDER TITLE */}
+        {/* ACTION BUTTONS */}
         <div className="flex flex-wrap gap-3">
-
           {/* BACK */}
           <button
             className="px-4 py-2 text-sm rounded bg-slate-500 text-white hover:bg-slate-600"
@@ -143,46 +151,41 @@ export default function ViewJournal() {
           </button>
 
           {/* EDIT */}
-          {!journal.reversed && !periodLocked && (
-            <button
-              className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => router.push(`/journal/edit/${journal.id}`)}
-            >
-              Edit Journal
-            </button>
-          )}
+          <button
+            className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            onClick={() => router.push(`/journal/edit/${journal.id}`)}
+          >
+            Edit Journal
+          </button>
 
           {/* REVERSE */}
-          {!journal.reversed && (
-            <button
-              onClick={reverseJournal}
-              disabled={periodLocked}
-              className={`px-4 py-2 text-sm rounded text-white ${
-                periodLocked
-                  ? "bg-slate-400 cursor-not-allowed"
-                  : "bg-amber-500 hover:bg-amber-600"
-              }`}
-            >
-              {periodLocked ? "Locked" : "Reverse Journal"}
-            </button>
-          )}
+          <button
+            onClick={reverseJournal}
+            className="px-4 py-2 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
+          >
+            Reverse Journal
+          </button>
 
           {/* DELETE */}
-          {!journal.reversed && !periodLocked && (
-            <button
-              onClick={deleteJournal}
-              className="px-4 py-2 text-sm rounded bg-red-600 text-white hover:bg-red-700"
-            >
-              Delete Journal
-            </button>
-          )}
+          <button
+            onClick={deleteJournal}
+            className="px-4 py-2 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+          >
+            Delete Journal
+          </button>
         </div>
 
         {/* JOURNAL DETAILS */}
         <ResponsiveCard title="Journal Details">
-          <p><strong>Date:</strong> {journal.date}</p>
-          <p><strong>Reference:</strong> {journal.reference || "—"}</p>
-          <p><strong>Description:</strong> {journal.description || "—"}</p>
+          <p>
+            <strong>Date:</strong> {journal.date}
+          </p>
+          <p>
+            <strong>Reference:</strong> {journal.reference || "—"}
+          </p>
+          <p>
+            <strong>Description:</strong> {journal.description || "—"}
+          </p>
           <p>
             <strong>Status:</strong>{" "}
             {journal.reversed ? (
@@ -205,7 +208,6 @@ export default function ViewJournal() {
             ))}
           </ResponsiveTable>
         </ResponsiveCard>
-
       </div>
     </ResponsiveLayout>
   );

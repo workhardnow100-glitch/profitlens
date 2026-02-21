@@ -45,8 +45,12 @@ export default function JournalList() {
   const pendingUnlockRequest = data?.pendingUnlockRequest || false;
   const trustStatus = data?.trustStatus || "none";
 
-  const isAdmin = user?.role === "admin";
-  const isAccountant = (user?.role || "").toUpperCase() === "ACCOUNTANT";
+  const isFounder = user?.role === "FOUNDER";
+  const isAdmin = user?.role === "ADMIN";
+  const isAccountant = user?.role === "ACCOUNTANT";
+  const isTrustedAccountant =
+    isAccountant && (trustStatus === "global" || trustStatus === "client");
+  const isOverride = isFounder || isAdmin || isTrustedAccountant;
 
   const [selectedMonths, setSelectedMonths] = React.useState([]);
   const [lockNote, setLockNote] = React.useState("");
@@ -96,7 +100,7 @@ export default function JournalList() {
 
     if (
       !confirm(
-        `Lock journals for:\n${labelList}\n\nThis will prevent posting, reversing, and deleting in these periods.`
+        `Lock journals for:\n${labelList}\n\nThis will prevent posting, reversing, and deleting in these periods (except for override users).`
       )
     ) {
       return;
@@ -124,7 +128,7 @@ export default function JournalList() {
   }
 
   async function handleUnlockPeriod() {
-    if (!isAdmin) return;
+    if (!isAdmin && !isFounder) return;
 
     if (
       !confirm(
@@ -203,6 +207,58 @@ export default function JournalList() {
   const currentYear = new Date().getFullYear();
   for (let y = currentYear - 5; y <= currentYear + 1; y++) {
     yearOptions.push(y);
+  }
+
+  async function reverseJournal(id) {
+    if (
+      !isOverride &&
+      !confirm("Reverse this journal? This will create a reversing entry.")
+    ) {
+      return;
+    }
+
+    const res = await fetch("/api/journal/manage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "reverse",
+        payload: { id },
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || "Failed to reverse journal.");
+      return;
+    }
+
+    mutate();
+  }
+
+  async function deleteJournal(id) {
+    if (
+      !confirm(
+        "Delete this journal? This cannot be undone and will remove it from the ledger."
+      )
+    )
+      return;
+
+    const res = await fetch("/api/journal/manage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete",
+        payload: { id },
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok) {
+      alert(json.error || "Failed to delete journal.");
+      return;
+    }
+
+    mutate();
   }
 
   return (
@@ -284,18 +340,18 @@ export default function JournalList() {
               {/* Trusted Accountant Banners */}
               {isAccountant && trustStatus === "global" && (
                 <div className="p-2 rounded bg-blue-100 text-blue-800 text-xs font-medium">
-                  You are globally trusted. Unlock requests will be auto-approved.
+                  You are globally trusted. Unlock requests will be auto-approved and you have override access.
                 </div>
               )}
 
               {isAccountant && trustStatus === "client" && (
                 <div className="p-2 rounded bg-green-100 text-green-800 text-xs font-medium">
-                  You are trusted for this client. Unlock requests will be auto-approved.
+                  You are trusted for this client. Unlock requests will be auto-approved and you have override access.
                 </div>
               )}
 
               {/* Pending Unlock Banner */}
-              {periodLocked && isAccountant && pendingUnlockRequest && (
+              {periodLocked && isAccountant && !isTrustedAccountant && pendingUnlockRequest && (
                 <div className="p-2 rounded bg-amber-100 text-amber-800 text-xs font-medium">
                   Unlock request submitted and awaiting admin approval.
                 </div>
@@ -310,8 +366,8 @@ export default function JournalList() {
                 Lock Selected Months
               </button>
 
-              {/* Unlock Button (Admin Only) */}
-              {periodLocked && isAdmin && (
+              {/* Unlock Button (Admin / Founder Only) */}
+              {periodLocked && (isAdmin || isFounder) && (
                 <button
                   type="button"
                   onClick={handleUnlockPeriod}
@@ -321,16 +377,19 @@ export default function JournalList() {
                 </button>
               )}
 
-              {/* Request Unlock (Accountant Only) */}
-              {periodLocked && isAccountant && !pendingUnlockRequest && (
-                <button
-                  type="button"
-                  onClick={() => setShowUnlockRequestModal(true)}
-                  className="mt-2 px-3 py-1 rounded text-xs bg-amber-500 text-white hover:bg-amber-600"
-                >
-                  Request Unlock
-                </button>
-              )}
+              {/* Request Unlock (Accountant Only, non-trusted) */}
+              {periodLocked &&
+                isAccountant &&
+                !isTrustedAccountant &&
+                !pendingUnlockRequest && (
+                  <button
+                    type="button"
+                    onClick={() => setShowUnlockRequestModal(true)}
+                    className="mt-2 px-3 py-1 rounded text-xs bg-amber-500 text-white hover:bg-amber-600"
+                  >
+                    Request Unlock
+                  </button>
+                )}
             </div>
           </ResponsiveCard>
         </div>
@@ -431,6 +490,10 @@ export default function JournalList() {
             {journals.map((j) => {
               const locked = isJournalInLockedPeriod(j.date);
 
+              const canAct =
+                isOverride || (!j.reversed && !locked); // non-override users blocked by locked/reversed
+              const canDeleteReversed = isOverride && j.reversed;
+
               return (
                 <tr
                   key={j.id}
@@ -458,9 +521,8 @@ export default function JournalList() {
                     )}
                   </td>
 
-                  {/* ⭐ NEW ACTION BUTTONS */}
+                  {/* ACTION BUTTONS */}
                   <td className="space-x-2 whitespace-nowrap">
-
                     {/* VIEW */}
                     <button
                       className="px-3 py-1 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
@@ -470,7 +532,7 @@ export default function JournalList() {
                     </button>
 
                     {/* EDIT */}
-                    {!j.reversed && !locked && (
+                    {canAct && (
                       <button
                         className="px-3 py-1 text-sm rounded bg-blue-500 text-white hover:bg-blue-600"
                         onClick={() => router.push(`/journal/edit/${j.id}`)}
@@ -480,63 +542,30 @@ export default function JournalList() {
                     )}
 
                     {/* REVERSE */}
-                    {!j.reversed && !locked && (
+                    {canAct && (
                       <button
                         className="px-3 py-1 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
-                        onClick={async () => {
-                          if (!confirm("Reverse this journal?")) return;
-
-                          const res = await fetch("/api/journal/manage", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              action: "reverse",
-                              payload: { id: j.id },
-                            }),
-                          });
-
-                          const json = await res.json();
-                          if (!res.ok) {
-                            alert(json.error || "Failed to reverse journal.");
-                            return;
-                          }
-
-                          mutate();
-                        }}
+                        onClick={() => reverseJournal(j.id)}
                       >
                         Reverse
                       </button>
                     )}
 
-                    {/* DELETE */}
-                    {!j.reversed && !locked && (
+                    {/* DELETE (normal) */}
+                    {canAct && (
                       <button
                         className="px-3 py-1 text-sm rounded bg-red-600 text-white hover:bg-red-700"
-                        onClick={async () => {
-                          if (
-                            !confirm(
-                              "Delete this journal? This cannot be undone."
-                            )
-                          )
-                            return;
+                        onClick={() => deleteJournal(j.id)}
+                      >
+                        Delete
+                      </button>
+                    )}
 
-                          const res = await fetch("/api/journal/manage", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({
-                              action: "delete",
-                              payload: { id: j.id },
-                            }),
-                          });
-
-                          const json = await res.json();
-                          if (!res.ok) {
-                            alert(json.error || "Failed to delete journal.");
-                            return;
-                          }
-
-                          mutate();
-                        }}
+                    {/* DELETE REVERSED (override only) */}
+                    {canDeleteReversed && (
+                      <button
+                        className="px-3 py-1 text-sm rounded bg-red-600 text-white hover:bg-red-700"
+                        onClick={() => deleteJournal(j.id)}
                       >
                         Delete
                       </button>
