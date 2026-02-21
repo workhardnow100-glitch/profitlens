@@ -3,29 +3,46 @@ import { useEffect, useState } from "react";
 export default function BalanceSheetPage() {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newLine, setNewLine] = useState({
+    section: "assets",
+    subsection: "non_current",
+    label: "",
+    amount: 0,
+  });
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch("/api/reports/balance-sheet");
-        const json = await res.json();
-        setData(json);
-      } catch (err) {
-        console.error("Balance sheet load error:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
     load();
   }, []);
 
-  if (loading) {
-    return <div className="p-6">Loading balance sheet…</div>;
+  async function load() {
+    setLoading(true);
+    const res = await fetch("/api/reports/balance-sheet");
+    const json = await res.json();
+    setData(json);
+    setLoading(false);
   }
 
-  if (!data) {
-    return <div className="p-6">No data available.</div>;
+  async function saveNewLine() {
+    await fetch("/api/reports/balance-sheet/custom-line", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(newLine),
+    });
+
+    setShowAddModal(false);
+    setNewLine({
+      section: "assets",
+      subsection: "non_current",
+      label: "",
+      amount: 0,
+    });
+
+    load();
   }
+
+  if (loading) return <div className="p-6">Loading balance sheet…</div>;
+  if (!data) return <div className="p-6">No data available.</div>;
 
   const { assets, liabilities, equity, totals } = data;
 
@@ -33,36 +50,45 @@ export default function BalanceSheetPage() {
     <div className="p-8 max-w-4xl mx-auto">
       <h1 className="text-3xl font-bold mb-6">Balance Sheet</h1>
 
-      {/* ASSETS */}
-      <Section title="Assets">
-        <Subsection title="Current Assets" rows={assets.current} />
-        <Subsection title="Non‑current Assets" rows={assets.non_current} />
+      <button
+        onClick={() => setShowAddModal(true)}
+        className="mb-6 px-4 py-2 bg-blue-600 text-white rounded"
+      >
+        Add Line
+      </button>
 
+      <Section title="Assets">
+        <Subsection title="Non‑Current Assets" rows={assets.non_current} />
+        <Subsection title="Current Assets" rows={assets.current} />
         <TotalRow label="Total Assets" value={totals.total_assets} />
       </Section>
 
-      {/* LIABILITIES */}
       <Section title="Liabilities">
+        <Subsection title="Non‑Current Liabilities" rows={liabilities.non_current} />
         <Subsection title="Current Liabilities" rows={liabilities.current} />
-        <Subsection title="Non‑current Liabilities" rows={liabilities.non_current} />
-
         <TotalRow label="Total Liabilities" value={totals.total_liabilities} />
       </Section>
 
-      {/* EQUITY */}
       <Section title="Equity">
         <Subsection title="Equity" rows={equity} />
-
-        <TotalRow label="Total Equity" value={totals.equity} />
+        <TotalRow label="Total Equity" value={totals.total_equity} />
       </Section>
 
-      {/* NET ASSETS */}
       <div className="mt-10 p-4 bg-gray-100 rounded">
         <div className="flex justify-between text-lg font-semibold">
-          <span>Net Assets</span>
-          <span>£{format(totals.net_assets)}</span>
+          <span>Total Liabilities and Equity</span>
+          <span>£{format(totals.total_liabilities_and_equity)}</span>
         </div>
       </div>
+
+      {showAddModal && (
+        <AddModal
+          newLine={newLine}
+          setNewLine={setNewLine}
+          onSave={saveNewLine}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -85,13 +111,11 @@ function Subsection({ title, rows }: any) {
 
       <table className="w-full mb-4">
         <tbody>
-          {rows.map((row: any) => (
-            <tr key={row.account_code} className="border-b">
-              <td className="py-2 text-gray-700">
-                {row.account_code} — {row.account_name}
-              </td>
+          {rows.map((row: any, i: number) => (
+            <tr key={i} className="border-b">
+              <td className="py-2 text-gray-700">{row.label}</td>
               <td className="py-2 text-right font-medium">
-                £{format(row.balance)}
+                £{format(row.amount)}
               </td>
             </tr>
           ))}
@@ -106,6 +130,68 @@ function TotalRow({ label, value }: any) {
     <div className="flex justify-between text-lg font-semibold border-t pt-3 mt-3">
       <span>{label}</span>
       <span>£{format(value)}</span>
+    </div>
+  );
+}
+
+function AddModal({ newLine, setNewLine, onSave, onClose }: any) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center">
+      <div className="bg-white p-6 rounded shadow-lg w-96">
+        <h2 className="text-xl font-semibold mb-4">Add Balance Sheet Line</h2>
+
+        <label className="block mb-2">Section</label>
+        <select
+          className="w-full border p-2 mb-4"
+          value={newLine.section}
+          onChange={(e) => setNewLine({ ...newLine, section: e.target.value })}
+        >
+          <option value="assets">Assets</option>
+          <option value="liabilities">Liabilities</option>
+          <option value="equity">Equity</option>
+        </select>
+
+        <label className="block mb-2">Subsection</label>
+        <select
+          className="w-full border p-2 mb-4"
+          value={newLine.subsection}
+          onChange={(e) =>
+            setNewLine({ ...newLine, subsection: e.target.value })
+          }
+        >
+          <option value="non_current">Non‑Current</option>
+          <option value="current">Current</option>
+        </select>
+
+        <label className="block mb-2">Label</label>
+        <input
+          className="w-full border p-2 mb-4"
+          value={newLine.label}
+          onChange={(e) => setNewLine({ ...newLine, label: e.target.value })}
+        />
+
+        <label className="block mb-2">Amount</label>
+        <input
+          type="number"
+          className="w-full border p-2 mb-4"
+          value={newLine.amount}
+          onChange={(e) =>
+            setNewLine({ ...newLine, amount: Number(e.target.value) })
+          }
+        />
+
+        <div className="flex justify-end gap-2">
+          <button className="px-4 py-2" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="px-4 py-2 bg-blue-600 text-white rounded"
+            onClick={onSave}
+          >
+            Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

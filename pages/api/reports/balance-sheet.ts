@@ -4,6 +4,23 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
+type BSLine = {
+  label: string;
+  amount: number;
+};
+
+type BSStructure = {
+  assets: {
+    non_current: BSLine[];
+    current: BSLine[];
+  };
+  liabilities: {
+    non_current: BSLine[];
+    current: BSLine[];
+  };
+  equity: BSLine[];
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -17,91 +34,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(200).json(emptyBalanceSheet());
     }
 
-    // 1. Fetch all balance sheet account lines
-    const { data: lines, error: linesError } = await supabaseAdmin.rpc(
+    // 1. Ledger lines
+    const { data: ledgerLines, error: ledgerError } = await supabaseAdmin.rpc(
       "balance_sheet_lines_for_client",
       { p_client_id: clientId }
     );
 
-    if (linesError || !lines) {
-      console.error("Balance Sheet RPC error:", linesError);
+    if (ledgerError) {
+      console.error("Balance sheet ledger RPC error:", ledgerError);
       return res.status(200).json(emptyBalanceSheet());
     }
 
-    // 2. Fetch current year profit from P&L
-    const { data: pnl, error: pnlError } = await supabaseAdmin.rpc(
-      "profit_and_loss_for_client",
-      { p_client_id: clientId }
-    );
+    // 2. Custom lines
+    const { data: customLines, error: customError } = await supabaseAdmin
+      .from("balance_sheet_custom_lines")
+      .select("*")
+      .eq("client_id", clientId);
 
-    const currentYearProfit = pnl && pnl[0] ? pnl[0].net_profit_ytd : 0;
-
-    // 3. Categorise lines into Assets / Liabilities / Equity
-    const assetsCurrent: any[] = [];
-    const assetsNonCurrent: any[] = [];
-    const liabilitiesCurrent: any[] = [];
-    const liabilitiesNonCurrent: any[] = [];
-    const equity: any[] = [];
-
-    for (const row of lines) {
-      const code = parseInt(row.account_code, 10);
-      const balance = Number(row.balance);
-
-      // Assets
-      if (code >= 1000 && code <= 1999) {
-        if (code < 1500) assetsCurrent.push(row);
-        else assetsNonCurrent.push(row);
-        continue;
-      }
-
-      // Liabilities
-      if (code >= 2000 && code <= 2999) {
-        if (code < 2500) liabilitiesCurrent.push(row);
-        else liabilitiesNonCurrent.push(row);
-        continue;
-      }
-
-      // Equity
-      if (code >= 3000 && code <= 3999) {
-        equity.push(row);
-        continue;
-      }
+    if (customError) {
+      console.error("Balance sheet custom lines error:", customError);
     }
 
-    // 4. Inject current year profit into equity section
-    equity.push({
-      account_code: "P&L",
-      account_name: "Current Year Profit",
-      balance: currentYearProfit,
-    });
+    // 3. Map ledger accounts to UK categories
+    const mapped = mapLedgerToUKStructure(ledgerLines || []);
+
+    // 4. Merge custom lines
+    mergeCustomLines(mapped, customLines || []);
 
     // 5. Compute totals
-    const totalAssets =
-      sum(assetsCurrent) + sum(assetsNonCurrent);
-
-    const totalLiabilities =
-      sum(liabilitiesCurrent) + sum(liabilitiesNonCurrent);
-
-    const totalEquity = sum(equity);
-
-    const netAssets = totalAssets - totalLiabilities;
+    const totals = computeTotals(mapped);
 
     return res.status(200).json({
-      assets: {
-        current: assetsCurrent,
-        non_current: assetsNonCurrent,
-      },
-      liabilities: {
-        current: liabilitiesCurrent,
-        non_current: liabilitiesNonCurrent,
-      },
-      equity,
-      totals: {
-        total_assets: totalAssets,
-        total_liabilities: totalLiabilities,
-        net_assets: netAssets,
-        equity: totalEquity,
-      },
+      assets: mapped.assets,
+      liabilities: mapped.liabilities,
+      equity: mapped.equity,
+      totals,
     });
   } catch (err) {
     console.error("Balance sheet API error:", err);
@@ -109,20 +76,119 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 }
 
-function sum(rows: any[]) {
-  return rows.reduce((acc, r) => acc + Number(r.balance || 0), 0);
+function mapLedgerToUKStructure(lines: any[]): BSStructure {
+  const structure: BSStructure = {
+    assets: {
+      non_current: [],
+      current: [],
+    },
+    liabilities: {
+      non_current: [],
+      current: [],
+    },
+    equity: [],
+  };
+
+  for (const row of lines) {
+    const code = parseInt(row.account_code, 10);
+    const balance = Number(row.balance);
+
+    // Assets
+    if (code >= 1000 && code <= 1999) {
+      if (code === 1100) {
+        structure.assets.current.push({ label: "Cash", amount: balance });
+      } else if (code === 1200) {
+        structure.assets.current.push({
+          label: "Accounts Receivable",
+          amount: balance,
+        });
+      } else {
+        structure.assets.current.push({
+          label: row.account_name,
+          amount: balance,
+        });
+      }
+      continue;
+    }
+
+    // Liabilities
+    if (code >= 2000 && code <= 2999) {
+      if (code === 2100) {
+        structure.liabilities.current.push({
+          label: "Accounts Payable",
+          amount: balance,
+        });
+      } else {
+        structure.liabilities.current.push({
+          label: row.account_name,
+          amount: balance,
+        });
+      }
+      continue;
+    }
+
+    // Equity
+    if (code >= 3000 && code <= 3999) {
+      structure.equity.push({
+        label: row.account_name,
+        amount: balance,
+      });
+      continue;
+    }
+  }
+
+  return structure;
+}
+
+function mergeCustomLines(structure: BSStructure, custom: any[]) {
+  for (const line of custom) {
+    const section = line.section as "assets" | "liabilities" | "equity";
+    const subsection = line.subsection as "current" | "non_current";
+
+    if (section === "equity") {
+      structure.equity.push({
+        label: line.label,
+        amount: Number(line.amount),
+      });
+    } else {
+      structure[section][subsection].push({
+        label: line.label,
+        amount: Number(line.amount),
+      });
+    }
+  }
+}
+
+function computeTotals(structure: BSStructure) {
+  const sum = (rows: BSLine[]) =>
+    rows.reduce((a, r) => a + Number(r.amount || 0), 0);
+
+  const totalAssets =
+    sum(structure.assets.current) + sum(structure.assets.non_current);
+
+  const totalLiabilities =
+    sum(structure.liabilities.current) + sum(structure.liabilities.non_current);
+
+  const totalEquity = sum(structure.equity);
+
+  return {
+    total_assets: totalAssets,
+    total_liabilities: totalLiabilities,
+    total_equity: totalEquity,
+    total_liabilities_and_equity: totalLiabilities + totalEquity,
+  };
 }
 
 function emptyBalanceSheet() {
   return {
-    assets: { current: [], non_current: [] },
-    liabilities: { current: [], non_current: [] },
-    equity: [],
+    assets: { current: [] as BSLine[], non_current: [] as BSLine[] },
+    liabilities: { current: [] as BSLine[], non_current: [] as BSLine[] },
+    equity: [] as BSLine[],
     totals: {
       total_assets: 0,
       total_liabilities: 0,
-      net_assets: 0,
-      equity: 0,
+      total_equity: 0,
+      total_liabilities_and_equity: 0,
     },
   };
 }
