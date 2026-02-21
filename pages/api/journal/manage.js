@@ -28,12 +28,23 @@ export default async function handler(req, res) {
   if (!session?.user) return res.status(401).json({ error: "Unauthorized" });
 
   const role = (session.user.role || "").toUpperCase();
-  const isFounder = session.user.role === "admin";
+
+  const isFounder = role === "FOUNDER";
+  const isAdmin = role === "ADMIN";
+  const isAccountant = role === "ACCOUNTANT";
+
+  // optional: trustStatus on the user (if you set this at login/session time)
+  const trustStatus = session.user.trustStatus || "none";
+  const isTrustedAccountant =
+    isAccountant && (trustStatus === "global" || trustStatus === "client");
+
+  const isOverride = isFounder || isAdmin || isTrustedAccountant;
+
   const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
     session.user.subscriptionStatus
   );
 
-  if (!(isFounder || isSubscribedOrTrial)) {
+  if (!(isFounder || isAdmin || isSubscribedOrTrial || isTrustedAccountant)) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
@@ -86,9 +97,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing journal data" });
     }
 
-    // 🔒 Block posting into locked month
+    // 🔒 Block posting into locked month (except override)
     const locked = await isDateLocked(clientId, date);
-    if (locked) {
+    if (locked && !isOverride) {
       return res
         .status(400)
         .json({ error: "This period is locked. Journals cannot be posted." });
@@ -173,12 +184,12 @@ export default async function handler(req, res) {
       if (journal.reversed)
         return res.status(400).json({ error: "Already reversed" });
 
-      // 🔒 Block reversing if original journal date is in locked month
+      // 🔒 Block reversing if original journal date is in locked month (except override)
       const locked = await isDateLocked(clientId, journal.date);
-      if (locked) {
-        return res
-          .status(400)
-          .json({ error: "This period is locked. Journals cannot be reversed." });
+      if (locked && !isOverride) {
+        return res.status(400).json({
+          error: "This period is locked. Journals cannot be reversed.",
+        });
       }
 
       const { data: lines, error: lineErr } = await supabaseAdmin
@@ -257,17 +268,20 @@ export default async function handler(req, res) {
 
       if (jErr) throw jErr;
       if (!journal) return res.status(404).json({ error: "Not found" });
-      if (journal.reversed)
+
+      // 🔒 Non-override users cannot delete reversed journals
+      if (journal.reversed && !isOverride) {
         return res
           .status(400)
           .json({ error: "Cannot delete reversed journal" });
+      }
 
-      // 🔒 Block deleting if journal date is in locked month
+      // 🔒 Block deleting if journal date is in locked month (except override)
       const locked = await isDateLocked(clientId, journal.date);
-      if (locked) {
-        return res
-          .status(400)
-          .json({ error: "This period is locked. Journals cannot be deleted." });
+      if (locked && !isOverride) {
+        return res.status(400).json({
+          error: "This period is locked. Journals cannot be deleted.",
+        });
       }
 
       const { error: delErr } = await supabaseAdmin
