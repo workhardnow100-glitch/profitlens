@@ -1,59 +1,11 @@
 // pages/api/chart-of-accounts/index.js
+
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { SYSTEM_CATEGORIES } from "../../../lib/constants/systemCategories";
-import { CT_MAP } from "../../../lib/constants/ctMap";
 
-const INCOME_TYPES = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
-const ALLOWABLE_TYPES = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
-const DISALLOWABLE_TYPES = new Set(
-  CT_MAP.disallowable.map((c) => c.toLowerCase())
-);
-const IGNORE_TYPES = new Set(CT_MAP.ignore.map((c) => c.toLowerCase()));
-const SYSTEM_TYPES = new Set(SYSTEM_CATEGORIES.map((c) => c.toLowerCase()));
-
-function classifyBucket(name) {
-  const key = (name || "").toLowerCase();
-  if (INCOME_TYPES.has(key)) return "income";
-  if (ALLOWABLE_TYPES.has(key)) return "allowable";
-  if (DISALLOWABLE_TYPES.has(key)) return "disallowable";
-  if (IGNORE_TYPES.has(key)) return "ignore";
-  if (SYSTEM_TYPES.has(key)) return "system";
-  return "ignore";
-}
-
-function classifyAccountType(bucket) {
-  switch (bucket) {
-    case "income":
-      return "INCOME";
-    case "allowable":
-    case "disallowable":
-      return "EXPENSE";
-    case "system":
-    case "ignore":
-    default:
-      return "SYSTEM";
-  }
-}
-
-function generateAccountCodes(entries) {
-  let incomeCode = 4000;
-  let expenseCode = 5000;
-  let systemCode = 9000;
-
-  return entries.map((entry) => {
-    let code;
-    if (entry.account_type === "INCOME") {
-      code = String(incomeCode++);
-    } else if (entry.account_type === "EXPENSE") {
-      code = String(expenseCode++);
-    } else {
-      code = String(systemCode++);
-    }
-    return { ...entry, account_code: code };
-  });
-}
+// NEW: canonical UK chart of accounts
+import { UK_COA } from "../../../lib/constants/ukCoa";
 
 async function getOrCreateCoaHeader(clientId, userId) {
   const { data: existing, error: fetchError } = await supabaseAdmin
@@ -81,40 +33,36 @@ async function getOrCreateCoaHeader(clientId, userId) {
 async function generateCoaForClient(clientId, userId) {
   const coaHeader = await getOrCreateCoaHeader(clientId, userId);
 
+  // Remove old entries
   await supabaseAdmin
     .from("chart_of_account_entries")
     .delete()
     .eq("coa_id", coaHeader.id);
 
-  const allNames = new Set([
-    ...SYSTEM_CATEGORIES,
-    ...CT_MAP.income,
-    ...CT_MAP.allowable,
-    ...CT_MAP.disallowable,
-    ...CT_MAP.ignore,
-    "Uncategorised",
-  ]);
+  const now = new Date().toISOString();
 
-  const baseEntries = Array.from(allNames).map((name) => {
-    const bucket = classifyBucket(name);
-    const accountType = classifyAccountType(bucket);
-    return {
-      coa_id: coaHeader.id,
-      account_code: null,
-      account_name: name,
-      account_type: accountType,
-      hmrc_bucket: bucket,
-      description: null,
-      is_system: true,
-      has_activity: false, // <-- NEW FIELD
-    };
-  });
-
-  const withCodes = generateAccountCodes(baseEntries);
+  // Build entries from canonical UK_COA
+  const entries = UK_COA.map((acc) => ({
+    coa_id: coaHeader.id,
+    account_code: acc.account_code,
+    account_name: acc.account_name,
+    account_type: acc.account_type,
+    hmrc_bucket: acc.hmrc_bucket,
+    description: acc.description || null,
+    is_system: acc.is_system ?? true,
+    has_activity: false,
+    code_range_start: acc.code_range_start || null,
+    code_range_end: acc.code_range_end || null,
+    is_control_account: acc.is_control_account ?? false,
+    is_bank_account: acc.is_bank_account ?? false,
+    is_system_protected: acc.is_system_protected ?? acc.is_system ?? false,
+    created_at: now,
+    updated_at: now,
+  }));
 
   const { data: inserted, error: insertError } = await supabaseAdmin
     .from("chart_of_account_entries")
-    .insert(withCodes)
+    .insert(entries)
     .select("*");
 
   if (insertError) throw new Error(insertError.message);
@@ -145,7 +93,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
-      const usedOnly = req.query.usedOnly === "true"; // <-- (A) NEW
+      const usedOnly = req.query.usedOnly === "true";
 
       const { data: header, error: headerError } = await supabaseAdmin
         .from("chart_of_accounts")
@@ -168,7 +116,7 @@ export default async function handler(req, res) {
         .order("account_code", { ascending: true });
 
       if (usedOnly) {
-        query = query.eq("has_activity", true); // <-- (B) NEW
+        query = query.eq("has_activity", true);
       }
 
       const { data: entries, error: entriesError } = await query;
