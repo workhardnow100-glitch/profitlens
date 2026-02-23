@@ -221,8 +221,10 @@ export default async function handler(req, res) {
     // ⭐ 3) COA‑driven maths (aligned with dashboard)
     for (const tx of txs) {
       if (tx.is_reversal) continue;
-      if (tx.includedinct === false) continue;
-      if (tx.includedinvat === false) continue;
+
+      // ✅ Match dashboard: only respect CT toggle, ignore includedinvat
+      const includeForProfit = tx.includedinct !== false;
+      if (!includeForProfit) continue;
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
@@ -257,7 +259,9 @@ export default async function handler(req, res) {
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      const category = coa.hmrc_bucket || coa.account_type || `COA ${coa.id}`;
+      // ✅ Category aligned with dashboard breakdown: HMRC bucket first
+      const category =
+        coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
       categorySet.add(category);
 
       const addTo = (map, key) => {
@@ -283,7 +287,7 @@ export default async function handler(req, res) {
         bucket.net = bucket.revenue - bucket.expenses;
 
         bucket.categories[category] =
-          (bucket.categories[category] || 0) + amount;
+          (bucket.categories[category] || 0) + Math.abs(amount);
 
         bucket.transactions.push({
           id: tx.id,
@@ -341,11 +345,12 @@ export default async function handler(req, res) {
               ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
                 .includes((coa?.hmrc_bucket || "").toLowerCase());
 
+            const includeForProfit = tx.includedinct !== false;
+
             return (
               clientLabel === clientFilter &&
               !tx.is_reversal &&
-              tx.includedinct !== false &&
-              tx.includedinvat !== false &&
+              includeForProfit &&
               coa &&
               !isControl &&
               (accType === "INCOME" || accType === "EXPENSE")
@@ -361,10 +366,11 @@ export default async function handler(req, res) {
               ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
                 .includes((coa?.hmrc_bucket || "").toLowerCase());
 
+            const includeForProfit = tx.includedinct !== false;
+
             return (
               !tx.is_reversal &&
-              tx.includedinct !== false &&
-              tx.includedinvat !== false &&
+              includeForProfit &&
               coa &&
               !isControl &&
               (accType === "INCOME" || accType === "EXPENSE")
@@ -372,8 +378,9 @@ export default async function handler(req, res) {
           })
     ).map((tx) => {
       const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+      const accType = (coa?.account_type || "").toUpperCase();
       const category =
-        coa?.hmrc_bucket || coa?.account_type || `COA ${coa?.id || "?"}`;
+        coa?.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
 
       return {
         id: tx.id,
