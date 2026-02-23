@@ -38,6 +38,8 @@
  */
 
 // pages/api/reports.js
+// ⭐ REAL REVENUE REPORTS API — FINAL VERSION
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
 
@@ -60,11 +62,7 @@ function extractClientLabel(description = "") {
   const cleaned = String(description).trim();
   if (!cleaned) return "UNLABELED";
   const parts = cleaned.split(/\s+/);
-  if (
-    parts.length >= 2 &&
-    /^[A-Za-z]+$/.test(parts[0]) &&
-    /^[A-Za-z]+$/.test(parts[1])
-  ) {
+  if (parts.length >= 2 && /^[A-Za-z]+$/.test(parts[0]) && /^[A-Za-z]+$/.test(parts[1])) {
     return `${parts[0].toUpperCase()} ${parts[1].toUpperCase()}`;
   }
   return parts[0].toUpperCase();
@@ -75,11 +73,7 @@ function parseLabelToDate(label) {
 
   const qMatch = label.match(/^(\d{4})-Q([1-4])$/);
   if (qMatch) {
-    return new Date(
-      parseInt(qMatch[1], 10),
-      (parseInt(qMatch[2], 10) - 1) * 3,
-      1
-    );
+    return new Date(parseInt(qMatch[1], 10), (parseInt(qMatch[2], 10) - 1) * 3, 1);
   }
 
   const parsed = Date.parse(label);
@@ -111,9 +105,7 @@ export default async function handler(req, res) {
     const isAccountant = role === "ACCOUNTANT";
 
     const subscriptionStatus = req?.session?.user?.subscriptionStatus;
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
-      subscriptionStatus
-    );
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
 
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
@@ -124,13 +116,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    const {
-      from,
-      to,
-      page = DEFAULT_PAGE,
-      limit = DEFAULT_LIMIT,
-      client: clientFilter,
-    } = req.query;
+    const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } = req.query;
 
     // Audit
     await supabaseAdmin.from("audit").insert([
@@ -145,12 +131,11 @@ export default async function handler(req, res) {
 
     // Filters
     const filters = {
-      ...(from &&
-        !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
+      ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ 1) Fetch transactions (MATCH DASHBOARD)
+    // ⭐ 1) Fetch transactions
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(`
@@ -177,18 +162,14 @@ export default async function handler(req, res) {
 
     const txs = transactions ?? [];
 
-    // ⭐ 2) Build COA map (MATCH DASHBOARD)
-    const distinctCoaIds = Array.from(
-      new Set(txs.map((t) => t.coa_id).filter(Boolean))
-    );
+    // ⭐ 2) Build COA map
+    const distinctCoaIds = Array.from(new Set(txs.map((t) => t.coa_id).filter(Boolean)));
 
     const coaMap = new Map();
     if (distinctCoaIds.length > 0) {
       const { data: coaRows, error: coaErr } = await supabaseAdmin
         .from("chart_of_account_entries")
-        .select(
-          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
-        )
+        .select("id, account_type, hmrc_bucket, is_control_account, is_bank_account")
         .in("id", distinctCoaIds);
 
       if (coaErr) {
@@ -196,9 +177,7 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: "Failed to fetch COA" });
       }
 
-      (coaRows || []).forEach((row) => {
-        coaMap.set(row.id, row);
-      });
+      (coaRows || []).forEach((row) => coaMap.set(row.id, row));
     }
 
     const monthly = {};
@@ -210,17 +189,12 @@ export default async function handler(req, res) {
     // ⭐ 3) COA maths + CT_MAP categories
     for (const tx of txs) {
       if (tx.is_reversal) continue;
-
-      // Dashboard rule: only CT toggle matters
       if (tx.includedinct === false) continue;
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const month = date.toLocaleString("en-GB", {
-        month: "short",
-        year: "numeric",
-      });
+      const month = date.toLocaleString("en-GB", { month: "short", year: "numeric" });
       const quarter = getQuarter(tx.date);
       const year = String(date.getFullYear());
 
@@ -246,7 +220,6 @@ export default async function handler(req, res) {
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      // ⭐ CT_MAP category comes from business_category
       const category =
         (tx.business_category && String(tx.business_category).trim()) ||
         "Uncategorised";
@@ -267,9 +240,13 @@ export default async function handler(req, res) {
 
         const bucket = map[key];
 
+        // ⭐ REAL REVENUE ONLY
         if (accType === "INCOME" && amount > 0) {
           bucket.revenue += amount;
-        } else if (accType === "EXPENSE" && amount < 0) {
+        }
+
+        // ⭐ REAL EXPENSES ONLY
+        if (accType === "EXPENSE" && amount < 0) {
           bucket.expenses += Math.abs(amount);
         }
 
