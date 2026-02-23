@@ -39,12 +39,21 @@
 
 // pages/api/reports.js
 // ⭐ REAL REVENUE REPORTS API — FINAL VERSION
-
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
+import { CT_MAP } from "../../lib/constants/ctMap";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
+
+// ⭐ REAL revenue categories
+const REVENUE_CATEGORIES = new Set(CT_MAP.revenue);
+
+// ⭐ Categories that must NOT count as revenue
+const NON_REVENUE_INCOME = new Set(CT_MAP.other_income);
+
+// ⭐ Categories to ignore entirely (transfers etc.)
+const IGNORE_CATEGORIES = new Set(CT_MAP.ignore);
 
 function getQuarter(date) {
   const d = new Date(date);
@@ -217,12 +226,15 @@ export default async function handler(req, res) {
 
       const amount = Number(tx.amount || 0);
 
-      if (amount > 0) clientSet.add(clientLabel);
-      if (clientFilter && clientLabel !== clientFilter) continue;
-
       const category =
         (tx.business_category && String(tx.business_category).trim()) ||
         "Uncategorised";
+
+      // Ignore transfers entirely
+      if (IGNORE_CATEGORIES.has(category)) continue;
+
+      if (amount > 0) clientSet.add(clientLabel);
+      if (clientFilter && clientLabel !== clientFilter) continue;
 
       categorySet.add(category);
 
@@ -241,7 +253,11 @@ export default async function handler(req, res) {
         const bucket = map[key];
 
         // ⭐ REAL REVENUE ONLY
-        if (accType === "INCOME" && amount > 0) {
+        if (
+          accType === "INCOME" &&
+          amount > 0 &&
+          REVENUE_CATEGORIES.has(category)
+        ) {
           bucket.revenue += amount;
         }
 
@@ -306,6 +322,12 @@ export default async function handler(req, res) {
 
         if (tx.includedinct === false) return false;
         if (tx.is_reversal) return false;
+
+        const category =
+          (tx.business_category && String(tx.business_category).trim()) ||
+          "Uncategorised";
+
+        if (IGNORE_CATEGORIES.has(category)) return false;
 
         const clientLabel = extractClientLabel(tx.description);
         if (clientFilter && clientLabel !== clientFilter) return false;
