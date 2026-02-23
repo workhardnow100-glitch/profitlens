@@ -27,6 +27,12 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
+// ✅ Fast lookup sets for CT_MAP groups
+const INCOME_SET = new Set(CT_MAP.income);
+const ALLOWABLE_SET = new Set(CT_MAP.allowable);
+const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
+const IGNORE_SET = new Set(CT_MAP.ignore);
+
 export default async function handler(req, res) {
   // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
   const guard = await requireRole(req, res, [
@@ -142,7 +148,7 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------------------
-     ⭐ GET — COA-driven dashboard data
+     ⭐ GET — CT_MAP + COA‑driven dashboard data
   ------------------------------------------------------- */
   if (req.method === "GET") {
     try {
@@ -193,10 +199,10 @@ export default async function handler(req, res) {
         });
       }
 
-      // 3) Aggregations
+      // 3) Aggregations (CT_MAP‑driven)
       const monthly = {};
       const recent = [];
-      const categoryBreakdown = {}; // HMRC-bucket-based, but we still expose user categories separately
+      const categoryBreakdown = {}; // CT_MAP category names
 
       let totalRevenue = 0;
       let totalExpenses = 0;
@@ -217,8 +223,8 @@ export default async function handler(req, res) {
 
         const amount = tx.amount !== null ? Number(tx.amount) : 0;
 
-        // UI category (user-facing)
-        const uiCategory = tx.business_category?.trim() || "Uncategorised";
+        // UI category (user-facing, CT_MAP‑driven)
+        const uiCategory = (tx.business_category || "Uncategorised").trim();
 
         // Recent list: keep user category for UI
         recent.push({
@@ -232,7 +238,7 @@ export default async function handler(req, res) {
           storagePath: tx.storage_path || null,
         });
 
-        // COA-driven classification for maths
+        // COA‑driven guardrails (control / balance sheet)
         const coa = coaMap.get(tx.coa_id);
         if (!coa) continue;
 
@@ -251,33 +257,39 @@ export default async function handler(req, res) {
 
         if (isControl) continue;
 
-        // Respect CT/VAT toggles for dashboard maths
-        // (you can relax this if you want dashboard to be "all activity")
+        // Respect CT toggles for profit maths
         const includeForProfit = tx.includedinct !== false; // default true
         if (!includeForProfit) continue;
 
+        // ❌ Ignore categories explicitly marked as ignore
+        if (IGNORE_SET.has(uiCategory)) continue;
+
         const absAmount = Math.abs(amount);
 
-        // Revenue: INCOME accounts, positive amounts
-        if (accType === "INCOME" && amount > 0) {
+        // ✅ Revenue: CT_MAP.income only, positive amounts, INCOME accounts
+        if (INCOME_SET.has(uiCategory) && accType === "INCOME" && amount > 0) {
           totalRevenue += amount;
           monthly[monthKey].revenue += amount;
 
-          // Bucket-based breakdown (e.g. "trading_income", "other_income")
-          const key = bucket || "income";
-          if (!categoryBreakdown[key]) categoryBreakdown[key] = 0;
-          categoryBreakdown[key] += absAmount;
+          if (!categoryBreakdown[uiCategory]) categoryBreakdown[uiCategory] = 0;
+          categoryBreakdown[uiCategory] += absAmount;
+          continue;
         }
 
-        // Expenses: EXPENSE accounts, negative amounts
-        if (accType === "EXPENSE" && amount < 0) {
+        // ✅ Expenses: CT_MAP.allowable + CT_MAP.disallowable, negative amounts, EXPENSE accounts
+        const isExpenseCategory =
+          ALLOWABLE_SET.has(uiCategory) || DISALLOWABLE_SET.has(uiCategory);
+
+        if (isExpenseCategory && accType === "EXPENSE" && amount < 0) {
           totalExpenses += absAmount;
           monthly[monthKey].expenses += absAmount;
 
-          const key = bucket || "expenses";
-          if (!categoryBreakdown[key]) categoryBreakdown[key] = 0;
-          categoryBreakdown[key] += absAmount;
+          if (!categoryBreakdown[uiCategory]) categoryBreakdown[uiCategory] = 0;
+          categoryBreakdown[uiCategory] += absAmount;
+          continue;
         }
+
+        // Anything else (non‑trading, transfers, weird buckets) is ignored for CT profit
       }
 
       const months = Object.keys(monthly).sort();
@@ -292,7 +304,7 @@ export default async function handler(req, res) {
           action: isAccountant
             ? "ACCOUNTANT_FETCH_DASHBOARD"
             : "FETCH_DASHBOARD",
-          details: `Returned ${txs.length} transactions (COA-driven dashboard)`,
+          details: `Returned ${txs.length} transactions (CT_MAP + COA dashboard)`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -305,7 +317,7 @@ export default async function handler(req, res) {
         ],
         series: { months, revenue: revenueSeries, expenses: expensesSeries },
         recent,
-        breakdown: categoryBreakdown, // HMRC/COA-based breakdown
+        breakdown: categoryBreakdown, // CT_MAP category breakdown
         categories: Object.keys(categoryBreakdown),
       });
     } catch (err) {
