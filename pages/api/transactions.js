@@ -5,13 +5,16 @@ import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { CT_MAP } from "../../lib/constants/ctMap";
 
 // ✅ Build a single unified allowed category list
-const ALLOWED_BUSINESS_CATEGORIES = new Set([
-  ...SYSTEM_CATEGORIES,
+const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
   ...CT_MAP.disallowable,
   ...CT_MAP.ignore,
+  ...CT_MAP.other_income,   // ⭐ ADD THIS
+  ...SYSTEM_CATEGORIES,
+  "Uncategorised",
 ]);
+
 
 // ✅ System-only inference (safe)
 function inferSystemCategory(type = "", description = "") {
