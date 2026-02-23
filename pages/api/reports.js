@@ -40,7 +40,6 @@
 // pages/api/reports.js
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
-import { CT_MAP } from "../../lib/constants/ctMap";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
@@ -92,22 +91,6 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
-// Map HMRC bucket → CT_MAP-style label (fallback to bucket)
-function mapBucketToLabel(bucket, accType) {
-  if (!bucket) return accType === "INCOME" ? "income" : "expenses";
-
-  const lower = bucket.toLowerCase();
-  const income = CT_MAP.income.map((x) => x.toLowerCase());
-  const allowable = CT_MAP.allowable.map((x) => x.toLowerCase());
-  const disallowable = CT_MAP.disallowable.map((x) => x.toLowerCase());
-
-  if (income.includes(lower)) return bucket;
-  if (allowable.includes(lower)) return bucket;
-  if (disallowable.includes(lower)) return bucket;
-
-  return bucket;
-}
-
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -132,11 +115,14 @@ export default async function handler(req, res) {
       subscriptionStatus
     );
 
+    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
+    // ⭐ Unified client resolution for ALL roles
     const clientId = guard.actingAsClientId || guard.clientId;
+
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
@@ -169,24 +155,26 @@ export default async function handler(req, res) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ 1) Fetch transactions (MATCH DASHBOARD SELECT)
+    // ⭐ Fetch transactions WITH COA JOIN (COA is the single source of truth for maths)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(
         `
         id,
         date,
-        amount,
         description,
-        business_category,
-        account_number,
-        sort_code,
-        storage_path,
+        amount,
         type,
         is_reversal,
-        coa_id,
         includedinct,
-        includedinvat
+        includedinvat,
+        business_category,
+        coa_id,
+        chart_of_accounts (
+          id,
+          name,
+          type
+        )
       `
       )
       .eq("client_id", clientId);
@@ -200,44 +188,19 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
-    const txs = transactions ?? [];
-
-    // ⭐ 2) Build COA map (MATCH DASHBOARD)
-    const distinctCoaIds = Array.from(
-      new Set(txs.map((t) => t.coa_id).filter(Boolean))
-    );
-
-    const coaMap = new Map();
-    if (distinctCoaIds.length > 0) {
-      const { data: coaRows, error: coaErr } = await supabaseAdmin
-        .from("chart_of_account_entries")
-        .select(
-          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
-        )
-        .in("id", distinctCoaIds);
-
-      if (coaErr) {
-        console.error("Reports API: COA fetch error", coaErr);
-        return res.status(500).json({ error: "Failed to fetch COA" });
-      }
-
-      (coaRows || []).forEach((row) => {
-        coaMap.set(row.id, row);
-      });
-    }
-
     const monthly = {};
     const quarterly = {};
     const yearly = {};
     const clientSet = new Set();
     const categorySet = new Set();
 
-    // ⭐ 3) COA‑driven maths (aligned with dashboard)
-    for (const tx of txs) {
+    for (const tx of transactions) {
+      // Ignore reversals
       if (tx.is_reversal) continue;
 
-      // Dashboard rule: only CT toggle matters
+      // Respect CT toggle ONLY (match dashboard)
       if (tx.includedinct === false) continue;
+      // ❌ DO NOT filter on includedinvat here – dashboard doesn’t for profit
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
@@ -251,30 +214,25 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+      const coa = tx.chart_of_accounts;
       if (!coa) continue;
 
-      const accType = (coa.account_type || "").toUpperCase();
+      const coaType = (coa.type || "").toLowerCase();
 
-      const isControl =
-        coa.is_control_account ||
-        coa.is_bank_account ||
-        ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
-          .includes((coa.hmrc_bucket || "").toLowerCase());
+      // Only income/expense accounts participate in reports maths
+      if (coaType !== "income" && coaType !== "expense") continue;
 
-      if (isControl) continue;
-
-      if (accType !== "INCOME" && accType !== "EXPENSE") continue;
-
-      const amount = Number(tx.amount || 0);
+      const amount = parseFloat(tx.amount || 0);
 
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      const bucket =
-        coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-      const categoryLabel = mapBucketToLabel(bucket, accType);
-      categorySet.add(categoryLabel);
+      // ⭐ THIS is the CT_MAP category: from transactions.business_category
+      const category =
+        (tx.business_category && String(tx.business_category).trim()) ||
+        "Uncategorised";
+
+      categorySet.add(category);
 
       const addTo = (map, key) => {
         if (!map[key]) {
@@ -288,29 +246,29 @@ export default async function handler(req, res) {
           };
         }
 
-        const bucketObj = map[key];
+        const bucket = map[key];
 
-        // Dashboard-style maths
-        if (accType === "INCOME" && amount > 0) {
-          bucketObj.revenue += amount;
-        } else if (accType === "EXPENSE" && amount < 0) {
-          bucketObj.expenses += Math.abs(amount);
+        // COA‑driven classification for maths
+        if (coaType === "income" && amount > 0) {
+          bucket.revenue += amount;
+        } else if (coaType === "expense" && amount < 0) {
+          bucket.expenses += Math.abs(amount);
         }
 
-        bucketObj.net = bucketObj.revenue - bucketObj.expenses;
+        bucket.net = bucket.revenue - bucket.expenses;
 
-        // Category totals (signed, for detail)
-        bucketObj.categories[categoryLabel] =
-          (bucketObj.categories[categoryLabel] || 0) + amount;
+        // Category totals (signed, for detail) – use CT_MAP category
+        bucket.categories[category] =
+          (bucket.categories[category] || 0) + amount;
 
-        bucketObj.transactions.push({
+        bucket.transactions.push({
           id: tx.id,
           date: tx.date,
           description: tx.description
             ? String(tx.description).trim()
             : "Unlabeled",
           amount: formatCurrency(tx.amount),
-          category: categoryLabel,
+          category, // <- CT_MAP label
           type: tx.type,
         });
       };
@@ -346,21 +304,14 @@ export default async function handler(req, res) {
 
     const paginated = allMonthly.slice(start, end);
 
-    const returnedTxs = txs
+    const returnedTxs = transactions
       .filter((tx) => {
-        const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+        const coa = tx.chart_of_accounts;
         if (!coa) return false;
 
-        const accType = (coa.account_type || "").toUpperCase();
-        if (accType !== "INCOME" && accType !== "EXPENSE") return false;
+        const coaType = (coa.type || "").toLowerCase();
+        if (coaType !== "income" && coaType !== "expense") return false;
 
-        const isControl =
-          coa.is_control_account ||
-          coa.is_bank_account ||
-          ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
-            .includes((coa.hmrc_bucket || "").toLowerCase());
-
-        if (isControl) return false;
         if (tx.includedinct === false) return false;
         if (tx.is_reversal) return false;
 
@@ -370,18 +321,16 @@ export default async function handler(req, res) {
         return true;
       })
       .map((tx) => {
-        const coa = coaMap.get(tx.coa_id);
-        const accType = (coa.account_type || "").toUpperCase();
-        const bucket =
-          coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-        const categoryLabel = mapBucketToLabel(bucket, accType);
+        const category =
+          (tx.business_category && String(tx.business_category).trim()) ||
+          "Uncategorised";
 
         return {
           id: tx.id,
           date: tx.date,
           description: tx.description,
           amount: formatCurrency(tx.amount),
-          category: categoryLabel,
+          category, // <- CT_MAP label
           type: tx.type,
         };
       });
@@ -413,7 +362,7 @@ export default async function handler(req, res) {
       },
       transactions: returnedTxs,
       clients: Array.from(clientSet).sort(),
-      categories: Array.from(categorySet).sort(),
+      categories: Array.from(categorySet).sort(), // CT_MAP categories
     });
   } catch (err) {
     console.error("❌ Reports API error:", err);
