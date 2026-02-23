@@ -83,8 +83,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
+    // ⭐ RBAC
+    const guard = await requireRole(req, res, [
+      "USER",
+      "ACCOUNTANT",
+      "ADMIN",
+      "FOUNDER",
+    ]);
     if (!guard.ok) return;
 
     const role = guard.role;
@@ -92,21 +97,20 @@ export default async function handler(req, res) {
     const isAccountant = role === "ACCOUNTANT";
 
     const subscriptionStatus = req?.session?.user?.subscriptionStatus || null;
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      subscriptionStatus
+    );
 
-    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ⭐ Unified client resolution for ALL roles
     const clientId = guard.actingAsClientId || guard.clientId;
-
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
 
-    // ⭐ Audit: view forecasts
+    // ⭐ Audit
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -117,10 +121,10 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ⭐ Fetch transactions
+    // ⭐ Fetch transactions (include includedinct)
     const { data: transactions = [], error } = await supabaseAdmin
       .from("transactions")
-      .select("date, amount, business_category, is_reversal")
+      .select("date, amount, business_category, is_reversal, includedinct")
       .eq("client_id", clientId);
 
     if (error) {
@@ -128,7 +132,6 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
-    // ⭐ No transactions → return empty forecast
     if (!transactions.length) {
       return res.status(200).json({
         forecast: [
@@ -148,9 +151,12 @@ export default async function handler(req, res) {
       categoriesTotals[cat] = { revenue: 0, expenses: 0 };
     }
 
-    // ⭐ Process transactions
+    // ⭐ Process transactions (CT‑aligned)
     for (const tx of transactions) {
       if (tx.is_reversal) continue;
+
+      // Respect CT toggle
+      if (tx.includedinct === false) continue;
 
       const key = formatMonthKey(tx.date);
       if (!key) continue;
@@ -161,6 +167,8 @@ export default async function handler(req, res) {
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
+
+      // Ignore transfers, personal, system categories
       if (MAP.ignore.has(lower)) continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
