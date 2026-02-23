@@ -97,7 +97,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+    // RBAC
     const guard = await requireRole(req, res, [
       "USER",
       "ACCOUNTANT",
@@ -115,14 +115,11 @@ export default async function handler(req, res) {
       subscriptionStatus
     );
 
-    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ⭐ Unified client resolution for ALL roles
     const clientId = guard.actingAsClientId || guard.clientId;
-
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
@@ -135,48 +132,38 @@ export default async function handler(req, res) {
       client: clientFilter,
     } = req.query;
 
-    // ⭐ Audit log (view)
+    // Audit
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
-        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${
-          clientFilter || "none"
-        })`,
+        details: `Viewed reports`,
         timestamp: new Date().toISOString(),
       },
     ]);
 
-    // ⭐ Build filters
+    // Filters
     const filters = {
       ...(from &&
         !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ Fetch transactions WITH COA JOIN (COA is the single source of truth for maths)
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD)
     let txQuery = supabaseAdmin
       .from("transactions")
-      .select(
-        `
+      .select(`
         id,
         date,
-        description,
         amount,
+        description,
+        business_category,
         type,
         is_reversal,
         includedinct,
-        includedinvat,
-        business_category,
-        coa_id,
-        chart_of_accounts (
-          id,
-          name,
-          type
-        )
-      `
-      )
+        coa_id
+      `)
       .eq("client_id", clientId);
 
     if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
@@ -188,19 +175,44 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
+    const txs = transactions ?? [];
+
+    // ⭐ 2) Build COA map (MATCH DASHBOARD)
+    const distinctCoaIds = Array.from(
+      new Set(txs.map((t) => t.coa_id).filter(Boolean))
+    );
+
+    const coaMap = new Map();
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaErr } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select(
+          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+        )
+        .in("id", distinctCoaIds);
+
+      if (coaErr) {
+        console.error("Reports API: COA fetch error", coaErr);
+        return res.status(500).json({ error: "Failed to fetch COA" });
+      }
+
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row);
+      });
+    }
+
     const monthly = {};
     const quarterly = {};
     const yearly = {};
     const clientSet = new Set();
     const categorySet = new Set();
 
-    for (const tx of transactions) {
-      // Ignore reversals
+    // ⭐ 3) COA maths + CT_MAP categories
+    for (const tx of txs) {
       if (tx.is_reversal) continue;
 
-      // Respect CT toggle ONLY (match dashboard)
+      // Dashboard rule: only CT toggle matters
       if (tx.includedinct === false) continue;
-      // ❌ DO NOT filter on includedinvat here – dashboard doesn’t for profit
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
@@ -214,20 +226,27 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      const coa = tx.chart_of_accounts;
+      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
       if (!coa) continue;
 
-      const coaType = (coa.type || "").toLowerCase();
+      const accType = (coa.account_type || "").toUpperCase();
 
-      // Only income/expense accounts participate in reports maths
-      if (coaType !== "income" && coaType !== "expense") continue;
+      const isControl =
+        coa.is_control_account ||
+        coa.is_bank_account ||
+        ["CONTROL", "SYSTEM", "BALANCE_SHEET", "EQUITY", "LIABILITIES", "ASSETS"]
+          .includes((coa.hmrc_bucket || "").toUpperCase());
 
-      const amount = parseFloat(tx.amount || 0);
+      if (isControl) continue;
+
+      if (accType !== "INCOME" && accType !== "EXPENSE") continue;
+
+      const amount = Number(tx.amount || 0);
 
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      // ⭐ THIS is the CT_MAP category: from transactions.business_category
+      // ⭐ CT_MAP category comes from business_category
       const category =
         (tx.business_category && String(tx.business_category).trim()) ||
         "Uncategorised";
@@ -248,27 +267,23 @@ export default async function handler(req, res) {
 
         const bucket = map[key];
 
-        // COA‑driven classification for maths
-        if (coaType === "income" && amount > 0) {
+        if (accType === "INCOME" && amount > 0) {
           bucket.revenue += amount;
-        } else if (coaType === "expense" && amount < 0) {
+        } else if (accType === "EXPENSE" && amount < 0) {
           bucket.expenses += Math.abs(amount);
         }
 
         bucket.net = bucket.revenue - bucket.expenses;
 
-        // Category totals (signed, for detail) – use CT_MAP category
         bucket.categories[category] =
           (bucket.categories[category] || 0) + amount;
 
         bucket.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description
-            ? String(tx.description).trim()
-            : "Unlabeled",
+          description: tx.description || "",
           amount: formatCurrency(tx.amount),
-          category, // <- CT_MAP label
+          category,
           type: tx.type,
         });
       };
@@ -304,13 +319,13 @@ export default async function handler(req, res) {
 
     const paginated = allMonthly.slice(start, end);
 
-    const returnedTxs = transactions
+    const returnedTxs = txs
       .filter((tx) => {
-        const coa = tx.chart_of_accounts;
+        const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
         if (!coa) return false;
 
-        const coaType = (coa.type || "").toLowerCase();
-        if (coaType !== "income" && coaType !== "expense") return false;
+        const accType = (coa.account_type || "").toUpperCase();
+        if (accType !== "INCOME" && accType !== "EXPENSE") return false;
 
         if (tx.includedinct === false) return false;
         if (tx.is_reversal) return false;
@@ -330,20 +345,18 @@ export default async function handler(req, res) {
           date: tx.date,
           description: tx.description,
           amount: formatCurrency(tx.amount),
-          category, // <- CT_MAP label
+          category,
           type: tx.type,
         };
       });
 
-    // ⭐ Audit filtered reports
+    // Audit filtered
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
-        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${
-          clientFilter || "none"
-        })`,
+        details: `Filtered reports`,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -362,7 +375,7 @@ export default async function handler(req, res) {
       },
       transactions: returnedTxs,
       clients: Array.from(clientSet).sort(),
-      categories: Array.from(categorySet).sort(), // CT_MAP categories
+      categories: Array.from(categorySet).sort(),
     });
   } catch (err) {
     console.error("❌ Reports API error:", err);
