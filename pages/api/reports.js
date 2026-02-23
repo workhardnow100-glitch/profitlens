@@ -37,6 +37,7 @@
  * ============================================================
  */
 
+// pages/api/reports.js
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
@@ -92,6 +93,7 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
+// Unified allowed category list (same as dashboard/profile)
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -101,6 +103,7 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
+// Ignore map (CT_MAP.ignore)
 const MAP = {
   ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
 };
@@ -112,7 +115,12 @@ export default async function handler(req, res) {
 
   try {
     // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-    const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
+    const guard = await requireRole(req, res, [
+      "USER",
+      "ACCOUNTANT",
+      "ADMIN",
+      "FOUNDER",
+    ]);
     if (!guard.ok) return;
 
     const role = guard.role;
@@ -120,7 +128,9 @@ export default async function handler(req, res) {
     const isAccountant = role === "ACCOUNTANT";
 
     const subscriptionStatus = req?.session?.user?.subscriptionStatus;
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      subscriptionStatus
+    );
 
     // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
@@ -148,20 +158,26 @@ export default async function handler(req, res) {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
-        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${
+          clientFilter || "none"
+        })`,
         timestamp: new Date().toISOString(),
       },
     ]);
 
     // ⭐ Build filters
     const filters = {
-      ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
+      ...(from &&
+        !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
+    // ⭐ Fetch transactions (include includedinct for CT alignment)
     let txQuery = supabaseAdmin
       .from("transactions")
-      .select("id, date, description, amount, business_category, type, is_reversal")
+      .select(
+        "id, date, description, amount, business_category, type, is_reversal, includedinct"
+      )
       .eq("client_id", clientId);
 
     if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
@@ -169,6 +185,7 @@ export default async function handler(req, res) {
 
     const { data: transactions = [], error: txErr } = await txQuery;
     if (txErr) {
+      console.error("Reports API: transaction fetch error", txErr);
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
@@ -179,12 +196,19 @@ export default async function handler(req, res) {
     const categorySet = new Set();
 
     for (const tx of transactions) {
+      // Ignore reversals
       if (tx.is_reversal) continue;
+
+      // Respect CT inclusion toggle (Option A)
+      if (tx.includedinct === false) continue;
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const month = date.toLocaleString("en-US", { month: "short", year: "numeric" });
+      const month = date.toLocaleString("en-US", {
+        month: "short",
+        year: "numeric",
+      });
       const quarter = getQuarter(tx.date);
       const year = String(date.getFullYear());
 
@@ -194,6 +218,7 @@ export default async function handler(req, res) {
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
 
       const lower = category.toLowerCase();
+      // Ignore categories mapped to "ignore" (e.g. transfers)
       if (MAP.ignore.has(lower)) continue;
 
       const amount = parseFloat(tx.amount || 0);
@@ -222,12 +247,15 @@ export default async function handler(req, res) {
 
         bucket.net = bucket.revenue - bucket.expenses;
 
-        bucket.categories[category] = (bucket.categories[category] || 0) + amount;
+        bucket.categories[category] =
+          (bucket.categories[category] || 0) + amount;
 
         bucket.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description ? String(tx.description).trim() : "Unlabeled",
+          description: tx.description
+            ? String(tx.description).trim()
+            : "Unlabeled",
           amount: formatCurrency(tx.amount),
           category,
         });
@@ -264,16 +292,23 @@ export default async function handler(req, res) {
 
     const paginated = allMonthly.slice(start, end);
 
-    const returnedTxs = (clientFilter
-      ? transactions.filter(
-          (tx) =>
-            extractClientLabel(tx.description) === clientFilter &&
-            !tx.is_reversal
-        )
-      : transactions.filter((tx) => !tx.is_reversal)
+    const returnedTxs = (
+      clientFilter
+        ? transactions.filter(
+            (tx) =>
+              extractClientLabel(tx.description) === clientFilter &&
+              !tx.is_reversal &&
+              tx.includedinct !== false
+          )
+        : transactions.filter(
+            (tx) => !tx.is_reversal && tx.includedinct !== false
+          )
     ).map((tx) => {
       let category = tx.business_category?.trim() || "Uncategorised";
       if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
+
+      const lower = category.toLowerCase();
+      if (MAP.ignore.has(lower)) return null;
 
       return {
         id: tx.id,
@@ -283,7 +318,7 @@ export default async function handler(req, res) {
         category,
         type: tx.type,
       };
-    });
+    }).filter(Boolean);
 
     // ⭐ Audit filtered reports
     await supabaseAdmin.from("audit").insert([
@@ -291,7 +326,9 @@ export default async function handler(req, res) {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
-        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${clientFilter || "none"})`,
+        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${
+          clientFilter || "none"
+        })`,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -317,4 +354,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to generate report" });
   }
 }
-
