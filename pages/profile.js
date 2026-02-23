@@ -28,6 +28,7 @@ const CT_CATEGORY_OPTIONS = Array.from(
     ...CT_MAP.allowable,
     ...CT_MAP.disallowable,
     ...CT_MAP.ignore,
+    ...CT_MAP.other_income,
     ...SYSTEM_CATEGORIES,
     "Uncategorised",
   ])
