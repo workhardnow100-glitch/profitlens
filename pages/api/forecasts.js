@@ -45,6 +45,7 @@ export const runtime = "nodejs";
 
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
+import { CT_MAP } from "../../lib/constants/ctMap";
 
 function formatMonthKey(dateStr) {
   const d = new Date(dateStr);
@@ -58,6 +59,17 @@ function formatMonthLabel(key) {
     month: "short",
     year: "numeric",
   }).format(new Date(Number(year), Number(month) - 1));
+}
+
+// ⭐ Map HMRC bucket → CT_MAP label
+function mapBucketToLabel(bucket) {
+  if (!bucket) return "Uncategorised";
+
+  if (CT_MAP.income.includes(bucket)) return bucket;
+  if (CT_MAP.allowable.includes(bucket)) return bucket;
+  if (CT_MAP.disallowable.includes(bucket)) return bucket;
+
+  return bucket;
 }
 
 export default async function handler(req, res) {
@@ -173,8 +185,9 @@ export default async function handler(req, res) {
 
     for (const tx of txs) {
       if (tx.is_reversal) continue;
+
+      // ⭐ Dashboard rule: only includedinct matters
       if (tx.includedinct === false) continue;
-      if (tx.includedinvat === false) continue;
 
       const key = formatMonthKey(tx.date);
       if (!key) continue;
@@ -187,7 +200,7 @@ export default async function handler(req, res) {
 
       const accType = (coa.account_type || "").toUpperCase();
 
-      // Ignore control/bank/balance sheet accounts
+      // ⭐ Ignore control/bank/balance sheet accounts
       const isControl =
         coa.is_control_account ||
         coa.is_bank_account ||
@@ -198,20 +211,23 @@ export default async function handler(req, res) {
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
 
-      const catName = `COA ${coa.id}`;
-      if (!categoriesTotals[catName]) {
-        categoriesTotals[catName] = { revenue: 0, expenses: 0 };
+      // ⭐ Category label = CT_MAP label
+      const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+      const categoryLabel = mapBucketToLabel(bucket);
+
+      if (!categoriesTotals[categoryLabel]) {
+        categoriesTotals[categoryLabel] = { revenue: 0, expenses: 0 };
       }
 
       if (accType === "INCOME" && amount > 0) {
         monthly[key].revenue += amount;
-        categoriesTotals[catName].revenue += amount;
+        categoriesTotals[categoryLabel].revenue += amount;
       }
 
-      if (accType === "EXPENSE" && amount < 0) {
+      if( accType === "EXPENSE" && amount < 0) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
-        categoriesTotals[catName].expenses += abs;
+        categoriesTotals[categoryLabel].expenses += abs;
       }
     }
 
