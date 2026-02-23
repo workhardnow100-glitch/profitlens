@@ -10,7 +10,6 @@ const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.allowable,
   ...CT_MAP.disallowable,
   ...CT_MAP.ignore,
-  ...CT_MAP.other_income,   // ⭐ ADD THIS
   ...SYSTEM_CATEGORIES,
   "Uncategorised",
 ]);
