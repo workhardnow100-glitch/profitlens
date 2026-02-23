@@ -39,6 +39,7 @@
  * ============================================================
  */
 
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
@@ -103,33 +104,34 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ⭐ Fetch transactions WITH COA JOIN
-    const { data: transactions = [], error } = await supabaseAdmin
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD EXACTLY)
+    const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
-      .select(
-        `
+      .select(`
         id,
         date,
         amount,
+        description,
+        business_category,
+        account_number,
+        sort_code,
+        storage_path,
+        type,
         is_reversal,
-        includedinct,
-        includedinvat,
         coa_id,
-        chart_of_accounts (
-          id,
-          name,
-          type
-        )
-      `
-      )
-      .eq("client_id", clientId);
+        includedinct,
+        includedinvat
+      `)
+      .eq("client_id", clientId)
+      .order("date", { ascending: true });
 
     if (error) {
-      console.error("❌ Supabase fetch error:", error);
+      console.error("❌ Forecasts: transaction fetch error", error);
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
-    if (!transactions.length) {
+    const txs = transactions ?? [];
+    if (!txs.length) {
       return res.status(200).json({
         forecast: [
           { label: "Projected Revenue", value: "£0.00" },
@@ -141,14 +143,36 @@ export default async function handler(req, res) {
       });
     }
 
+    // ⭐ 2) Build COA map (MATCH DASHBOARD EXACTLY)
+    const distinctCoaIds = Array.from(
+      new Set(txs.map((t) => t.coa_id).filter(Boolean))
+    );
+
+    const coaMap = new Map();
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaErr } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select(
+          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+        )
+        .in("id", distinctCoaIds);
+
+      if (coaErr) {
+        console.error("❌ Forecasts: COA fetch error", coaErr);
+        return res.status(500).json({ error: "Failed to fetch COA" });
+      }
+
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row);
+      });
+    }
+
+    // ⭐ 3) COA‑driven maths (MATCH DASHBOARD EXACTLY)
     const monthly = {};
     const categoriesTotals = {};
 
-    // ⭐ Process transactions (FULL COA ENGINE)
-    for (const tx of transactions) {
+    for (const tx of txs) {
       if (tx.is_reversal) continue;
-
-      // Respect CT/VAT toggles
       if (tx.includedinct === false) continue;
       if (tx.includedinvat === false) continue;
 
@@ -156,46 +180,49 @@ export default async function handler(req, res) {
       if (!key) continue;
 
       const amount = Number(tx.amount || 0);
+      if (!amount) continue;
 
-      const coa = tx.chart_of_accounts;
+      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
       if (!coa) continue;
 
-      const type = coa.type?.toLowerCase();
+      const accType = (coa.account_type || "").toUpperCase();
 
-      // Ignore non-income/expense accounts
-      if (type !== "income" && type !== "expense") continue;
+      // Ignore control/bank/balance sheet accounts
+      const isControl =
+        coa.is_control_account ||
+        coa.is_bank_account ||
+        ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
+          .includes((coa.hmrc_bucket || "").toLowerCase());
+
+      if (isControl) continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
 
-      // ⭐ COA-driven classification
-      if (type === "income" && amount > 0) {
-        monthly[key].revenue += amount;
-
-        if (!categoriesTotals[coa.name])
-          categoriesTotals[coa.name] = { revenue: 0, expenses: 0 };
-
-        categoriesTotals[coa.name].revenue += amount;
+      const catName = `COA ${coa.id}`;
+      if (!categoriesTotals[catName]) {
+        categoriesTotals[catName] = { revenue: 0, expenses: 0 };
       }
 
-      if (type === "expense" && amount < 0) {
+      if (accType === "INCOME" && amount > 0) {
+        monthly[key].revenue += amount;
+        categoriesTotals[catName].revenue += amount;
+      }
+
+      if (accType === "EXPENSE" && amount < 0) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
-
-        if (!categoriesTotals[coa.name])
-          categoriesTotals[coa.name] = { revenue: 0, expenses: 0 };
-
-        categoriesTotals[coa.name].expenses += abs;
+        categoriesTotals[catName].expenses += abs;
       }
     }
 
-    // ⭐ Build forecast series
+    // ⭐ 4) Build series
     const keys = Object.keys(monthly).sort();
     const months = keys.map(formatMonthLabel);
     const revenue = keys.map((k) => monthly[k].revenue);
     const expenses = keys.map((k) => monthly[k].expenses);
     const net = revenue.map((r, i) => r - expenses[i]);
 
-    // ⭐ Forecast = average of last 3 months
+    // ⭐ 5) Forecast = average of last 3 months
     const recentRevenue = revenue.slice(-3);
     const recentExpenses = expenses.slice(-3);
 
