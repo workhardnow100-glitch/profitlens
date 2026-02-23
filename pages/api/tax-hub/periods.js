@@ -7,7 +7,7 @@ import { CT_MAP } from "../../../lib/constants/ctMap";
 import vatSummaryHandler from "../vat/summary";
 
 // ------------------------------
-// CORPORATION TAX CALCULATORs
+// CORPORATION TAX CALCULATOR
 // ------------------------------
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
@@ -33,7 +33,7 @@ function calculateCorporationTax(profit) {
 }
 
 // ------------------------------
-// LOWERCASE CT MAP
+// LOWERCASE CT MAP (still used for SA for now)
 // ------------------------------
 const CT_MAP_LOWER = {
   income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
@@ -43,7 +43,7 @@ const CT_MAP_LOWER = {
 };
 
 // ------------------------------
-// ALLOWED CATEGORIES
+// ALLOWED CATEGORIES (for enrichment / SA / VAT grouping)
 // ------------------------------
 const ALLOWED_BUSINESS_CATEGORIES = new Set([
   ...SYSTEM_CATEGORIES,
@@ -176,35 +176,6 @@ function buildCISPeriods(cisTxs) {
 }
 
 // ------------------------------
-// CORPORATION TAX PERIOD BUILDER
-// ------------------------------
-function buildCorpPeriods(corpTxs) {
-  const periods = {};
-  corpTxs.forEach((tx) => {
-    const d = new Date(tx.date);
-    const year = d.getFullYear();
-    const periodStart = new Date(year, 0, 1);
-    const periodEnd = new Date(year, 11, 31);
-    const key = `${year}`;
-
-    if (!periods[key]) {
-      periods[key] = {
-        periodLabel: `${periodStart.toISOString().slice(0, 10)} → ${periodEnd.toISOString().slice(0, 10)}`,
-        periodStart: periodStart.toISOString().slice(0, 10),
-        periodEnd: periodEnd.toISOString().slice(0, 10),
-        locked: false,
-        hmrcAuthorized: true,
-        transactions: [],
-        corpTaxDue: 0,
-      };
-    }
-    periods[key].transactions.push(tx);
-    if (tx.tax_locked) periods[key].locked = true;
-  });
-  return Object.values(periods);
-}
-
-// ------------------------------
 // MAIN HANDLER
 // ------------------------------
 export default async function handler(req, res) {
@@ -233,10 +204,8 @@ export default async function handler(req, res) {
   const bodyClientId = req.body?.clientId || req.body?.client_id || null;
 
   if (session.user.role === "accountant") {
-    // Prefer session actingAsClientId if present
     clientId = session.user.actingAsClientId || bodyClientId;
   } else {
-    // Non-accountant: prefer session clientId, but allow explicit body override if provided
     clientId = session.user.clientId || bodyClientId;
   }
 
@@ -268,12 +237,28 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------
-    // FETCH TRANSACTIONS
+    // FETCH TRANSACTIONS (now includes COA + CT fields)
     // ------------------------------
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, business_category, tax_locked, client_id, vat_amount, amount, cis_amount, cis_type, type, description"
+        `
+        id,
+        date,
+        business_category,
+        tax_locked,
+        client_id,
+        vat_amount,
+        amount,
+        cis_amount,
+        cis_type,
+        type,
+        description,
+        includedinct,
+        assetbalancingcharge,
+        assetbalancingallowance,
+        coa_id
+      `
       )
       .eq("client_id", clientId)
       .order("date", { ascending: false });
@@ -281,7 +266,7 @@ export default async function handler(req, res) {
     if (txError) throw txError;
 
     // ------------------------------
-    // CATEGORY ENRICHMENT
+    // CATEGORY ENRICHMENT (for VAT / CIS / SA only)
     // ------------------------------
     const enriched = (transactions || []).map((tx) => {
       let category = tx.business_category?.trim() || null;
@@ -303,7 +288,7 @@ export default async function handler(req, res) {
     });
 
     // ------------------------------
-    // GROUP INTO TAX TYPES
+    // GROUP INTO TAX TYPES (for VAT/CIS/SA display)
     // ------------------------------
     const grouped = { vat: [], cis: [], corp: [], sa: [] };
     enriched.forEach((tx) => {
@@ -332,7 +317,28 @@ export default async function handler(req, res) {
     const cisPeriods = buildCISPeriods(cisSource);
 
     // ------------------------------
-    // CORPORATION TAX PERIODS
+    // LOAD COA ENTRIES FOR CT (COA-driven, same as CT summary)
+    // ------------------------------
+    const ctTxsAll = (transactions || []).filter((tx) => tx.includedinct === true);
+    const distinctCoaIds = Array.from(
+      new Set(ctTxsAll.map((tx) => tx.coa_id).filter(Boolean))
+    );
+
+    let coaMap = new Map();
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaError } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("id, account_type, hmrc_bucket, is_control_account, is_bank_account")
+        .in("id", distinctCoaIds);
+
+      if (coaError) throw coaError;
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row);
+      });
+    }
+
+    // ------------------------------
+    // CORPORATION TAX PERIODS (COA-driven, aligned with CT summary)
     // ------------------------------
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -345,37 +351,78 @@ export default async function handler(req, res) {
       const periodStart = fmt(periodStartDate);
       const periodEnd = fmt(periodEndDate);
 
-      const yearTxs = enriched.filter((tx) => {
+      // Use raw transactions, but only CT-included ones for CT maths
+      const yearTxsAll = (transactions || []).filter((tx) => {
         if (!tx.date) return false;
         const d = new Date(tx.date);
         return d.getFullYear() === year;
       });
 
-      if (yearTxs.length === 0) continue;
+      const yearCtTxs = yearTxsAll.filter((tx) => tx.includedinct === true);
+
+      if (yearTxsAll.length === 0) continue;
 
       let income = 0;
       let allowable = 0;
       let disallowable = 0;
       let locked = false;
 
-      yearTxs.forEach((tx) => {
-        const cat = (tx.business_category || "Uncategorised").trim();
-        const key = cat.toLowerCase();
+      let totalBalancingCharges = 0;
+      let totalBalancingAllowances = 0;
+
+      yearCtTxs.forEach((tx) => {
         const amount = Number(tx.amount || 0);
+        const coa = coaMap.get(tx.coa_id);
 
         if (tx.tax_locked) locked = true;
 
-        if (CT_MAP_LOWER.income.has(key) && amount > 0) {
+        let ctType = "ignore";
+
+        if (coa) {
+          const bucket = coa.hmrc_bucket;
+          const type = coa.account_type;
+
+          const isControl =
+            bucket === "control" ||
+            bucket === "system" ||
+            bucket === "balance_sheet" ||
+            bucket === "equity" ||
+            bucket === "liabilities" ||
+            bucket === "assets" ||
+            coa.is_control_account ||
+            coa.is_bank_account;
+
+          if (!isControl) {
+            if (type === "INCOME") {
+              ctType = "income";
+            } else if (type === "EXPENSE") {
+              if (bucket === "allowable") ctType = "allowable";
+              else if (bucket === "disallowable") ctType = "disallowable";
+            }
+          }
+        }
+
+        if (ctType === "income" && amount > 0) {
           income += amount;
-        } else if (CT_MAP_LOWER.allowable.has(key) && amount < 0) {
+        } else if (ctType === "allowable" && amount < 0) {
           allowable += Math.abs(amount);
-        } else if (CT_MAP_LOWER.disallowable.has(key) && amount < 0) {
+        } else if (ctType === "disallowable" && amount < 0) {
           disallowable += Math.abs(amount);
         }
+
+        const bc = Number(tx.assetbalancingcharge || 0);
+        const ba = Number(tx.assetbalancingallowance || 0);
+
+        if (!Number.isNaN(bc) && bc !== 0) totalBalancingCharges += bc;
+        if (!Number.isNaN(ba) && ba !== 0) totalBalancingAllowances += ba;
       });
 
       const profit = income - allowable;
-      const adjustedProfit = profit + disallowable;
+      let adjustedProfit = profit + disallowable;
+
+      adjustedProfit += totalBalancingCharges;
+      adjustedProfit -= totalBalancingAllowances;
+
       const { tax: corpTaxDue, rate: effectiveRate } =
         calculateCorporationTax(adjustedProfit);
 
@@ -385,7 +432,7 @@ export default async function handler(req, res) {
         periodEnd,
         locked,
         hmrcAuthorized: true,
-        transactions: yearTxs,
+        transactions: yearTxsAll, // full year txs for UI, CT maths uses yearCtTxs
         corpTaxDue,
         income,
         allowable,
@@ -397,7 +444,7 @@ export default async function handler(req, res) {
     }
 
     // ------------------------------
-    // SELF ASSESSMENT PERIODS
+    // SELF ASSESSMENT PERIODS (still CT_MAP-based for now)
     // ------------------------------
     const saPeriods = [];
     for (let year = currentYear; year > currentYear - yearsBack; year--) {
