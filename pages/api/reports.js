@@ -40,6 +40,7 @@
 // pages/api/reports.js
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
+import { CT_MAP } from "../../lib/constants/ctMap";
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
@@ -91,13 +92,26 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
+// ⭐ Map HMRC bucket → CT_MAP label
+function mapBucketToLabel(bucket) {
+  if (!bucket) return "Uncategorised";
+
+  const lower = bucket.toLowerCase();
+
+  if (CT_MAP.income.includes(bucket)) return bucket;
+  if (CT_MAP.allowable.includes(bucket)) return bucket;
+  if (CT_MAP.disallowable.includes(bucket)) return bucket;
+
+  return bucket;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
+    // ⭐ RBAC
     const guard = await requireRole(req, res, [
       "USER",
       "ACCOUNTANT",
@@ -115,14 +129,11 @@ export default async function handler(req, res) {
       subscriptionStatus
     );
 
-    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res.status(403).json({ error: "Upgrade required" });
     }
 
-    // ⭐ Unified client resolution for ALL roles
     const clientId = guard.actingAsClientId || guard.clientId;
-
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
     }
@@ -135,15 +146,13 @@ export default async function handler(req, res) {
       client: clientFilter,
     } = req.query;
 
-    // ⭐ Audit log (view)
+    // ⭐ Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
-        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${
-          clientFilter || "none"
-        })`,
+        details: `Viewed reports`,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -155,7 +164,7 @@ export default async function handler(req, res) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ 1) Fetch transactions (MATCH DASHBOARD SELECT)
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD EXACTLY)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(
@@ -188,7 +197,7 @@ export default async function handler(req, res) {
 
     const txs = transactions ?? [];
 
-    // ⭐ 2) Build COA map (MATCH DASHBOARD)
+    // ⭐ 2) Build COA map (MATCH DASHBOARD EXACTLY)
     const distinctCoaIds = Array.from(
       new Set(txs.map((t) => t.coa_id).filter(Boolean))
     );
@@ -218,18 +227,17 @@ export default async function handler(req, res) {
     const clientSet = new Set();
     const categorySet = new Set();
 
-    // ⭐ 3) COA‑driven maths (aligned with dashboard)
+    // ⭐ 3) COA‑driven maths (MATCH DASHBOARD EXACTLY)
     for (const tx of txs) {
       if (tx.is_reversal) continue;
 
-      // ✅ Match dashboard: only respect CT toggle, ignore includedinvat
-      const includeForProfit = tx.includedinct !== false;
-      if (!includeForProfit) continue;
+      // ⭐ Dashboard rule: only includedinct matters
+      if (tx.includedinct === false) continue;
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
 
-      const month = date.toLocaleString("en-US", {
+      const month = date.toLocaleString("en-GB", {
         month: "short",
         year: "numeric",
       });
@@ -243,6 +251,7 @@ export default async function handler(req, res) {
 
       const accType = (coa.account_type || "").toUpperCase();
 
+      // ⭐ Ignore control/bank/balance sheet accounts
       const isControl =
         coa.is_control_account ||
         coa.is_bank_account ||
@@ -251,7 +260,7 @@ export default async function handler(req, res) {
 
       if (isControl) continue;
 
-      // Only INCOME / EXPENSE accounts
+      // ⭐ Only INCOME / EXPENSE accounts
       if (accType !== "INCOME" && accType !== "EXPENSE") continue;
 
       const amount = Number(tx.amount || 0);
@@ -259,10 +268,11 @@ export default async function handler(req, res) {
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      // ✅ Category aligned with dashboard breakdown: HMRC bucket first
-      const category =
-        coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-      categorySet.add(category);
+      // ⭐ Category label = CT_MAP bucket label
+      const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+      const categoryLabel = mapBucketToLabel(bucket);
+
+      categorySet.add(categoryLabel);
 
       const addTo = (map, key) => {
         if (!map[key]) {
@@ -276,27 +286,25 @@ export default async function handler(req, res) {
           };
         }
 
-        const bucket = map[key];
+        const bucketObj = map[key];
 
         if (accType === "INCOME" && amount > 0) {
-          bucket.revenue += amount;
+          bucketObj.revenue += amount;
         } else if (accType === "EXPENSE" && amount < 0) {
-          bucket.expenses += Math.abs(amount);
+          bucketObj.expenses += Math.abs(amount);
         }
 
-        bucket.net = bucket.revenue - bucket.expenses;
+        bucketObj.net = bucketObj.revenue - bucketObj.expenses;
 
-        bucket.categories[category] =
-          (bucket.categories[category] || 0) + Math.abs(amount);
+        bucketObj.categories[categoryLabel] =
+          (bucketObj.categories[categoryLabel] || 0) + Math.abs(amount);
 
-        bucket.transactions.push({
+        bucketObj.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description
-            ? String(tx.description).trim()
-            : "Unlabeled",
+          description: tx.description || "",
           amount: formatCurrency(tx.amount),
-          category,
+          category: categoryLabel,
           type: tx.type,
         });
       };
@@ -332,65 +340,45 @@ export default async function handler(req, res) {
 
     const paginated = allMonthly.slice(start, end);
 
-    const returnedTxs = (
-      clientFilter
-        ? txs.filter((tx) => {
-            const clientLabel = extractClientLabel(tx.description);
-            const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
-            const accType = (coa?.account_type || "").toUpperCase();
+    const returnedTxs = txs
+      .filter((tx) => {
+        const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+        if (!coa) return false;
 
-            const isControl =
-              coa?.is_control_account ||
-              coa?.is_bank_account ||
-              ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
-                .includes((coa?.hmrc_bucket || "").toLowerCase());
+        const accType = (coa.account_type || "").toUpperCase();
+        if (accType !== "INCOME" && accType !== "EXPENSE") return false;
 
-            const includeForProfit = tx.includedinct !== false;
+        const isControl =
+          coa.is_control_account ||
+          coa.is_bank_account ||
+          ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
+            .includes((coa.hmrc_bucket || "").toLowerCase());
 
-            return (
-              clientLabel === clientFilter &&
-              !tx.is_reversal &&
-              includeForProfit &&
-              coa &&
-              !isControl &&
-              (accType === "INCOME" || accType === "EXPENSE")
-            );
-          })
-        : txs.filter((tx) => {
-            const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
-            const accType = (coa?.account_type || "").toUpperCase();
+        if (isControl) return false;
 
-            const isControl =
-              coa?.is_control_account ||
-              coa?.is_bank_account ||
-              ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
-                .includes((coa?.hmrc_bucket || "").toLowerCase());
+        if (tx.includedinct === false) return false;
+        if (tx.is_reversal) return false;
 
-            const includeForProfit = tx.includedinct !== false;
+        const clientLabel = extractClientLabel(tx.description);
+        if (clientFilter && clientLabel !== clientFilter) return false;
 
-            return (
-              !tx.is_reversal &&
-              includeForProfit &&
-              coa &&
-              !isControl &&
-              (accType === "INCOME" || accType === "EXPENSE")
-            );
-          })
-    ).map((tx) => {
-      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
-      const accType = (coa?.account_type || "").toUpperCase();
-      const category =
-        coa?.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+        return true;
+      })
+      .map((tx) => {
+        const coa = coaMap.get(tx.coa_id);
+        const accType = (coa.account_type || "").toUpperCase();
+        const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+        const categoryLabel = mapBucketToLabel(bucket);
 
-      return {
-        id: tx.id,
-        date: tx.date,
-        description: tx.description,
-        amount: formatCurrency(tx.amount),
-        category,
-        type: tx.type,
-      };
-    });
+        return {
+          id: tx.id,
+          date: tx.date,
+          description: tx.description,
+          amount: formatCurrency(tx.amount),
+          category: categoryLabel,
+          type: tx.type,
+        };
+      });
 
     // ⭐ Audit filtered reports
     await supabaseAdmin.from("audit").insert([
@@ -398,9 +386,7 @@ export default async function handler(req, res) {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
-        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${
-          clientFilter || "none"
-        })`,
+        details: `Filtered reports`,
         timestamp: new Date().toISOString(),
       },
     ]);
