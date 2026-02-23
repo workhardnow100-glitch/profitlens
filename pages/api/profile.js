@@ -1,46 +1,9 @@
-/**
- * ============================================================
- * File: pages/api/profile.js
- * Purpose:
- *   Serve and update the client “Profile” cockpit:
- *     - GET: Full client identity + transaction summary
- *     - POST (updateClient): Update client identity fields
- *     - POST (category): Update a single transaction category
- *
- * Security / RBAC / SOC2 Notes:
- *   - Methods: GET, POST only.
- *   - Authentication:
- *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
- *   - RBAC:
- *       • ACCOUNTANT:
- *           – May VIEW profile + summary.
- *           – May NOT modify client identity or categories.
- *       • USER:
- *           – May VIEW + UPDATE their own client’s profile + categories.
- *       • FOUNDER:
- *           – May act on any client via actingAsClientId/clientId.
- *   - Subscription gating:
- *       • USER must be subscribed/trialing to access profile.
- *       • ACCOUNTANT + FOUNDER bypass subscription gating.
- *   - Data handling:
- *       • All reads/writes are client-scoped via client_id.
- *   - Audit logging:
- *       • Logs VIEW_PROFILE, UPDATE_CLIENT_PROFILE, UPDATE_CATEGORY.
- *
- * Change Control:
- *   - Any change to:
- *       • CT_MAP / SYSTEM_CATEGORIES
- *       • clients / transactions / hmrc_categories / accounts schema
- *     MUST be reflected here and in the Profile UI.
- * ============================================================
- */
-
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { requireRole } from "../../lib/rbac";
 
-// Unified allowed category list
+// Unified allowed category list (UI only)
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
@@ -51,8 +14,12 @@ const ALLOWED_CATEGORIES = new Set([
 ]);
 
 export default async function handler(req, res) {
-  // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
+  const guard = await requireRole(req, res, [
+    "USER",
+    "ACCOUNTANT",
+    "ADMIN",
+    "FOUNDER",
+  ]);
   if (!guard.ok) return;
 
   const role = guard.role;
@@ -64,14 +31,11 @@ export default async function handler(req, res) {
     subscriptionStatus
   );
 
-  // ⭐ Accountants + founders bypass subscription checks
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ⭐ Unified client resolution for ALL roles
   const clientId = guard.actingAsClientId || guard.clientId;
-
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -79,7 +43,7 @@ export default async function handler(req, res) {
   const actorEmail = req.session?.user?.email || "unknown";
 
   try {
-    // ⭐ AUDIT LOG — View profile (all roles)
+    // ⭐ AUDIT LOG — View profile
     if (req.method === "GET") {
       await supabaseAdmin.from("audit").insert([
         {
@@ -92,7 +56,7 @@ export default async function handler(req, res) {
       ]);
     }
 
-    // ⭐ POST — Update client identity fields (business owner only)
+    // ⭐ POST — Update client identity fields
     if (req.method === "POST" && req.body.updateClient) {
       if (isAccountant) {
         return res
@@ -125,7 +89,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    // ⭐ POST — Update transaction category (business owner only)
+    // ⭐ POST — Update transaction category (UI only)
     if (req.method === "POST" && !req.body.updateClient) {
       if (isAccountant) {
         return res.status(403).json({
@@ -167,46 +131,58 @@ export default async function handler(req, res) {
         },
       ]);
 
-      // After update, fall through to GET to return fresh data
       req.method = "GET";
     }
 
-    // ⭐ GET — Profile data
+    // ⭐ GET — COA-driven profile data
     if (req.method === "GET") {
-      // Fetch transactions
+      // 1) Fetch transactions with COA + toggles
       const { data: transactions, error: txError } = await supabaseAdmin
         .from("transactions")
         .select(
-          "id, date, description, amount, business_category, account_number, sort_code"
+          `
+          id,
+          date,
+          description,
+          amount,
+          business_category,
+          account_number,
+          sort_code,
+          coa_id,
+          includedinct,
+          includedinvat
+        `
         )
         .eq("client_id", clientId)
         .order("date", { ascending: false });
 
       if (txError) throw txError;
 
-      // Fetch HMRC categories
-      const { data: hmrcCategories, error: hmrcError } = await supabaseAdmin
-        .from("hmrc_categories")
-        .select(
-          "id, category_name, business_type, description, is_global, is_excluded"
-        )
-        .eq("is_global", true);
+      const txs = transactions ?? [];
 
-      if (hmrcError) throw hmrcError;
+      // 2) Load COA entries
+      const distinctCoaIds = Array.from(
+        new Set(txs.map((t) => t.coa_id).filter(Boolean))
+      );
 
-      // Fetch account details
-      const { data: account, error: accError } = await supabaseAdmin
-        .from("accounts")
-        .select("account_number, sort_code")
-        .eq("owner_id", clientId)
-        .single();
+      const coaMap = new Map();
+      if (distinctCoaIds.length > 0) {
+        const { data: coaRows, error: coaErr } = await supabaseAdmin
+          .from("chart_of_account_entries")
+          .select(
+            "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+          )
+          .in("id", distinctCoaIds);
 
-      if (accError && accError.code !== "PGRST116") throw accError;
+        if (coaErr) throw coaErr;
+        (coaRows || []).forEach((row) => coaMap.set(row.id, row));
+      }
 
-      // Fetch FULL client identity block
+      // 3) Fetch client identity block
       const { data: client, error: clientError } = await supabaseAdmin
         .from("clients")
-        .select(`
+        .select(
+          `
           id,
           name,
           email,
@@ -226,7 +202,8 @@ export default async function handler(req, res) {
           contact_phone,
           contact_email,
           notes
-        `)
+        `
+        )
         .eq("id", clientId)
         .single();
 
@@ -234,43 +211,62 @@ export default async function handler(req, res) {
 
       const businessType = client?.business_type || "sole_trader";
 
-      const totalsByType = {
-        sole_trader: {},
-        limited_company: {},
-      };
-
-      hmrcCategories.forEach((cat) => {
-        if (!totalsByType[cat.business_type]) {
-          totalsByType[cat.business_type] = {};
-        }
-        totalsByType[cat.business_type][cat.category_name] = 0;
-      });
-
+      // 4) COA-driven totals
       let totalIncome = 0;
       let totalExpenses = 0;
 
-      transactions.forEach((tx) => {
-        let categoryName = tx.business_category || "Uncategorised";
-        if (!ALLOWED_CATEGORIES.has(categoryName)) {
-          categoryName = "Uncategorised";
-        }
+      const hmrcTotals = {};
 
-        const bt = businessType;
+      const byMonth = {};
 
-        if (!totalsByType[bt]) totalsByType[bt] = {};
-        if (!totalsByType[bt][categoryName]) {
-          totalsByType[bt][categoryName] = 0;
-        }
-
+      for (const tx of txs) {
         const amount = Number(tx.amount || 0);
-        totalsByType[bt][categoryName] += amount;
+        const date = new Date(tx.date);
+        const monthKey = date.toISOString().slice(0, 7);
 
-        if (amount > 0) {
-          totalIncome += amount;
-        } else {
-          totalExpenses += Math.abs(amount);
+        if (!byMonth[monthKey]) {
+          byMonth[monthKey] = { income: 0, expenses: 0 };
         }
-      });
+
+        const coa = coaMap.get(tx.coa_id);
+        if (!coa) continue;
+
+        const bucket = coa.hmrc_bucket;
+        const accType = coa.account_type;
+
+        const isControl =
+          bucket === "control" ||
+          bucket === "system" ||
+          bucket === "balance_sheet" ||
+          bucket === "equity" ||
+          bucket === "liabilities" ||
+          bucket === "assets" ||
+          coa.is_control_account ||
+          coa.is_bank_account;
+
+        if (isControl) continue;
+
+        const includeForProfit = tx.includedinct !== false;
+        if (!includeForProfit) continue;
+
+        const absAmount = Math.abs(amount);
+
+        if (accType === "INCOME" && amount > 0) {
+          totalIncome += amount;
+          byMonth[monthKey].income += amount;
+
+          if (!hmrcTotals[bucket]) hmrcTotals[bucket] = 0;
+          hmrcTotals[bucket] += absAmount;
+        }
+
+        if (accType === "EXPENSE" && amount < 0) {
+          totalExpenses += absAmount;
+          byMonth[monthKey].expenses += absAmount;
+
+          if (!hmrcTotals[bucket]) hmrcTotals[bucket] = 0;
+          hmrcTotals[bucket] += absAmount;
+        }
+      }
 
       const netProfit = totalIncome - totalExpenses;
 
@@ -282,23 +278,9 @@ export default async function handler(req, res) {
       const limitedCompanyOwed =
         netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
 
-      const byMonth = {};
-      transactions.forEach((tx) => {
-        const month = new Date(tx.date).toISOString().slice(0, 7);
-        if (!byMonth[month]) byMonth[month] = { income: 0, expenses: 0 };
-        const amount = Number(tx.amount || 0);
-        if (amount > 0) {
-          byMonth[month].income += amount;
-        } else {
-          byMonth[month].expenses += Math.abs(amount);
-        }
-      });
-
       return res.status(200).json({
         client,
-        transactions,
-        hmrcCategories,
-        account: account || null,
+        transactions: txs, // UI categories preserved
         summary: {
           totalIncome,
           totalExpenses,
@@ -308,8 +290,8 @@ export default async function handler(req, res) {
             limited_company: limitedCompanyOwed,
           },
         },
-        totalsByType,
-        byMonth,
+        hmrcTotals, // COA-driven category totals
+        byMonth, // COA-driven monthly breakdown
       });
     }
 
