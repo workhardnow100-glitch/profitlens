@@ -1,7 +1,3 @@
-////
-
-
-
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
