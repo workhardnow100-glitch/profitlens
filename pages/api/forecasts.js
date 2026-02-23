@@ -39,13 +39,20 @@
  * ============================================================
  */
 
-
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
 import { CT_MAP } from "../../lib/constants/ctMap";
+
+// ⭐ REAL revenue categories (Sales + trading income)
+const REVENUE_CATEGORIES = new Set(
+  CT_MAP.revenue || CT_MAP.income || [] // fallback if not yet renamed
+);
+
+// ⭐ Categories to ignore entirely (transfers, VAT, loan repayments, etc.)
+const IGNORE_CATEGORIES = new Set(CT_MAP.ignore || []);
 
 function formatMonthKey(dateStr) {
   const d = new Date(dateStr);
@@ -59,17 +66,6 @@ function formatMonthLabel(key) {
     month: "short",
     year: "numeric",
   }).format(new Date(Number(year), Number(month) - 1));
-}
-
-// ⭐ Map HMRC bucket → CT_MAP label
-function mapBucketToLabel(bucket) {
-  if (!bucket) return "Uncategorised";
-
-  if (CT_MAP.income.includes(bucket)) return bucket;
-  if (CT_MAP.allowable.includes(bucket)) return bucket;
-  if (CT_MAP.disallowable.includes(bucket)) return bucket;
-
-  return bucket;
 }
 
 export default async function handler(req, res) {
@@ -116,7 +112,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ⭐ 1) Fetch transactions (MATCH DASHBOARD EXACTLY)
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD / REPORTS ENGINE)
     const { data: transactions, error } = await supabaseAdmin
       .from("transactions")
       .select(`
@@ -125,14 +121,10 @@ export default async function handler(req, res) {
         amount,
         description,
         business_category,
-        account_number,
-        sort_code,
-        storage_path,
         type,
         is_reversal,
         coa_id,
-        includedinct,
-        includedinvat
+        includedinct
       `)
       .eq("client_id", clientId)
       .order("date", { ascending: true });
@@ -155,7 +147,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ⭐ 2) Build COA map (MATCH DASHBOARD EXACTLY)
+    // ⭐ 2) Build COA map
     const distinctCoaIds = Array.from(
       new Set(txs.map((t) => t.coa_id).filter(Boolean))
     );
@@ -179,14 +171,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // ⭐ 3) COA‑driven maths (MATCH DASHBOARD EXACTLY)
+    // ⭐ 3) COA‑driven maths + CT_MAP categories
     const monthly = {};
     const categoriesTotals = {};
 
     for (const tx of txs) {
       if (tx.is_reversal) continue;
 
-      // ⭐ Dashboard rule: only includedinct matters
+      // ⭐ Dashboard/Reports rule: only includedinct matters
       if (tx.includedinct === false) continue;
 
       const key = formatMonthKey(tx.date);
@@ -209,25 +201,37 @@ export default async function handler(req, res) {
 
       if (isControl) continue;
 
+      if (accType !== "INCOME" && accType !== "EXPENSE") continue;
+
+      // ⭐ Category label = CT_MAP category from transaction
+      const category =
+        (tx.business_category && String(tx.business_category).trim()) ||
+        "Uncategorised";
+
+      // Ignore transfers / non‑P&L movements
+      if (IGNORE_CATEGORIES.has(category)) continue;
+
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
 
-      // ⭐ Category label = CT_MAP label
-      const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-      const categoryLabel = mapBucketToLabel(bucket);
-
-      if (!categoriesTotals[categoryLabel]) {
-        categoriesTotals[categoryLabel] = { revenue: 0, expenses: 0 };
+      if (!categoriesTotals[category]) {
+        categoriesTotals[category] = { revenue: 0, expenses: 0 };
       }
 
-      if (accType === "INCOME" && amount > 0) {
+      // ⭐ REAL REVENUE ONLY (Sales + trading income)
+      if (
+        accType === "INCOME" &&
+        amount > 0 &&
+        REVENUE_CATEGORIES.has(category)
+      ) {
         monthly[key].revenue += amount;
-        categoriesTotals[categoryLabel].revenue += amount;
+        categoriesTotals[category].revenue += amount;
       }
 
+      // ⭐ REAL EXPENSES ONLY
       if (accType === "EXPENSE" && amount < 0) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
-        categoriesTotals[categoryLabel].expenses += abs;
+        categoriesTotals[category].expenses += abs;
       }
     }
 
@@ -238,7 +242,7 @@ export default async function handler(req, res) {
     const expenses = keys.map((k) => monthly[k].expenses);
     const net = revenue.map((r, i) => r - expenses[i]);
 
-    // ⭐ 5) Forecast = average of last 3 months
+    // ⭐ 5) Forecast = average of last 3 months (REAL profit engine)
     const recentRevenue = revenue.slice(-3);
     const recentExpenses = expenses.slice(-3);
 
