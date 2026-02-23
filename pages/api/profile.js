@@ -17,6 +17,12 @@ const ALLOWED_CATEGORIES = new Set([
   "Uncategorised",
 ]);
 
+// CT_MAP sets
+const INCOME_SET = new Set(CT_MAP.income);
+const ALLOWABLE_SET = new Set(CT_MAP.allowable);
+const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
+const IGNORE_SET = new Set(CT_MAP.ignore);
+
 export default async function handler(req, res) {
   const guard = await requireRole(req, res, [
     "USER",
@@ -138,7 +144,7 @@ export default async function handler(req, res) {
       req.method = "GET";
     }
 
-    // ⭐ GET — COA-driven profile data
+    // ⭐ GET — CT_MAP + COA‑driven profile data
     if (req.method === "GET") {
       // 1) Fetch transactions with COA + toggles
       const { data: transactions, error: txError } = await supabaseAdmin
@@ -215,12 +221,11 @@ export default async function handler(req, res) {
 
       const businessType = client?.business_type || "sole_trader";
 
-      // 4) COA-driven totals
+      // ⭐ 4) CT_MAP + COA-driven totals (MATCHES DASHBOARD)
       let totalIncome = 0;
       let totalExpenses = 0;
 
-      const hmrcTotals = {};
-
+      const categoryTotals = {}; // CT_MAP categories
       const byMonth = {};
 
       for (const tx of txs) {
@@ -232,44 +237,58 @@ export default async function handler(req, res) {
           byMonth[monthKey] = { income: 0, expenses: 0 };
         }
 
+        const category = (tx.business_category || "Uncategorised").trim();
+
+        // 1. Ignore CT_MAP.ignore
+        if (IGNORE_SET.has(category)) continue;
+
+        // 2. COA guardrails
         const coa = coaMap.get(tx.coa_id);
         if (!coa) continue;
 
-        const bucket = coa.hmrc_bucket;
         const accType = coa.account_type;
 
         const isControl =
-          bucket === "control" ||
-          bucket === "system" ||
-          bucket === "balance_sheet" ||
-          bucket === "equity" ||
-          bucket === "liabilities" ||
-          bucket === "assets" ||
+          coa.hmrc_bucket === "control" ||
+          coa.hmrc_bucket === "system" ||
+          coa.hmrc_bucket === "balance_sheet" ||
+          coa.hmrc_bucket === "equity" ||
+          coa.hmrc_bucket === "liabilities" ||
+          coa.hmrc_bucket === "assets" ||
           coa.is_control_account ||
           coa.is_bank_account;
 
         if (isControl) continue;
 
-        const includeForProfit = tx.includedinct !== false;
-        if (!includeForProfit) continue;
+        // 3. Respect CT toggle
+        if (tx.includedinct === false) continue;
 
         const absAmount = Math.abs(amount);
 
-        if (accType === "INCOME" && amount > 0) {
+        // 4. Revenue (CT_MAP.income + COA INCOME + positive)
+        if (INCOME_SET.has(category) && accType === "INCOME" && amount > 0) {
           totalIncome += amount;
           byMonth[monthKey].income += amount;
 
-          if (!hmrcTotals[bucket]) hmrcTotals[bucket] = 0;
-          hmrcTotals[bucket] += absAmount;
+          categoryTotals[category] =
+            (categoryTotals[category] || 0) + absAmount;
+          continue;
         }
 
-        if (accType === "EXPENSE" && amount < 0) {
+        // 5. Expenses (CT_MAP.allowable + disallowable + COA EXPENSE + negative)
+        const isExpenseCategory =
+          ALLOWABLE_SET.has(category) || DISALLOWABLE_SET.has(category);
+
+        if (isExpenseCategory && accType === "EXPENSE" && amount < 0) {
           totalExpenses += absAmount;
           byMonth[monthKey].expenses += absAmount;
 
-          if (!hmrcTotals[bucket]) hmrcTotals[bucket] = 0;
-          hmrcTotals[bucket] += absAmount;
+          categoryTotals[category] =
+            (categoryTotals[category] || 0) + absAmount;
+          continue;
         }
+
+        // 6. Everything else ignored
       }
 
       const netProfit = totalIncome - totalExpenses;
@@ -294,8 +313,8 @@ export default async function handler(req, res) {
             limited_company: limitedCompanyOwed,
           },
         },
-        hmrcTotals, // COA-driven category totals
-        byMonth, // COA-driven monthly breakdown
+        categoryTotals, // CT_MAP category totals
+        byMonth, // CT_MAP monthly breakdown
       });
     }
 
