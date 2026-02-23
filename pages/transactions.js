@@ -38,6 +38,7 @@ const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
     ...CT_MAP.allowable,
+    ...CT_MAP.other_income,
     ...CT_MAP.disallowable,
     ...CT_MAP.ignore,
     ...SYSTEM_CATEGORIES,
