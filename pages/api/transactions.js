@@ -10,10 +10,16 @@ const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.allowable,
   ...CT_MAP.disallowable,
   ...CT_MAP.ignore,
-  ...CT_MAP.other_income,   // ⭐ Asset Sale Proceeds now selectable
+  ...CT_MAP.other_income, // ⭐ Asset Sale Proceeds now selectable
   ...SYSTEM_CATEGORIES,
   "Uncategorised",
 ]);
+
+// ✅ Fast lookup sets for CT_MAP groups (for profit logic)
+const INCOME_SET = new Set(CT_MAP.income);
+const ALLOWABLE_SET = new Set(CT_MAP.allowable);
+const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
+const IGNORE_SET = new Set(CT_MAP.ignore);
 
 // ⭐ System-only inference (safe)
 function inferSystemCategory(type = "", description = "") {
@@ -149,7 +155,7 @@ function filterByDateWindow(transactions, from, to) {
   });
 }
 
-// ⭐ Summary uses only HMRC categories (CT_MAP) and excludes system categories
+// ⭐ Summary uses CT_MAP + COA guardrails (trading only)
 function computeSummary(transactions, coaMap) {
   let income = 0;
   let expenses = 0;
@@ -188,14 +194,14 @@ function computeSummary(transactions, coaMap) {
 
     const absAmount = Math.abs(amount);
 
-    // 5. Revenue
+    // 5. Revenue (trading only)
     if (INCOME_SET.has(category) && accType === "INCOME" && amount > 0) {
       income += amount;
       categories[category] = (categories[category] || 0) + absAmount;
       continue;
     }
 
-    // 6. Expenses
+    // 6. Expenses (trading only)
     const isExpenseCategory =
       ALLOWABLE_SET.has(category) || DISALLOWABLE_SET.has(category);
 
@@ -213,7 +219,6 @@ function computeSummary(transactions, coaMap) {
     categories,
   };
 }
-
 
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
@@ -267,7 +272,6 @@ export default async function handler(req, res) {
     const enriched = (data || []).map((tx) => {
       let category = tx.business_category?.trim() || null;
 
-      // ⭐ FIXED: use ALLOWED_CATEGORIES (not ALLOWED_BUSINESS_CATEGORIES)
       if (category && !ALLOWED_CATEGORIES.has(category)) {
         category = "Uncategorised";
       }
@@ -293,12 +297,36 @@ export default async function handler(req, res) {
       };
     });
 
+    // ⭐ Build COA map once
+    const distinctCoaIds = Array.from(
+      new Set(enriched.map((t) => t.coa_id).filter(Boolean))
+    );
+
+    const coaMap = new Map();
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaErr } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select(
+          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+        )
+        .in("id", distinctCoaIds);
+
+      if (coaErr) {
+        console.error("COA fetch error:", coaErr.message);
+        return res.status(500).json({ error: coaErr.message });
+      }
+
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row);
+      });
+    }
+
     const customFrom = fromParam ? new Date(fromParam) : null;
     const customTo = toParam ? new Date(toParam) : null;
     const { from, to } = computeDateWindow(period, customFrom, customTo);
 
     const filtered = filterByDateWindow(enriched, from, to);
-    const summary = computeSummary(filtered);
+    const summary = computeSummary(filtered, coaMap);
 
     // ⭐ AUDIT LOG — Accountant filtered view
     if (session.user.role === "accountant") {
