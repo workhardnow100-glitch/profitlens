@@ -173,14 +173,18 @@ export default async function handler(req, res) {
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
 
-      if (amount > 0) {
+      // ⭐ NEW: Only treat as revenue if CT category is income
+      if (amount > 0 && MAP.income.has(lower)) {
         monthly[key].revenue += amount;
         categoriesTotals[category].revenue += amount;
-      } else if (amount < 0) {
+      }
+      // ⭐ NEW: Only treat as expenses if CT category is allowable/disallowable
+      else if (amount < 0 && (MAP.allowable.has(lower) || MAP.disallowable.has(lower))) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
         categoriesTotals[category].expenses += abs;
       }
+      // Anything else (e.g. mis‑mapped positives, weird categories) is ignored
     }
 
     // ⭐ Build forecast series
