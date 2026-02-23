@@ -109,10 +109,20 @@ export default function Transactions() {
     };
   }, []);
 
-  // Read-only list API you pasted
-  const { data, error } = useSWR("/api/transactions", fetcher);
+  // API – now period-aware, but table still uses client-side filtered
+  const { data, error } = useSWR(
+    () => {
+      let url = `/api/transactions?period=${period}`;
+      if (period === "custom") {
+        if (customFrom) url += `&from=${encodeURIComponent(customFrom)}`;
+        if (customTo) url += `&to=${encodeURIComponent(customTo)}`;
+      }
+      return url;
+    },
+    fetcher
+  );
 
-  // Period filtering (client-side window)
+  // Period filtering (client-side window) – unchanged, used by table
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
@@ -188,7 +198,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // Auto VAT (same logic as before, still uses update-vat API if you keep it)
+  // Auto VAT – unchanged
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -235,7 +245,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // Aggregation (income/expenses, categories, top payers/merchants)
+  // ⭐ NEW: Trading-only aggregation from API summary (CT_MAP + COA)
   const {
     totalIncome,
     totalExpenses,
@@ -244,93 +254,71 @@ export default function Transactions() {
     topIncomePayers,
     topExpenseMerchants,
   } = useMemo(() => {
-    const isIncome = (amt) => Number(amt) >= 0;
-    let incomeSum = 0,
-      expenseSum = 0;
-    const categoryExpenses = {},
-      merchantsByCategory = {},
-      incomeByPayer = {},
-      expenseByMerchant = {};
+    if (!data?.summary) {
+      return {
+        totalIncome: 0,
+        totalExpenses: 0,
+        categoryExpensesEntries: [],
+        drilldownSeries: [],
+        topIncomePayers: [],
+        topExpenseMerchants: [],
+      };
+    }
 
-    const excludedCategories = new Set([
-      "Asset Disposal",
-      "Insurance Payout",
-      "Internal Transfers",
-      "Transfers",
-      "Returned Direct Debit",
-      "Refunds Received",
-    ]);
+    const summary = data.summary;
+    const categories = summary.categories || {};
 
-    filtered.forEach((tx) => {
-      const amount = parseFloat(tx.amount) || 0;
-      const category =
-        (tx.business_category && tx.business_category.trim()) ||
-        "Uncategorised";
-      const merchant =
-        (tx.description && tx.description.trim()) || "Unknown";
+    // Convert categories → array
+    const entries = Object.entries(categories).map(([category, amount]) => ({
+      category,
+      amount,
+    }));
 
-      if (isIncome(amount)) {
-        if (!excludedCategories.has(category)) {
-          incomeSum += amount;
-          incomeByPayer[merchant] =
-            (incomeByPayer[merchant] || 0) + amount;
-        }
-      } else if (amount < 0) {
-        if (!excludedCategories.has(category)) {
-          const out = Math.abs(amount);
-          expenseSum += out;
-          categoryExpenses[category] =
-            (categoryExpenses[category] || 0) + out;
-
-          if (!merchantsByCategory[category])
-            merchantsByCategory[category] = {};
-          merchantsByCategory[category][merchant] =
-            (merchantsByCategory[category][merchant] || 0) + out;
-
-          expenseByMerchant[merchant] =
-            (expenseByMerchant[merchant] || 0) + out;
-        }
-      }
-    });
-
-    const drilldowns = Object.entries(merchantsByCategory).map(
-      ([category, merchants]) => ({
-        id: category,
-        name: category,
-        data: Object.entries(merchants)
-          .sort((a, b) => b[1] - a[1])
-          .map(([merchant, amount]) => [merchant, amount]),
-      })
-    );
-
-    const categoryEntries = Object.entries(categoryExpenses).sort(
-      (a, b) => b[1] - a[1]
-    );
-
-    const topIncome = Object.entries(incomeByPayer)
-      .sort((a, b) => b[1] - a[1])
+    // Top income categories (CT_MAP.income only)
+    const topIncome = entries
+      .filter((e) => CT_MAP.income.includes(e.category))
+      .sort((a, b) => b.amount - a.amount)
       .slice(0, 5)
-      .map(([name, amount]) => ({ name, amount }));
+      .map((e) => ({ name: e.category, amount: e.amount }));
 
-    const topExpense = Object.entries(expenseByMerchant)
-      .sort((a, b) => b[1] - a[1])
+    // Top expense categories (allowable + disallowable)
+    const topExpenses = entries
+      .filter(
+        (e) =>
+          CT_MAP.allowable.includes(e.category) ||
+          CT_MAP.disallowable.includes(e.category)
+      )
+      .sort((a, b) => b.amount - a.amount)
       .slice(0, 5)
-      .map(([name, amount]) => ({ name, amount }));
+      .map((e) => ({ name: e.category, amount: e.amount }));
+
+    // Drilldown series – CT_MAP category buckets
+    const drilldowns = entries.map((e) => ({
+      id: e.category,
+      name: e.category,
+      data: [[e.category, e.amount]],
+    }));
 
     return {
-      totalIncome: incomeSum,
-      totalExpenses: expenseSum,
-      categoryExpensesEntries: categoryEntries,
+      totalIncome: summary.income,
+      totalExpenses: summary.expenses,
+      categoryExpensesEntries: entries.map((e) => [e.category, e.amount]),
       drilldownSeries: drilldowns,
       topIncomePayers: topIncome,
-      topExpenseMerchants: topExpense,
+      topExpenseMerchants: topExpenses,
     };
-  }, [filtered]);
+  }, [data]);
 
-  // Chart options
+  // Chart options – now using trading-only totals + CT_MAP category breakdown
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
-    if (!filtered.length) return "NO_DATA";
+
+    const hasData =
+      (categoryExpensesEntries && categoryExpensesEntries.length > 0) ||
+      totalIncome !== 0 ||
+      totalExpenses !== 0;
+
+    if (!hasData) return "NO_DATA";
 
     const innerSeries = {
       name: "Profit vs Loss",
@@ -367,7 +355,6 @@ export default function Transactions() {
   }, [
     hcReady,
     Highcharts,
-    filtered,
     totalIncome,
     totalExpenses,
     categoryExpensesEntries,
@@ -421,24 +408,25 @@ export default function Transactions() {
 
   // Category change → updates business_category + auto_ct
   async function updateBusinessCategory(id, newCategory) {
-  const key = (newCategory || "Uncategorised").toLowerCase();
+    const key = (newCategory || "Uncategorised").toLowerCase();
 
-  const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
-  const allowableSet = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
-  const disallowableSet = new Set(CT_MAP.disallowable.map((c) => c.toLowerCase()));
+    const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
+    const allowableSet = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
+    const disallowableSet = new Set(
+      CT_MAP.disallowable.map((c) => c.toLowerCase())
+    );
 
-  let includeCT = false;
-  if (incomeSet.has(key)) includeCT = true;
-  else if (allowableSet.has(key)) includeCT = true;
-  else if (disallowableSet.has(key)) includeCT = true;
+    let includeCT = false;
+    if (incomeSet.has(key)) includeCT = true;
+    else if (allowableSet.has(key)) includeCT = true;
+    else if (disallowableSet.has(key)) includeCT = true;
 
-  await updateTransaction(id, {
-    business_category: newCategory,
-    includedinct: includeCT,
-    manualctoverride: false
-  });
-}
-
+    await updateTransaction(id, {
+      business_category: newCategory,
+      includedinct: includeCT,
+      manualctoverride: false,
+    });
+  }
 
   // VAT update → via upsert
   async function updateVATForTx(tx, newRate) {
@@ -723,145 +711,148 @@ export default function Transactions() {
                     </td>
 
                     {/* Category */}
-<td>
-  <select
-    className="border p-1 rounded text-sm"
-    value={businessCategory}
-    onChange={(e) =>
-      updateBusinessCategory(tx.id, e.target.value)
-    }
-  >
-    {CT_CATEGORY_OPTIONS.map((cat) => (
-      <option key={cat} value={cat}>
-        {cat}
-      </option>
-    ))}
-  </select>
-</td>
+                    <td>
+                      <select
+                        className="border p-1 rounded text-sm"
+                        value={businessCategory}
+                        onChange={(e) =>
+                          updateBusinessCategory(tx.id, e.target.value)
+                        }
+                      >
+                        {CT_CATEGORY_OPTIONS.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
 
-{/* VAT + CIS + SA + Include VAT + Include CIS */}
-<td>
-  <div className="flex flex-col gap-1">
+                    {/* VAT + CIS + SA + Include VAT + Include CIS */}
+                    <td>
+                      <div className="flex flex-col gap-1">
+                        {/* VAT */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">VAT:</span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            value={vatRate}
+                            onChange={(e) =>
+                              updateVATForTx(tx, e.target.value)
+                            }
+                          >
+                            <option value={20}>20% Standard</option>
+                            <option value={5}>5% Reduced</option>
+                            <option value={0}>0% Zero Rated</option>
+                            <option value={0}>Exempt</option>
+                            <option value={0}>Out of Scope</option>
+                          </select>
+                        </div>
 
-    {/* VAT */}
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-slate-500">VAT:</span>
-      <select
-        className="border p-1 rounded text-sm"
-        value={vatRate}
-        onChange={(e) =>
-          updateVATForTx(tx, e.target.value)
-        }
-      >
-        <option value={20}>20% Standard</option>
-        <option value={5}>5% Reduced</option>
-        <option value={0}>0% Zero Rated</option>
-        <option value={0}>Exempt</option>
-        <option value={0}>Out of Scope</option>
-      </select>
-    </div>
+                        {/* Include in VAT */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">
+                            In VAT:
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={tx.includedinvat === true}
+                            onChange={(e) =>
+                              updateTransaction(tx.id, {
+                                includedinvat: e.target.checked,
+                              })
+                            }
+                          />
+                        </div>
 
-    {/* Include in VAT */}
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-slate-500">In VAT:</span>
-      <input
-        type="checkbox"
-        checked={tx.includedinvat === true}
-        onChange={(e) =>
-          updateTransaction(tx.id, {
-            includedinvat: e.target.checked
-          })
-        }
-      />
-    </div>
+                        {/* CIS */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">CIS:</span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            value={cisSelection}
+                            onChange={(e) =>
+                              updateCISForTx(tx, e.target.value)
+                            }
+                          >
+                            <option value="none">No CIS</option>
+                            <option value="deducted">CIS Deducted</option>
+                            <option value="suffered">CIS Suffered</option>
+                          </select>
+                        </div>
 
-    {/* CIS */}
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-slate-500">CIS:</span>
-      <select
-        className="border p-1 rounded text-sm"
-        value={cisSelection}
-        onChange={(e) =>
-          updateCISForTx(tx, e.target.value)
-        }
-      >
-        <option value="none">No CIS</option>
-        <option value="deducted">CIS Deducted</option>
-        <option value="suffered">CIS Suffered</option>
-      </select>
-    </div>
+                        {/* Include in CIS */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">
+                            In CIS:
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={tx.includedincis === true}
+                            onChange={(e) =>
+                              updateTransaction(tx.id, {
+                                includedincis: e.target.checked,
+                              })
+                            }
+                          />
+                        </div>
 
-    {/* Include in CIS */}
-    <div className="flex items-center gap-2">
-      <span className="text-xs text-slate-500">In CIS:</span>
-      <input
-        type="checkbox"
-        checked={tx.includedincis === true}
-        onChange={(e) =>
-          updateTransaction(tx.id, {
-            includedincis: e.target.checked
-          })
-        }
-      />
-    </div>
+                        {/* SA */}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-xs text-slate-500 cursor-help"
+                            title={SA_TAG_HELP_TEXT}
+                          >
+                            SA:
+                          </span>
+                          <select
+                            className="border p-1 rounded text-sm"
+                            value={saSelection}
+                            onChange={(e) =>
+                              updateSAForTx(tx, e.target.value)
+                            }
+                          >
+                            <option value="excluded">Not SA</option>
+                            <option value="included">Include in SA</option>
+                          </select>
+                        </div>
+                      </div>
+                    </td>
 
-    {/* SA */}
-    <div className="flex items-center gap-2">
-      <span
-        className="text-xs text-slate-500 cursor-help"
-        title={SA_TAG_HELP_TEXT}
-      >
-        SA:
-      </span>
-      <select
-        className="border p-1 rounded text-sm"
-        value={saSelection}
-        onChange={(e) =>
-          updateSAForTx(tx, e.target.value)
-        }
-      >
-        <option value="excluded">Not SA</option>
-        <option value="included">Include in SA</option>
-      </select>
-    </div>
+                    {/* VAT Amount */}
+                    <td>£{effectiveVatAmount.toFixed(2)}</td>
 
-  </div>
-</td>
+                    {/* Asset Disposal */}
+                    <td>
+                      <select
+                        className="border p-1 rounded text-sm"
+                        value={tx.assetdisposaltype || "NONE"}
+                        onChange={(e) =>
+                          handleAssetDisposalChange(tx, e.target.value)
+                        }
+                      >
+                        <option value="NONE">No</option>
+                        <option value="MAIN_POOL">Main Pool</option>
+                        <option value="SPECIAL_RATE_POOL">
+                          Special Rate
+                        </option>
+                        <option value="CARS">Cars</option>
+                        <option value="SHORT_LIFE">Short‑Life</option>
+                      </select>
+                    </td>
 
-{/* VAT Amount */}
-<td>£{effectiveVatAmount.toFixed(2)}</td>
-
-{/* Asset Disposal */}
-<td>
-  <select
-    className="border p-1 rounded text-sm"
-    value={tx.assetdisposaltype || "NONE"}
-    onChange={(e) =>
-      handleAssetDisposalChange(tx, e.target.value)
-    }
-  >
-    <option value="NONE">No</option>
-    <option value="MAIN_POOL">Main Pool</option>
-    <option value="SPECIAL_RATE_POOL">Special Rate</option>
-    <option value="CARS">Cars</option>
-    <option value="SHORT_LIFE">Short‑Life</option>
-  </select>
-</td>
-
-{/* CT flag */}
-<td className="text-center">
-  <input
-    type="checkbox"
-    checked={tx.includedinct === true}
-    onChange={async (e) => {
-      await updateTransaction(tx.id, {
-        includedinct: e.target.checked,
-        manualctoverride: true,
-      });
-    }}
-  />
-</td>
-
+                    {/* CT flag */}
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={tx.includedinct === true}
+                        onChange={async (e) => {
+                          await updateTransaction(tx.id, {
+                            includedinct: e.target.checked,
+                            manualctoverride: true,
+                          });
+                        }}
+                      />
+                    </td>
                   </tr>
                 );
               })}
