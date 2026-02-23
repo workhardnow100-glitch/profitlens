@@ -14,7 +14,7 @@ import {
 } from "./ui/sidebar";
 import { TrendingUp } from "lucide-react";
 
-// ✅ Global Accountant Banner Component
+// ⭐ FIXED: Accountant banner with safe 403 handling
 function ActingAsBanner() {
   const [actingAs, setActingAs] = useState(null);
   const [role, setRole] = useState(null);
@@ -23,19 +23,30 @@ function ActingAsBanner() {
     const load = async () => {
       try {
         const res = await fetch("/api/accountant/me");
+
+        // ⭐ If user is NOT an accountant → 403 → do nothing safely
+        if (res.status === 403) {
+          setRole(null);
+          setActingAs(null);
+          return;
+        }
+
         if (!res.ok) return;
 
         const data = await res.json();
+        if (!data?.user) return;
+
         setRole(data.user.role);
         setActingAs(data.user.actingAsClientId);
       } catch {
-        // ignore errors silently
+        // ignore silently
       }
     };
+
     load();
   }, []);
 
-  // ✅ Only show for accountants who are acting as a client
+  // Only show for accountants acting as a client
   if (role !== "accountant" || !actingAs) return null;
 
   return (
@@ -63,14 +74,16 @@ export default function ResponsiveLayout({ children }) {
               <div className="w-10 h-10 bg-gradient-to-r from-emerald-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
                 <TrendingUp className="w-6 h-6 text-white" />
               </div>
+
               <div className="w-full flex flex-col items-center text-center px-4 py-2">
-  <h2 className="font-bold text-slate-900 text-lg tracking-tight">ProfitLens</h2>
+                <h2 className="font-bold text-slate-900 text-lg tracking-tight">
+                  ProfitLens
+                </h2>
 
-  <p className="text-[10px] text-slate-500 whitespace-normal leading-snug mt-1 max-w-[150px]">
-    Bank Statement Analyzer, Acting Accountant Software & Tax Submissions
-  </p>
-</div>
-
+                <p className="text-[10px] text-slate-500 whitespace-normal leading-snug mt-1 max-w-[150px]">
+                  Bank Statement Analyzer, Acting Accountant Software & Tax Submissions
+                </p>
+              </div>
             </div>
           </SidebarHeader>
 
@@ -106,7 +119,7 @@ export default function ResponsiveLayout({ children }) {
 
         {/* Main content */}
         <main className="flex-1 flex flex-col overflow-hidden">
-          {/* Mobile header with sidebar trigger */}
+          {/* Mobile header */}
           <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200/60 px-6 py-4 md:hidden">
             <div className="flex items-center gap-4">
               <SidebarTrigger
@@ -117,7 +130,7 @@ export default function ResponsiveLayout({ children }) {
             </div>
           </header>
 
-          {/* ✅ Global Accountant Banner */}
+          {/* ⭐ Accountant banner (now safe) */}
           <ActingAsBanner />
 
           {/* Page content */}
