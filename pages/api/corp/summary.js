@@ -34,7 +34,7 @@
  *
  * Change Control:
  *   - Any change to:
- *       • CT_MAP semantics
+ *       • COA CT classification semantics
  *       • transaction schema (CT fields)
  *       • marginal relief rules
  *     MUST be reflected here and in the CT UI.
@@ -44,7 +44,6 @@
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
-import { CT_MAP } from "../../../lib/constants/ctMap";
 
 // Marginal relief calculator
 function calculateCorporationTax(profit) {
@@ -69,14 +68,6 @@ function calculateCorporationTax(profit) {
     rate: effectiveRate * 100,
   };
 }
-
-// Build lowercase sets for classification
-const MAP = {
-  income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
-  allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
-  disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
-  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
-};
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -138,7 +129,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Fetch transactions
+    // 1. Fetch transactions (including COA link)
     const { data: txs, error: fetchError } = await supabaseAdmin
       .from("transactions")
       .select(`
@@ -150,7 +141,8 @@ export default async function handler(req, res) {
         tax_locked,
         includedinct,
         assetbalancingcharge,
-        assetbalancingallowance
+        assetbalancingallowance,
+        coa_id
       `)
       .eq("client_id", clientId)
       .gte("date", periodStart)
@@ -187,7 +179,31 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3. Totals
+    // 3. Load COA CT classification for all used coa_ids in one shot
+    const distinctCoaIds = Array.from(
+      new Set(
+        ctTxs
+          .map((tx) => tx.coa_id)
+          .filter((id) => !!id)
+      )
+    );
+
+    let coaMap = new Map();
+
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaError } = await supabaseAdmin
+        .from("chart_of_accounts")
+        .select("id, ct_type")
+        .in("id", distinctCoaIds);
+
+      if (coaError) throw new Error(coaError.message);
+
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row.ct_type || "ignore");
+      });
+    }
+
+    // 4. Totals
     let income = 0;
     let allowable = 0;
     let disallowable = 0;
@@ -197,18 +213,12 @@ export default async function handler(req, res) {
 
     const breakdown = [];
 
-    // 4. Classification
+    // 5. Classification using COA (not business_category / CT_MAP)
     ctTxs.forEach((tx) => {
-      const cat = (tx.business_category || "Uncategorised").trim();
-      const key = cat.toLowerCase();
       const amount = Number(tx.amount || 0);
+      const cat = (tx.business_category || "Uncategorised").trim();
 
-      let ctType = "ignore";
-      if (MAP.income.has(key)) ctType = "income";
-      else if (MAP.allowable.has(key)) ctType = "allowable";
-      else if (MAP.disallowable.has(key)) ctType = "disallowable";
-      else if (MAP.ignore.has(key)) ctType = "ignore";
-      else ctType = "uncategorised";
+      const ctType = coaMap.get(tx.coa_id) || "ignore";
 
       breakdown.push({
         id: tx.id,
@@ -216,12 +226,21 @@ export default async function handler(req, res) {
         description: tx.description,
         amount,
         business_category: cat,
+        coa_id: tx.coa_id,
         ctType,
       });
 
-      if (ctType === "income" && amount > 0) income += amount;
-      if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
-      if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
+      if (ctType === "income" && amount > 0) {
+        income += amount;
+      }
+
+      if (ctType === "allowable" && amount < 0) {
+        allowable += Math.abs(amount);
+      }
+
+      if (ctType === "disallowable" && amount < 0) {
+        disallowable += Math.abs(amount);
+      }
 
       const bc = Number(tx.assetbalancingcharge || 0);
       const ba = Number(tx.assetbalancingallowance || 0);
@@ -230,7 +249,7 @@ export default async function handler(req, res) {
       if (!Number.isNaN(ba) && ba !== 0) totalBalancingAllowances += ba;
     });
 
-    // 5. Profit calculations
+    // 6. Profit calculations
     const profit = income - allowable;
     let adjustedProfit = profit + disallowable;
 
@@ -242,7 +261,7 @@ export default async function handler(req, res) {
 
     const locked = txs.some((tx) => tx.tax_locked === true);
 
-    // 6. Return summary
+    // 7. Return summary
     return res.status(200).json({
       success: true,
       periodStart,
