@@ -129,7 +129,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Fetch transactions (including COA link)
+    // 1. Fetch transactions joined to COA entries
     const { data: txs, error: fetchError } = await supabaseAdmin
       .from("transactions")
       .select(`
@@ -142,7 +142,13 @@ export default async function handler(req, res) {
         includedinct,
         assetbalancingcharge,
         assetbalancingallowance,
-        coa_id
+        coa_id,
+        chart_of_account_entries:coa_id (
+          account_type,
+          hmrc_bucket,
+          is_control_account,
+          is_bank_account
+        )
       `)
       .eq("client_id", clientId)
       .gte("date", periodStart)
@@ -179,31 +185,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 3. Load COA CT classification for all used coa_ids in one shot
-    const distinctCoaIds = Array.from(
-      new Set(
-        ctTxs
-          .map((tx) => tx.coa_id)
-          .filter((id) => !!id)
-      )
-    );
-
-    let coaMap = new Map();
-
-    if (distinctCoaIds.length > 0) {
-      const { data: coaRows, error: coaError } = await supabaseAdmin
-        .from("chart_of_accounts")
-        .select("id, ct_type")
-        .in("id", distinctCoaIds);
-
-      if (coaError) throw new Error(coaError.message);
-
-      (coaRows || []).forEach((row) => {
-        coaMap.set(row.id, row.ct_type || "ignore");
-      });
-    }
-
-    // 4. Totals
+    // 3. Totals
     let income = 0;
     let allowable = 0;
     let disallowable = 0;
@@ -213,12 +195,38 @@ export default async function handler(req, res) {
 
     const breakdown = [];
 
-    // 5. Classification using COA (not business_category / CT_MAP)
+    // 4. Classification using COA entries (account_type + hmrc_bucket)
     ctTxs.forEach((tx) => {
       const amount = Number(tx.amount || 0);
       const cat = (tx.business_category || "Uncategorised").trim();
+      const coa = tx.chart_of_account_entries;
 
-      const ctType = coaMap.get(tx.coa_id) || "ignore";
+      let ctType = "ignore";
+
+      if (coa) {
+        const isControl = !!coa.is_control_account || !!coa.is_bank_account;
+
+        if (!isControl) {
+          if (coa.account_type === "income") {
+            ctType = "income";
+          } else if (coa.account_type === "expense") {
+            // Adjust these string checks to match your hmrc_bucket_enum values
+            if (
+              coa.hmrc_bucket === "allowable" ||
+              coa.hmrc_bucket === "ALLOWABLE"
+            ) {
+              ctType = "allowable";
+            } else if (
+              coa.hmrc_bucket === "disallowable" ||
+              coa.hmrc_bucket === "DISALLOWABLE"
+            ) {
+              ctType = "disallowable";
+            } else {
+              ctType = "ignore";
+            }
+          }
+        }
+      }
 
       breakdown.push({
         id: tx.id,
@@ -249,7 +257,7 @@ export default async function handler(req, res) {
       if (!Number.isNaN(ba) && ba !== 0) totalBalancingAllowances += ba;
     });
 
-    // 6. Profit calculations
+    // 5. Profit calculations
     const profit = income - allowable;
     let adjustedProfit = profit + disallowable;
 
@@ -261,7 +269,7 @@ export default async function handler(req, res) {
 
     const locked = txs.some((tx) => tx.tax_locked === true);
 
-    // 7. Return summary
+    // 6. Return summary
     return res.status(200).json({
       success: true,
       periodStart,
