@@ -39,8 +39,6 @@
 
 // pages/api/reports.js
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { CT_MAP } from "../../lib/constants/ctMap";
-import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { requireRole } from "../../lib/rbac";
 
 const DEFAULT_PAGE = 1;
@@ -92,21 +90,6 @@ function parseLabelToDate(label) {
 
   return new Date(0);
 }
-
-// Unified allowed category list (same as dashboard/profile)
-const ALLOWED_CATEGORIES = new Set([
-  ...CT_MAP.income,
-  ...CT_MAP.allowable,
-  ...CT_MAP.disallowable,
-  ...CT_MAP.ignore,
-  ...SYSTEM_CATEGORIES,
-  "Uncategorised",
-]);
-
-// Ignore map (CT_MAP.ignore)
-const MAP = {
-  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
-};
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -172,11 +155,26 @@ export default async function handler(req, res) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ Fetch transactions (include includedinct for CT alignment)
+    // ⭐ Fetch transactions WITH COA JOIN (COA is the single source of truth)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(
-        "id, date, description, amount, business_category, type, is_reversal, includedinct"
+        `
+        id,
+        date,
+        description,
+        amount,
+        type,
+        is_reversal,
+        includedinct,
+        includedinvat,
+        coa_id,
+        chart_of_accounts (
+          id,
+          name,
+          type
+        )
+      `
       )
       .eq("client_id", clientId);
 
@@ -199,8 +197,9 @@ export default async function handler(req, res) {
       // Ignore reversals
       if (tx.is_reversal) continue;
 
-      // Respect CT inclusion toggle (Option A)
+      // Respect CT/VAT toggles
       if (tx.includedinct === false) continue;
+      if (tx.includedinvat === false) continue;
 
       const date = new Date(tx.date);
       if (isNaN(date)) continue;
@@ -214,12 +213,14 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      let category = tx.business_category?.trim() || "Uncategorised";
-      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
+      const coa = tx.chart_of_accounts;
+      if (!coa) continue;
 
-      const lower = category.toLowerCase();
-      // Ignore categories mapped to "ignore" (e.g. transfers)
-      if (MAP.ignore.has(lower)) continue;
+      const coaType = (coa.type || "").toLowerCase();
+      const category = coa.name || "Uncategorised";
+
+      // Only income/expense accounts participate in reports
+      if (coaType !== "income" && coaType !== "expense") continue;
 
       const amount = parseFloat(tx.amount || 0);
 
@@ -242,11 +243,16 @@ export default async function handler(req, res) {
 
         const bucket = map[key];
 
-        if (amount >= 0) bucket.revenue += amount;
-        else bucket.expenses += -amount;
+        // COA‑driven classification
+        if (coaType === "income" && amount > 0) {
+          bucket.revenue += amount;
+        } else if (coaType === "expense" && amount < 0) {
+          bucket.expenses += Math.abs(amount);
+        }
 
         bucket.net = bucket.revenue - bucket.expenses;
 
+        // Category totals (signed, for detail)
         bucket.categories[category] =
           (bucket.categories[category] || 0) + amount;
 
@@ -258,6 +264,7 @@ export default async function handler(req, res) {
             : "Unlabeled",
           amount: formatCurrency(tx.amount),
           category,
+          type: tx.type,
         });
       };
 
@@ -298,17 +305,26 @@ export default async function handler(req, res) {
             (tx) =>
               extractClientLabel(tx.description) === clientFilter &&
               !tx.is_reversal &&
-              tx.includedinct !== false
+              tx.includedinct !== false &&
+              tx.includedinvat !== false &&
+              tx.chart_of_accounts &&
+              ["income", "expense"].includes(
+                (tx.chart_of_accounts.type || "").toLowerCase()
+              )
           )
         : transactions.filter(
-            (tx) => !tx.is_reversal && tx.includedinct !== false
+            (tx) =>
+              !tx.is_reversal &&
+              tx.includedinct !== false &&
+              tx.includedinvat !== false &&
+              tx.chart_of_accounts &&
+              ["income", "expense"].includes(
+                (tx.chart_of_accounts.type || "").toLowerCase()
+              )
           )
     ).map((tx) => {
-      let category = tx.business_category?.trim() || "Uncategorised";
-      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
-
-      const lower = category.toLowerCase();
-      if (MAP.ignore.has(lower)) return null;
+      const coa = tx.chart_of_accounts;
+      const category = coa?.name || "Uncategorised";
 
       return {
         id: tx.id,
@@ -318,7 +334,7 @@ export default async function handler(req, res) {
         category,
         type: tx.type,
       };
-    }).filter(Boolean);
+    });
 
     // ⭐ Audit filtered reports
     await supabaseAdmin.from("audit").insert([
