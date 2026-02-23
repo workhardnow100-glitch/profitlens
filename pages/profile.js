@@ -756,9 +756,9 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* HMRC – Sole Trader + Limited Company breakdown */}
+        {/* HMRC  Limited Company breakdown */}
         <div ref={taxReportRef}>
-          <ResponsiveCard title="HMRC – Sole Trader breakdown">
+          <ResponsiveCard title="HMRC – Trader breakdown">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
               <div className="border border-slate-200 rounded p-3">
                 <p className="text-sm text-slate-600">
