@@ -150,27 +150,61 @@ function filterByDateWindow(transactions, from, to) {
 }
 
 // ⭐ Summary uses only HMRC categories (CT_MAP) and excludes system categories
-function computeSummary(transactions) {
+function computeSummary(transactions, coaMap) {
   let income = 0;
   let expenses = 0;
   const categories = {};
 
-  const excluded = new Set([...SYSTEM_CATEGORIES]);
-
-  transactions.forEach((tx) => {
+  for (const tx of transactions) {
     const amount = Number(tx.amount) || 0;
     const category = tx.business_category || "Uncategorised";
 
-    if (excluded.has(category)) return;
+    // 1. Ignore CT_MAP.ignore
+    if (IGNORE_SET.has(category)) continue;
 
-    if (amount > 0) {
+    // 2. COA guardrails
+    const coa = coaMap.get(tx.coa_id);
+    if (!coa) continue;
+
+    const accType = coa.account_type;
+
+    const isControl =
+      coa.hmrc_bucket === "control" ||
+      coa.hmrc_bucket === "system" ||
+      coa.hmrc_bucket === "balance_sheet" ||
+      coa.hmrc_bucket === "equity" ||
+      coa.hmrc_bucket === "liabilities" ||
+      coa.hmrc_bucket === "assets" ||
+      coa.is_control_account ||
+      coa.is_bank_account;
+
+    if (isControl) continue;
+
+    // 3. Respect CT toggle
+    if (tx.includedinct === false) continue;
+
+    // 4. Ignore reversals
+    if (tx.is_reversal) continue;
+
+    const absAmount = Math.abs(amount);
+
+    // 5. Revenue
+    if (INCOME_SET.has(category) && accType === "INCOME" && amount > 0) {
       income += amount;
-    } else if (amount < 0) {
-      const out = Math.abs(amount);
-      expenses += out;
-      categories[category] = (categories[category] || 0) + out;
+      categories[category] = (categories[category] || 0) + absAmount;
+      continue;
     }
-  });
+
+    // 6. Expenses
+    const isExpenseCategory =
+      ALLOWABLE_SET.has(category) || DISALLOWABLE_SET.has(category);
+
+    if (isExpenseCategory && accType === "EXPENSE" && amount < 0) {
+      expenses += absAmount;
+      categories[category] = (categories[category] || 0) + absAmount;
+      continue;
+    }
+  }
 
   return {
     income,
@@ -179,6 +213,7 @@ function computeSummary(transactions) {
     categories,
   };
 }
+
 
 export default async function handler(req, res) {
   const session = await getServerSession(req, res, authOptions);
