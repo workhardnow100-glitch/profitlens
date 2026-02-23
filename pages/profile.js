@@ -71,7 +71,6 @@ export default function ProfilePage() {
   const reportRef = useRef();
   const taxReportRef = useRef();
 
-  // ⭐ FIX: fetchProfile stored in a ref so saveField always calls the latest version
   const fetchProfileRef = useRef(null);
 
   // Access control
@@ -187,7 +186,7 @@ export default function ProfilePage() {
     });
   }, [transactions, selectedYear]);
 
-  // Filtered byMonth
+  // Filtered byMonth (from API, COA-driven)
   const filteredByMonth = useMemo(() => {
     if (!selectedYear) return byMonth || {};
     const result = {};
@@ -201,18 +200,14 @@ export default function ProfilePage() {
     return result;
   }, [byMonth, selectedYear]);
 
-  // Year summary
+  // Year summary (COA / CT-driven via byMonth from API)
   const yearSummary = useMemo(() => {
     let totalIncome = 0;
     let totalExpenses = 0;
 
-    for (const tx of filteredTransactions || []) {
-      const amount = Number(tx.amount || 0);
-      if (amount > 0) {
-        totalIncome += amount;
-      } else if (amount < 0) {
-        totalExpenses += Math.abs(amount);
-      }
+    for (const [monthKey, vals] of Object.entries(filteredByMonth || {})) {
+      totalIncome += Number(vals.income || 0);
+      totalExpenses += Number(vals.expenses || 0);
     }
 
     const netProfit = totalIncome - totalExpenses;
@@ -220,28 +215,26 @@ export default function ProfilePage() {
     const soleTraderTaxRate = 0.2;
     const limitedCompanyTaxRate = 0.19;
 
-    const soleTraderOwed =
-      netProfit > 0 ? netProfit * soleTraderTaxRate : 0;
-    const limitedCompanyOwed =
-      netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0;
-
     return {
       totalIncome,
       totalExpenses,
       netProfit,
       liabilities: {
-        sole_trader: soleTraderOwed,
-        limited_company: limitedCompanyOwed,
+        sole_trader: netProfit > 0 ? netProfit * soleTraderTaxRate : 0,
+        limited_company: netProfit > 0 ? netProfit * limitedCompanyTaxRate : 0,
       },
     };
-  }, [filteredTransactions]);
+  }, [filteredByMonth]);
 
-  // Income / expense aggregations
+  // Income / expense aggregations (respect CT toggle)
   const { incomeByCategory, expensesByCategory } = useMemo(() => {
     const incomeMap = {};
     const expenseMap = {};
 
     for (const tx of filteredTransactions || []) {
+      // Respect CT inclusion toggle
+      if (tx.includedinct === false) continue;
+
       const cat =
         (tx.business_category && tx.business_category.trim()) ||
         "Uncategorised";
@@ -267,12 +260,15 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, expenseView]);
 
-  // HMRC breakdown
+  // HMRC breakdown (respect CT toggle)
   const hmrcBreakdown = useMemo(() => {
     let allowable = 0;
     let disallowable = 0;
 
     for (const tx of filteredTransactions || []) {
+      // Respect CT inclusion toggle
+      if (tx.includedinct === false) continue;
+
       const cat =
         (tx.business_category && tx.business_category.trim()) ||
         "Uncategorised";
@@ -332,6 +328,7 @@ export default function ProfilePage() {
         .filter(
           (tx) =>
             tx.business_category?.trim() === cat &&
+            tx.includedinct !== false &&
             Number(tx.amount || 0) > 0
         )
         .map((tx) => ({
@@ -394,6 +391,8 @@ export default function ProfilePage() {
           const catMatch = tx.business_category?.trim() === cat;
           const isExpense = Number(tx.amount || 0) < 0;
           if (!catMatch || !isExpense) return false;
+
+          if (tx.includedinct === false) return false;
 
           const categoryName =
             (tx.business_category && tx.business_category.trim()) ||
@@ -489,7 +488,7 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
-  // ⭐ saveField now ALWAYS refreshes the page instantly
+  // saveField
   async function saveField(field, value) {
     await fetch("/api/profile", {
       method: "POST",
@@ -571,8 +570,7 @@ export default function ProfilePage() {
     <ResponsiveLayout>
       <div className="p-8" ref={reportRef}>
         <h2 className="text-2xl font-bold text-slate-800">Your Profile</h2>
-        
-                  {/* Global year filter (continued from Part 1) */}
+
         <p className="text-slate-600 mt-2">
           Account details, HMRC categories, and transaction summaries.
         </p>
@@ -641,57 +639,35 @@ export default function ProfilePage() {
 
         {/* Business Profile */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
           {/* Personal Details */}
           <ResponsiveCard title="Personal Details">
             <div className="grid grid-cols-1 gap-4">
-
               <EditableField label="Full Name" value={client?.name} field="name" onSave={saveField} />
-
               <EditableField label="Address" value={client?.address} field="address" onSave={saveField} />
-
               <EditableField label="Postcode" value={client?.postcode} field="postcode" onSave={saveField} />
-
               <EditableField label="Phone Number" value={client?.phone} field="phone" onSave={saveField} />
-
               <EditableField label="Email" value={client?.email} field="email" onSave={saveField} />
-
               <EditableField label="UTR Number" value={client?.utr_number} field="utr_number" onSave={saveField} />
-
             </div>
           </ResponsiveCard>
 
           {/* Business Details */}
           <ResponsiveCard title="Business Details">
             <div className="grid grid-cols-1 gap-4">
-
               <EditableField label="Business Name" value={client?.business_name} field="business_name" onSave={saveField} />
-
               <EditableField label="Trading Name" value={client?.trading_name} field="trading_name" onSave={saveField} />
-
               <EditableField label="Business Type" value={client?.business_type} field="business_type" onSave={saveField} />
-
               <EditableField label="Company Number" value={client?.company_number} field="company_number" onSave={saveField} />
-
               <EditableField label="VAT Number" value={client?.vat_number} field="vat_number" onSave={saveField} />
-
               <EditableField label="Registered Business Address" value={client?.registered_address} field="registered_address" onSave={saveField} />
-
               <EditableField label="Industry" value={client?.industry} field="industry" onSave={saveField} />
-
               <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
-
               <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
-              
               <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
-
               <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
-
               <EditableField label="Notes" value={client?.notes} field="notes" onSave={saveField} />
-
             </div>
           </ResponsiveCard>
-
         </div>
 
         {/* Account info */}
@@ -756,7 +732,7 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* HMRC  Limited Company breakdown */}
+        {/* HMRC Trader / Limited Company breakdown */}
         <div ref={taxReportRef}>
           <ResponsiveCard title="HMRC – Trader breakdown">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
