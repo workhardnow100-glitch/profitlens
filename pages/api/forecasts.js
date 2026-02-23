@@ -32,7 +32,7 @@
  *
  * Change Control:
  *   - Any change to:
- *       • CT_MAP / SYSTEM_CATEGORIES
+ *     
  *       • transaction schema
  *       • forecast logic
  *     MUST be reflected here and in the Forecasts UI.
@@ -43,8 +43,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { CT_MAP } from "../../lib/constants/ctMap";
-import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { requireRole } from "../../lib/rbac";
 
 function formatMonthKey(dateStr) {
@@ -60,22 +58,6 @@ function formatMonthLabel(key) {
     year: "numeric",
   }).format(new Date(Number(year), Number(month) - 1));
 }
-
-const ALLOWED_CATEGORIES = new Set([
-  ...CT_MAP.income,
-  ...CT_MAP.allowable,
-  ...CT_MAP.disallowable,
-  ...CT_MAP.ignore,
-  ...SYSTEM_CATEGORIES,
-  "Uncategorised",
-]);
-
-const MAP = {
-  income: new Set(CT_MAP.income.map((c) => c.toLowerCase())),
-  allowable: new Set(CT_MAP.allowable.map((c) => c.toLowerCase())),
-  disallowable: new Set(CT_MAP.disallowable.map((c) => c.toLowerCase())),
-  ignore: new Set(CT_MAP.ignore.map((c) => c.toLowerCase())),
-};
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -121,10 +103,25 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // ⭐ Fetch transactions (include includedinct)
+    // ⭐ Fetch transactions WITH COA JOIN
     const { data: transactions = [], error } = await supabaseAdmin
       .from("transactions")
-      .select("date, amount, business_category, is_reversal, includedinct")
+      .select(
+        `
+        id,
+        date,
+        amount,
+        is_reversal,
+        includedinct,
+        includedinvat,
+        coa_id,
+        chart_of_accounts (
+          id,
+          name,
+          type
+        )
+      `
+      )
       .eq("client_id", clientId);
 
     if (error) {
@@ -147,44 +144,48 @@ export default async function handler(req, res) {
     const monthly = {};
     const categoriesTotals = {};
 
-    for (const cat of ALLOWED_CATEGORIES) {
-      categoriesTotals[cat] = { revenue: 0, expenses: 0 };
-    }
-
-    // ⭐ Process transactions (CT‑aligned)
+    // ⭐ Process transactions (FULL COA ENGINE)
     for (const tx of transactions) {
       if (tx.is_reversal) continue;
 
-      // Respect CT toggle
+      // Respect CT/VAT toggles
       if (tx.includedinct === false) continue;
+      if (tx.includedinvat === false) continue;
 
       const key = formatMonthKey(tx.date);
       if (!key) continue;
 
-      const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
+      const amount = Number(tx.amount || 0);
 
-      let category = tx.business_category?.trim() || "Uncategorised";
-      if (!ALLOWED_CATEGORIES.has(category)) category = "Uncategorised";
+      const coa = tx.chart_of_accounts;
+      if (!coa) continue;
 
-      const lower = category.toLowerCase();
+      const type = coa.type?.toLowerCase();
 
-      // Ignore transfers, personal, system categories
-      if (MAP.ignore.has(lower)) continue;
+      // Ignore non-income/expense accounts
+      if (type !== "income" && type !== "expense") continue;
 
       if (!monthly[key]) monthly[key] = { revenue: 0, expenses: 0 };
 
-      // ⭐ NEW: Only treat as revenue if CT category is income
-      if (amount > 0 && MAP.income.has(lower)) {
+      // ⭐ COA-driven classification
+      if (type === "income" && amount > 0) {
         monthly[key].revenue += amount;
-        categoriesTotals[category].revenue += amount;
+
+        if (!categoriesTotals[coa.name])
+          categoriesTotals[coa.name] = { revenue: 0, expenses: 0 };
+
+        categoriesTotals[coa.name].revenue += amount;
       }
-      // ⭐ NEW: Only treat as expenses if CT category is allowable/disallowable
-      else if (amount < 0 && (MAP.allowable.has(lower) || MAP.disallowable.has(lower))) {
+
+      if (type === "expense" && amount < 0) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
-        categoriesTotals[category].expenses += abs;
+
+        if (!categoriesTotals[coa.name])
+          categoriesTotals[coa.name] = { revenue: 0, expenses: 0 };
+
+        categoriesTotals[coa.name].expenses += abs;
       }
-      // Anything else (e.g. mis‑mapped positives, weird categories) is ignored
     }
 
     // ⭐ Build forecast series
@@ -194,6 +195,7 @@ export default async function handler(req, res) {
     const expenses = keys.map((k) => monthly[k].expenses);
     const net = revenue.map((r, i) => r - expenses[i]);
 
+    // ⭐ Forecast = average of last 3 months
     const recentRevenue = revenue.slice(-3);
     const recentExpenses = expenses.slice(-3);
 
@@ -209,14 +211,14 @@ export default async function handler(req, res) {
 
     const avgNet = avgRevenue - avgExpenses;
 
-    const categories = Object.entries(categoriesTotals)
-      .filter(([name]) => !MAP.ignore.has(name.toLowerCase()))
-      .map(([name, vals]) => ({
+    const categories = Object.entries(categoriesTotals).map(
+      ([name, vals]) => ({
         name,
         revenue: `£${vals.revenue.toFixed(2)}`,
         expenses: `£${vals.expenses.toFixed(2)}`,
         net: `£${(vals.revenue - vals.expenses).toFixed(2)}`,
-      }));
+      })
+    );
 
     return res.status(200).json({
       forecast: [
