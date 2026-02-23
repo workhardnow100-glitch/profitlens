@@ -92,15 +92,18 @@ function parseLabelToDate(label) {
   return new Date(0);
 }
 
-// ⭐ Map HMRC bucket → CT_MAP label
-function mapBucketToLabel(bucket) {
-  if (!bucket) return "Uncategorised";
+// Map HMRC bucket → CT_MAP-style label (fallback to bucket)
+function mapBucketToLabel(bucket, accType) {
+  if (!bucket) return accType === "INCOME" ? "income" : "expenses";
 
   const lower = bucket.toLowerCase();
+  const income = CT_MAP.income.map((x) => x.toLowerCase());
+  const allowable = CT_MAP.allowable.map((x) => x.toLowerCase());
+  const disallowable = CT_MAP.disallowable.map((x) => x.toLowerCase());
 
-  if (CT_MAP.income.includes(bucket)) return bucket;
-  if (CT_MAP.allowable.includes(bucket)) return bucket;
-  if (CT_MAP.disallowable.includes(bucket)) return bucket;
+  if (income.includes(lower)) return bucket;
+  if (allowable.includes(lower)) return bucket;
+  if (disallowable.includes(lower)) return bucket;
 
   return bucket;
 }
@@ -111,7 +114,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ⭐ RBAC
+    // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
     const guard = await requireRole(req, res, [
       "USER",
       "ACCOUNTANT",
@@ -146,13 +149,15 @@ export default async function handler(req, res) {
       client: clientFilter,
     } = req.query;
 
-    // ⭐ Audit log
+    // ⭐ Audit log (view)
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
-        details: `Viewed reports`,
+        details: `Viewed reports (from=${from}, to=${to}, clientFilter=${
+          clientFilter || "none"
+        })`,
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -164,7 +169,7 @@ export default async function handler(req, res) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ 1) Fetch transactions (MATCH DASHBOARD EXACTLY)
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD SELECT)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(
@@ -197,7 +202,7 @@ export default async function handler(req, res) {
 
     const txs = transactions ?? [];
 
-    // ⭐ 2) Build COA map (MATCH DASHBOARD EXACTLY)
+    // ⭐ 2) Build COA map (MATCH DASHBOARD)
     const distinctCoaIds = Array.from(
       new Set(txs.map((t) => t.coa_id).filter(Boolean))
     );
@@ -227,11 +232,11 @@ export default async function handler(req, res) {
     const clientSet = new Set();
     const categorySet = new Set();
 
-    // ⭐ 3) COA‑driven maths (MATCH DASHBOARD EXACTLY)
+    // ⭐ 3) COA‑driven maths (aligned with dashboard)
     for (const tx of txs) {
       if (tx.is_reversal) continue;
 
-      // ⭐ Dashboard rule: only includedinct matters
+      // Dashboard rule: only CT toggle matters
       if (tx.includedinct === false) continue;
 
       const date = new Date(tx.date);
@@ -251,7 +256,6 @@ export default async function handler(req, res) {
 
       const accType = (coa.account_type || "").toUpperCase();
 
-      // ⭐ Ignore control/bank/balance sheet accounts
       const isControl =
         coa.is_control_account ||
         coa.is_bank_account ||
@@ -260,7 +264,6 @@ export default async function handler(req, res) {
 
       if (isControl) continue;
 
-      // ⭐ Only INCOME / EXPENSE accounts
       if (accType !== "INCOME" && accType !== "EXPENSE") continue;
 
       const amount = Number(tx.amount || 0);
@@ -268,10 +271,9 @@ export default async function handler(req, res) {
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
-      // ⭐ Category label = CT_MAP bucket label
-      const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-      const categoryLabel = mapBucketToLabel(bucket);
-
+      const bucket =
+        coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+      const categoryLabel = mapBucketToLabel(bucket, accType);
       categorySet.add(categoryLabel);
 
       const addTo = (map, key) => {
@@ -288,6 +290,7 @@ export default async function handler(req, res) {
 
         const bucketObj = map[key];
 
+        // Dashboard-style maths
         if (accType === "INCOME" && amount > 0) {
           bucketObj.revenue += amount;
         } else if (accType === "EXPENSE" && amount < 0) {
@@ -296,13 +299,16 @@ export default async function handler(req, res) {
 
         bucketObj.net = bucketObj.revenue - bucketObj.expenses;
 
+        // Category totals (signed, for detail)
         bucketObj.categories[categoryLabel] =
-          (bucketObj.categories[categoryLabel] || 0) + Math.abs(amount);
+          (bucketObj.categories[categoryLabel] || 0) + amount;
 
         bucketObj.transactions.push({
           id: tx.id,
           date: tx.date,
-          description: tx.description || "",
+          description: tx.description
+            ? String(tx.description).trim()
+            : "Unlabeled",
           amount: formatCurrency(tx.amount),
           category: categoryLabel,
           type: tx.type,
@@ -355,7 +361,6 @@ export default async function handler(req, res) {
             .includes((coa.hmrc_bucket || "").toLowerCase());
 
         if (isControl) return false;
-
         if (tx.includedinct === false) return false;
         if (tx.is_reversal) return false;
 
@@ -367,8 +372,9 @@ export default async function handler(req, res) {
       .map((tx) => {
         const coa = coaMap.get(tx.coa_id);
         const accType = (coa.account_type || "").toUpperCase();
-        const bucket = coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
-        const categoryLabel = mapBucketToLabel(bucket);
+        const bucket =
+          coa.hmrc_bucket || (accType === "INCOME" ? "income" : "expenses");
+        const categoryLabel = mapBucketToLabel(bucket, accType);
 
         return {
           id: tx.id,
@@ -386,7 +392,9 @@ export default async function handler(req, res) {
         client_id: clientId,
         actor_email: req.session?.user?.email || "unknown",
         action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
-        details: `Filtered reports`,
+        details: `Filtered reports (from=${from}, to=${to}, clientFilter=${
+          clientFilter || "none"
+        })`,
         timestamp: new Date().toISOString(),
       },
     ]);
