@@ -39,7 +39,7 @@ export default function BalanceSheetPage() {
     isCompare: boolean;
   } | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showHelp, setShowHelp] = useState(false); // mobile help panel
+  const [showHelp, setShowHelp] = useState(false);
   const [newLine, setNewLine] = useState({
     section: "assets",
     subsection: "non_current",
@@ -283,14 +283,6 @@ export default function BalanceSheetPage() {
         </aside>
       </div>
 
-      {/* Mobile help button */}
-      <button
-        className="lg:hidden fixed bottom-4 right-4 z-30 px-4 py-2 rounded-full bg-blue-600 text-white shadow-lg"
-        onClick={() => setShowHelp(true)}
-      >
-        ?
-      </button>
-
       {/* Mobile slide-out guidance panel */}
       {showHelp && (
         <div className="lg:hidden fixed inset-0 z-40">
@@ -323,6 +315,14 @@ export default function BalanceSheetPage() {
           onClose={() => setShowAddModal(false)}
         />
       )}
+
+      {/* Mobile help button */}
+      <button
+        className="lg:hidden fixed bottom-4 right-4 z-30 px-4 py-2 rounded-full bg-blue-600 text-white shadow-lg"
+        onClick={() => setShowHelp(true)}
+      >
+        ?
+      </button>
     </div>
   );
 }
@@ -406,6 +406,7 @@ function GuidancePanel({ innerOnly }: { innerOnly?: boolean }) {
             <li>Bank loan</li>
             <li>Director’s loan</li>
             <li>Retained earnings</li>
+            <li>Accumulated depreciation (negative balance under Non‑Current Assets)</li>
           </ul>
           <p className="mt-1">
             Each line should represent a group of accounts or a single key
@@ -471,6 +472,17 @@ function GuidancePanel({ innerOnly }: { innerOnly?: boolean }) {
           </ul>
           <p className="mt-1">
             → Assets down £1,000, Liabilities down £1,000.
+          </p>
+        </li>
+        <li>
+          <strong>Post £3,000 depreciation on plant &amp; machinery:</strong>
+          <ul className="list-disc list-inside ml-4 mt-1 space-y-1">
+            <li>Debit Depreciation Expense £3,000</li>
+            <li>Credit Accumulated Depreciation £3,000</li>
+          </ul>
+          <p className="mt-1">
+            → Net book value of assets down £3,000, Equity down £3,000 via the
+            P&amp;L.
           </p>
         </li>
       </ul>
@@ -767,6 +779,57 @@ function TotalRow({ label, value }: any) {
 }
 
 function AddModal({ newLine, setNewLine, onSave, onClose }: any) {
+  // Quick templates including depreciation
+  const templates = (() => {
+    if (newLine.section === "assets" && newLine.subsection === "non_current") {
+      return [
+        "",
+        "Property, plant and equipment",
+        "Motor vehicles",
+        "Computer equipment",
+        "Accumulated depreciation",
+        "Net book value of fixed assets",
+      ];
+    }
+    if (newLine.section === "assets" && newLine.subsection === "current") {
+      return [
+        "",
+        "Cash at bank",
+        "Trade debtors",
+        "VAT receivable",
+        "Prepayments",
+        "Stock",
+      ];
+    }
+    if (newLine.section === "liabilities" && newLine.subsection === "non_current") {
+      return [
+        "",
+        "Bank loan",
+        "HP / finance agreements",
+        "Director’s loan (long‑term)",
+      ];
+    }
+    if (newLine.section === "liabilities" && newLine.subsection === "current") {
+      return [
+        "",
+        "Trade creditors",
+        "VAT payable",
+        "Accruals",
+        "Short‑term loans",
+      ];
+    }
+    if (newLine.section === "equity") {
+      return [
+        "",
+        "Share capital",
+        "Retained earnings",
+        "Other reserves",
+        "Depreciation charge (via P&L)",
+      ];
+    }
+    return [""];
+  })();
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded shadow-lg w-96">
@@ -776,7 +839,17 @@ function AddModal({ newLine, setNewLine, onSave, onClose }: any) {
         <select
           className="w-full border p-2 mb-3"
           value={newLine.section}
-          onChange={(e) => setNewLine({ ...newLine, section: e.target.value })}
+          onChange={(e) =>
+            setNewLine({
+              ...newLine,
+              section: e.target.value,
+              // reset subsection sensibly when switching to equity
+              subsection:
+                e.target.value === "equity"
+                  ? undefined
+                  : newLine.subsection || "non_current",
+            })
+          }
         >
           <option value="assets">Assets</option>
           <option value="liabilities">Liabilities</option>
@@ -796,11 +869,35 @@ function AddModal({ newLine, setNewLine, onSave, onClose }: any) {
           <option value="current">Current</option>
         </select>
 
+        <label className="block mb-2 text-sm">Quick template (optional)</label>
+        <select
+          className="w-full border p-2 mb-3 text-sm"
+          value={templates.includes(newLine.label) ? newLine.label : ""}
+          onChange={(e) =>
+            setNewLine({
+              ...newLine,
+              label: e.target.value,
+            })
+          }
+        >
+          {templates.map((t) => (
+            <option key={t || "blank"} value={t}>
+              {t === "" ? "— Select a template —" : t}
+            </option>
+          ))}
+        </select>
+
         <label className="block mb-2 text-sm">Label</label>
         <input
           className="w-full border p-2 mb-3"
           value={newLine.label}
           onChange={(e) => setNewLine({ ...newLine, label: e.target.value })}
+          placeholder={
+            newLine.section === "assets" &&
+            newLine.subsection === "non_current"
+              ? "e.g. Accumulated depreciation"
+              : "e.g. Cash at bank"
+          }
         />
 
         <label className="block mb-2 text-sm">Amount</label>
@@ -811,7 +908,18 @@ function AddModal({ newLine, setNewLine, onSave, onClose }: any) {
           onChange={(e) =>
             setNewLine({ ...newLine, amount: Number(e.target.value) })
           }
+          placeholder={
+            newLine.label.toLowerCase().includes("accumulated depreciation")
+              ? "Enter as a negative balance (e.g. -3000)"
+              : "e.g. 20000"
+          }
         />
+
+        <p className="text-xs text-slate-500 mb-4">
+          For <strong>Accumulated depreciation</strong>, enter the balance as a{" "}
+          <strong>negative number</strong> so it reduces the net book value of
+          your fixed assets.
+        </p>
 
         <div className="flex justify-end gap-2">
           <button className="px-4 py-2" onClick={onClose}>
