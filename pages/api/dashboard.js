@@ -2,36 +2,15 @@
  * ============================================================
  * File: pages/api/dashboard.js
  * Purpose:
- *   Provide cockpit-grade dashboard data for a specific client:
+ *   COA-driven cockpit dashboard for a specific client:
  *     - Category updates (PATCH)
  *     - Bulk transaction deletion (DELETE)
  *     - Dashboard metrics + recent transactions (GET)
  *
- * Security / RBAC / SOC2 Notes:
- *   - Methods: GET, PATCH, DELETE only.
- *   - Authentication:
- *       • Uses requireRole() to enforce USER / ACCOUNTANT / ADMIN / FOUNDER.
- *   - RBAC:
- *       • ACCOUNTANT:
- *           – May READ dashboard data.
- *           – May NOT modify or delete transactions.
- *       • USER:
- *           – May READ + MODIFY + DELETE their own client’s data.
- *       • FOUNDER:
- *           – May act on any client via actingAsClientId/clientId.
- *   - Subscription gating:
- *       • USER must be subscribed/trialing to access dashboard.
- *       • ACCOUNTANT + FOUNDER bypass subscription gating.
- *   - Data handling:
- *       • All operations are client-scoped via client_id.
- *   - Audit logging:
- *       • Logs category updates, deletions, and dashboard fetches.
- *
- * Change Control:
- *   - Any change to:
- *       • CT_MAP / SYSTEM_CATEGORIES
- *       • transaction schema
- *     MUST be reflected here and in the Dashboard UI.
+ * Notes:
+ *   - UI still shows transaction.business_category (user-facing)
+ *   - All calculations use COA + HMRC buckets + toggles
+ *   - Mirrors CT/VAT logic: ignores transfers, loans, bank, control, BS
  * ============================================================
  */
 import { supabaseAdmin } from "../../lib/supabase-admin";
@@ -50,15 +29,23 @@ const ALLOWED_CATEGORIES = new Set([
 
 export default async function handler(req, res) {
   // ⭐ RBAC: USER, ACCOUNTANT, ADMIN, FOUNDER
-  const guard = await requireRole(req, res, ["USER", "ACCOUNTANT", "ADMIN", "FOUNDER"]);
+  const guard = await requireRole(req, res, [
+    "USER",
+    "ACCOUNTANT",
+    "ADMIN",
+    "FOUNDER",
+  ]);
   if (!guard.ok) return;
 
   const role = guard.role;
   const isFounder = role === "FOUNDER";
   const isAccountant = role === "ACCOUNTANT";
 
-  const subscriptionStatus = req?.session?.user?.subscriptionStatus || "incomplete";
-  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
+  const subscriptionStatus =
+    req?.session?.user?.subscriptionStatus || "incomplete";
+  const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+    subscriptionStatus
+  );
 
   // ⭐ Subscription gating (accountants + founders bypass)
   if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
@@ -68,7 +55,6 @@ export default async function handler(req, res) {
   // ⭐ Accountant-aware client ID
   const clientId = guard.actingAsClientId || guard.clientId;
 
-  // Everyone, including founders, must have a valid clientId for this endpoint
   if (!clientId || clientId === "unknown-client") {
     return res.status(400).json({ error: "Invalid client ID" });
   }
@@ -105,7 +91,9 @@ export default async function handler(req, res) {
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant ? "ACCOUNTANT_UPDATE_CATEGORY" : "UPDATE_CATEGORY",
+          action: isAccountant
+            ? "ACCOUNTANT_UPDATE_CATEGORY"
+            : "UPDATE_CATEGORY",
           details: `Updated transaction ${id} category to ${category}`,
           timestamp: new Date().toISOString(),
         },
@@ -138,7 +126,9 @@ export default async function handler(req, res) {
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant ? "ACCOUNTANT_DELETE_TRANSACTIONS" : "DELETE_TRANSACTIONS",
+          action: isAccountant
+            ? "ACCOUNTANT_DELETE_TRANSACTIONS"
+            : "DELETE_TRANSACTIONS",
           details: `Deleted ${count} transactions`,
           timestamp: new Date().toISOString(),
         },
@@ -152,25 +142,66 @@ export default async function handler(req, res) {
   }
 
   /* -------------------------------------------------------
-     ⭐ GET — dashboard data (everyone allowed)
+     ⭐ GET — COA-driven dashboard data
   ------------------------------------------------------- */
   if (req.method === "GET") {
     try {
+      // 1) Fetch transactions with COA + toggles
       const { data: transactions, error } = await supabaseAdmin
         .from("transactions")
         .select(
-          "id, date, amount, description, business_category, account_number, sort_code, storage_path, type, is_reversal"
+          `
+          id,
+          date,
+          amount,
+          description,
+          business_category,
+          account_number,
+          sort_code,
+          storage_path,
+          type,
+          is_reversal,
+          coa_id,
+          includedinct,
+          includedinvat
+        `
         )
         .eq("client_id", clientId)
         .order("date", { ascending: false });
 
       if (error) throw error;
 
+      const txs = transactions ?? [];
+
+      // 2) Build COA map
+      const distinctCoaIds = Array.from(
+        new Set(txs.map((t) => t.coa_id).filter(Boolean))
+      );
+
+      const coaMap = new Map();
+      if (distinctCoaIds.length > 0) {
+        const { data: coaRows, error: coaErr } = await supabaseAdmin
+          .from("chart_of_account_entries")
+          .select(
+            "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+          )
+          .in("id", distinctCoaIds);
+
+        if (coaErr) throw coaErr;
+        (coaRows || []).forEach((row) => {
+          coaMap.set(row.id, row);
+        });
+      }
+
+      // 3) Aggregations
       const monthly = {};
       const recent = [];
-      const categoryBreakdown = {};
+      const categoryBreakdown = {}; // HMRC-bucket-based, but we still expose user categories separately
 
-      for (const tx of transactions ?? []) {
+      let totalRevenue = 0;
+      let totalExpenses = 0;
+
+      for (const tx of txs) {
         if (tx.is_reversal) continue;
 
         const date = new Date(tx.date);
@@ -184,43 +215,84 @@ export default async function handler(req, res) {
           monthly[monthKey] = { revenue: 0, expenses: 0 };
         }
 
-        const amount = tx.amount !== null ? parseFloat(tx.amount) : 0;
-        const category = tx.business_category?.trim() || "Uncategorised";
+        const amount = tx.amount !== null ? Number(tx.amount) : 0;
 
-        if (!categoryBreakdown[category]) categoryBreakdown[category] = 0;
+        // UI category (user-facing)
+        const uiCategory = tx.business_category?.trim() || "Uncategorised";
 
+        // Recent list: keep user category for UI
         recent.push({
           id: tx.id,
           date: date.toISOString().slice(0, 10),
           amount,
           description: tx.description || "",
-          business_category: category,
+          business_category: uiCategory,
           accountNumber: tx.account_number || "-",
           sortCode: tx.sort_code || "-",
           storagePath: tx.storage_path || null,
         });
 
-        if (amount > 0) {
+        // COA-driven classification for maths
+        const coa = coaMap.get(tx.coa_id);
+        if (!coa) continue;
+
+        const bucket = coa.hmrc_bucket;
+        const accType = coa.account_type;
+
+        const isControl =
+          bucket === "control" ||
+          bucket === "system" ||
+          bucket === "balance_sheet" ||
+          bucket === "equity" ||
+          bucket === "liabilities" ||
+          bucket === "assets" ||
+          coa.is_control_account ||
+          coa.is_bank_account;
+
+        if (isControl) continue;
+
+        // Respect CT/VAT toggles for dashboard maths
+        // (you can relax this if you want dashboard to be "all activity")
+        const includeForProfit = tx.includedinct !== false; // default true
+        if (!includeForProfit) continue;
+
+        const absAmount = Math.abs(amount);
+
+        // Revenue: INCOME accounts, positive amounts
+        if (accType === "INCOME" && amount > 0) {
+          totalRevenue += amount;
           monthly[monthKey].revenue += amount;
-        } else if (amount < 0) {
-          monthly[monthKey].expenses += -amount;
-          categoryBreakdown[category] += -amount;
+
+          // Bucket-based breakdown (e.g. "trading_income", "other_income")
+          const key = bucket || "income";
+          if (!categoryBreakdown[key]) categoryBreakdown[key] = 0;
+          categoryBreakdown[key] += absAmount;
+        }
+
+        // Expenses: EXPENSE accounts, negative amounts
+        if (accType === "EXPENSE" && amount < 0) {
+          totalExpenses += absAmount;
+          monthly[monthKey].expenses += absAmount;
+
+          const key = bucket || "expenses";
+          if (!categoryBreakdown[key]) categoryBreakdown[key] = 0;
+          categoryBreakdown[key] += absAmount;
         }
       }
 
       const months = Object.keys(monthly).sort();
-      const revenue = months.map((m) => monthly[m].revenue);
-      const expenses = months.map((m) => monthly[m].expenses);
-      const totalRevenue = revenue.reduce((a, b) => a + b, 0);
-      const totalExpenses = expenses.reduce((a, b) => a + b, 0);
+      const revenueSeries = months.map((m) => monthly[m].revenue);
+      const expensesSeries = months.map((m) => monthly[m].expenses);
       const netProfit = totalRevenue - totalExpenses;
 
       await supabaseAdmin.from("audit").insert([
         {
           client_id: clientId,
           actor_email: req.session?.user?.email || "unknown",
-          action: isAccountant ? "ACCOUNTANT_FETCH_DASHBOARD" : "FETCH_DASHBOARD",
-          details: `Returned ${transactions?.length ?? 0} transactions`,
+          action: isAccountant
+            ? "ACCOUNTANT_FETCH_DASHBOARD"
+            : "FETCH_DASHBOARD",
+          details: `Returned ${txs.length} transactions (COA-driven dashboard)`,
           timestamp: new Date().toISOString(),
         },
       ]);
@@ -231,9 +303,9 @@ export default async function handler(req, res) {
           { label: "Total Expenses", value: totalExpenses.toFixed(2) },
           { label: "Net Profit", value: netProfit.toFixed(2) },
         ],
-        series: { months, revenue, expenses },
+        series: { months, revenue: revenueSeries, expenses: expensesSeries },
         recent,
-        breakdown: categoryBreakdown,
+        breakdown: categoryBreakdown, // HMRC/COA-based breakdown
         categories: Object.keys(categoryBreakdown),
       });
     } catch (err) {
