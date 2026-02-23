@@ -1,24 +1,21 @@
-///
-
-
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
 import { CT_MAP } from "../../lib/constants/ctMap";
 
-// ✅ Build a single unified allowed category list
+// ✅ Unified allowed category list (UI dropdown)
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
   ...CT_MAP.allowable,
   ...CT_MAP.disallowable,
   ...CT_MAP.ignore,
+  ...CT_MAP.other_income,   // ⭐ Asset Sale Proceeds now selectable
   ...SYSTEM_CATEGORIES,
   "Uncategorised",
 ]);
 
-
-// ✅ System-only inference (safe)
+// ⭐ System-only inference (safe)
 function inferSystemCategory(type = "", description = "") {
   const normalizedType = type?.trim().toUpperCase() || "";
   const desc = description?.toLowerCase?.() || "";
@@ -152,7 +149,7 @@ function filterByDateWindow(transactions, from, to) {
   });
 }
 
-// ✅ Summary uses only HMRC categories (CT_MAP) and excludes system categories
+// ⭐ Summary uses only HMRC categories (CT_MAP) and excludes system categories
 function computeSummary(transactions) {
   let income = 0;
   let expenses = 0;
@@ -197,7 +194,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Upgrade required" });
   }
 
-  // ✅ Accountant-aware client ID
+  // ⭐ Accountant-aware client ID
   const clientId =
     session.user.actingAsClientId || session.user.clientId;
 
@@ -208,7 +205,7 @@ export default async function handler(req, res) {
   const { period = "month", from: fromParam, to: toParam } = req.query;
 
   try {
-    // ✅ AUDIT LOG — Accountant viewing transactions
+    // ⭐ AUDIT LOG — Accountant viewing transactions
     if (session.user.role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
@@ -231,11 +228,12 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: error.message });
     }
 
-    // Enrich with HMRC-aligned categories only
+    // ⭐ Enrich with HMRC-aligned categories only
     const enriched = (data || []).map((tx) => {
       let category = tx.business_category?.trim() || null;
 
-      if (category && !ALLOWED_BUSINESS_CATEGORIES.has(category)) {
+      // ⭐ FIXED: use ALLOWED_CATEGORIES (not ALLOWED_BUSINESS_CATEGORIES)
+      if (category && !ALLOWED_CATEGORIES.has(category)) {
         category = "Uncategorised";
       }
 
@@ -267,7 +265,7 @@ export default async function handler(req, res) {
     const filtered = filterByDateWindow(enriched, from, to);
     const summary = computeSummary(filtered);
 
-    // AUDIT LOG — Accountant filtered view
+    // ⭐ AUDIT LOG — Accountant filtered view
     if (session.user.role === "accountant") {
       await supabaseAdmin.from("audit").insert([
         {
