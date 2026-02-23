@@ -155,25 +155,24 @@ export default async function handler(req, res) {
       ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
     };
 
-    // ⭐ Fetch transactions WITH COA JOIN (COA is the single source of truth)
+    // ⭐ 1) Fetch transactions (MATCH DASHBOARD SELECT)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(
         `
         id,
         date,
-        description,
         amount,
+        description,
+        business_category,
+        account_number,
+        sort_code,
+        storage_path,
         type,
         is_reversal,
-        includedinct,
-        includedinvat,
         coa_id,
-        chart_of_accounts (
-          id,
-          name,
-          type
-        )
+        includedinct,
+        includedinvat
       `
       )
       .eq("client_id", clientId);
@@ -187,17 +186,41 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "Failed to fetch transactions" });
     }
 
+    const txs = transactions ?? [];
+
+    // ⭐ 2) Build COA map (MATCH DASHBOARD)
+    const distinctCoaIds = Array.from(
+      new Set(txs.map((t) => t.coa_id).filter(Boolean))
+    );
+
+    const coaMap = new Map();
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaErr } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select(
+          "id, account_type, hmrc_bucket, is_control_account, is_bank_account"
+        )
+        .in("id", distinctCoaIds);
+
+      if (coaErr) {
+        console.error("Reports API: COA fetch error", coaErr);
+        return res.status(500).json({ error: "Failed to fetch COA" });
+      }
+
+      (coaRows || []).forEach((row) => {
+        coaMap.set(row.id, row);
+      });
+    }
+
     const monthly = {};
     const quarterly = {};
     const yearly = {};
     const clientSet = new Set();
     const categorySet = new Set();
 
-    for (const tx of transactions) {
-      // Ignore reversals
+    // ⭐ 3) COA‑driven maths (aligned with dashboard)
+    for (const tx of txs) {
       if (tx.is_reversal) continue;
-
-      // Respect CT/VAT toggles
       if (tx.includedinct === false) continue;
       if (tx.includedinvat === false) continue;
 
@@ -213,20 +236,28 @@ export default async function handler(req, res) {
 
       const clientLabel = extractClientLabel(tx.description);
 
-      const coa = tx.chart_of_accounts;
+      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
       if (!coa) continue;
 
-      const coaType = (coa.type || "").toLowerCase();
-      const category = coa.name || "Uncategorised";
+      const accType = (coa.account_type || "").toUpperCase();
 
-      // Only income/expense accounts participate in reports
-      if (coaType !== "income" && coaType !== "expense") continue;
+      const isControl =
+        coa.is_control_account ||
+        coa.is_bank_account ||
+        ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
+          .includes((coa.hmrc_bucket || "").toLowerCase());
 
-      const amount = parseFloat(tx.amount || 0);
+      if (isControl) continue;
+
+      // Only INCOME / EXPENSE accounts
+      if (accType !== "INCOME" && accType !== "EXPENSE") continue;
+
+      const amount = Number(tx.amount || 0);
 
       if (amount > 0) clientSet.add(clientLabel);
       if (clientFilter && clientLabel !== clientFilter) continue;
 
+      const category = coa.hmrc_bucket || coa.account_type || `COA ${coa.id}`;
       categorySet.add(category);
 
       const addTo = (map, key) => {
@@ -243,16 +274,14 @@ export default async function handler(req, res) {
 
         const bucket = map[key];
 
-        // COA‑driven classification
-        if (coaType === "income" && amount > 0) {
+        if (accType === "INCOME" && amount > 0) {
           bucket.revenue += amount;
-        } else if (coaType === "expense" && amount < 0) {
+        } else if (accType === "EXPENSE" && amount < 0) {
           bucket.expenses += Math.abs(amount);
         }
 
         bucket.net = bucket.revenue - bucket.expenses;
 
-        // Category totals (signed, for detail)
         bucket.categories[category] =
           (bucket.categories[category] || 0) + amount;
 
@@ -301,30 +330,50 @@ export default async function handler(req, res) {
 
     const returnedTxs = (
       clientFilter
-        ? transactions.filter(
-            (tx) =>
-              extractClientLabel(tx.description) === clientFilter &&
+        ? txs.filter((tx) => {
+            const clientLabel = extractClientLabel(tx.description);
+            const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+            const accType = (coa?.account_type || "").toUpperCase();
+
+            const isControl =
+              coa?.is_control_account ||
+              coa?.is_bank_account ||
+              ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
+                .includes((coa?.hmrc_bucket || "").toLowerCase());
+
+            return (
+              clientLabel === clientFilter &&
               !tx.is_reversal &&
               tx.includedinct !== false &&
               tx.includedinvat !== false &&
-              tx.chart_of_accounts &&
-              ["income", "expense"].includes(
-                (tx.chart_of_accounts.type || "").toLowerCase()
-              )
-          )
-        : transactions.filter(
-            (tx) =>
+              coa &&
+              !isControl &&
+              (accType === "INCOME" || accType === "EXPENSE")
+            );
+          })
+        : txs.filter((tx) => {
+            const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+            const accType = (coa?.account_type || "").toUpperCase();
+
+            const isControl =
+              coa?.is_control_account ||
+              coa?.is_bank_account ||
+              ["control", "system", "balance_sheet", "equity", "liabilities", "assets"]
+                .includes((coa?.hmrc_bucket || "").toLowerCase());
+
+            return (
               !tx.is_reversal &&
               tx.includedinct !== false &&
               tx.includedinvat !== false &&
-              tx.chart_of_accounts &&
-              ["income", "expense"].includes(
-                (tx.chart_of_accounts.type || "").toLowerCase()
-              )
-          )
+              coa &&
+              !isControl &&
+              (accType === "INCOME" || accType === "EXPENSE")
+            );
+          })
     ).map((tx) => {
-      const coa = tx.chart_of_accounts;
-      const category = coa?.name || "Uncategorised";
+      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
+      const category =
+        coa?.hmrc_bucket || coa?.account_type || `COA ${coa?.id || "?"}`;
 
       return {
         id: tx.id,
