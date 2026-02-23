@@ -1,13 +1,11 @@
 // pages/reports.js
 
-
 // ❗ THIS is the real fix — forces SSR and disables static generation
 export async function getServerSideProps() {
   return { props: {} };
 }
 
-
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/router";
@@ -162,29 +160,16 @@ export default function Reports() {
     }
   }
 
-  // ✅ Chart: Income vs Expenses vs Net
+  // ⭐ FIXED CHART: Income vs Expenses vs Net Profit
   const timeSeriesOptions = useMemo(() => {
     if (!filteredReports.length) return null;
 
     const labels = filteredReports.map((r) => r.label);
 
-    const income = filteredReports.map((r) =>
-      (r.categories || []).reduce(
-        (sum, c) => sum + (Number(c.amount || 0) > 0 ? Number(c.amount) : 0),
-        0
-      )
-    );
-
-    const expenses = filteredReports.map((r) =>
-      (r.categories || []).reduce(
-        (sum, c) =>
-          sum +
-          (Number(c.amount || 0) < 0 ? Math.abs(Number(c.amount || 0)) : 0),
-        0
-      )
-    );
-
-    const net = income.map((inc, i) => inc - expenses[i]);
+    // ⭐ Use API values directly — accountant‑grade
+    const income = filteredReports.map((r) => Number(r.revenue || 0));
+    const expenses = filteredReports.map((r) => Number(r.expenses || 0));
+    const net = filteredReports.map((r) => Number(r.net || 0));
 
     return {
       chart: { type: "spline", height: 320 },
