@@ -224,7 +224,7 @@ export default async function handler(req, res) {
         categoriesTotals[categoryLabel].revenue += amount;
       }
 
-      if( accType === "EXPENSE" && amount < 0) {
+      if (accType === "EXPENSE" && amount < 0) {
         const abs = Math.abs(amount);
         monthly[key].expenses += abs;
         categoriesTotals[categoryLabel].expenses += abs;
