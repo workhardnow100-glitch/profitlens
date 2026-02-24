@@ -30,26 +30,39 @@ export type BSStructure = {
 export async function getUnifiedBalanceSheet(
   clientId: string
 ): Promise<BSStructure> {
-  // A: journal-driven lines (must keep)
-  const { data: linesA } = await supabaseAdmin.rpc(
+  console.log("📘 [BS] Fetching balance sheet for client:", clientId);
+
+  // A: journal-driven lines
+  const { data: linesA, error: errA } = await supabaseAdmin.rpc(
     "balance_sheet_lines_for_client",
     { p_client_id: clientId }
   );
+  console.log("📘 [BS] RPC A (journal-driven) returned:", linesA);
+  if (errA) console.log("❌ [BS] RPC A error:", errA);
 
-  // B: full balance sheet engine (director loan, bank, VAT, etc.)
-  const { data: linesB } = await supabaseAdmin.rpc(
+  // B: full balance sheet engine
+  const { data: linesB, error: errB } = await supabaseAdmin.rpc(
     "balance_sheet_for_client",
     { p_client_id: clientId }
   );
+  console.log("📘 [BS] RPC B (full engine) returned:", linesB);
+  if (errB) console.log("❌ [BS] RPC B error:", errB);
 
   const merged = mergeSources(linesA || [], linesB || []);
+  console.log("📘 [BS] MERGED rows:", merged);
+
   const structure = mapToStructure(merged);
+  console.log("📘 [BS] STRUCTURE after classification:", structure);
+
   const totals = computeTotals(structure);
+  console.log("📘 [BS] TOTALS:", totals);
 
   return { ...structure, totals };
 }
 
 function mergeSources(a: any[], b: any[]): BSLine[] {
+  console.log("📘 [BS] mergeSources() A count:", a.length, "B count:", b.length);
+
   const map = new Map<string, BSLine>();
 
   const addRow = (row: any) => {
@@ -73,10 +86,14 @@ function mergeSources(a: any[], b: any[]): BSLine[] {
   a.forEach(addRow);
   b.forEach(addRow);
 
-  return Array.from(map.values());
+  const merged = Array.from(map.values());
+  console.log("📘 [BS] mergeSources() final merged:", merged);
+  return merged;
 }
 
 function mapToStructure(rows: BSLine[]) {
+  console.log("📘 [BS] mapToStructure() input rows:", rows);
+
   const structure: Omit<BSStructure, "totals"> = {
     assets: { non_current: [], current: [] },
     liabilities: { non_current: [], current: [] },
@@ -85,9 +102,12 @@ function mapToStructure(rows: BSLine[]) {
 
   for (const row of rows) {
     const codeNum = parseInt(row.account_code, 10);
-    const bal = Number(row.balance || 0);
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
+
+    console.log(
+      `🔍 [BS] Classifying ${row.account_code} ${row.account_name} | type=${type} bucket=${bucket}`
+    );
 
     // ---- ASSETS ----
     const isAsset =
@@ -100,10 +120,11 @@ function mapToStructure(rows: BSLine[]) {
       (codeNum >= 1000 && codeNum <= 1999);
 
     if (isAsset) {
-      // Non‑current: fixed assets
       if (bucket === "fixed_asset" || codeNum < 1100) {
+        console.log("   → Classified as NON‑CURRENT ASSET");
         structure.assets.non_current.push(row);
       } else {
+        console.log("   → Classified as CURRENT ASSET");
         structure.assets.current.push(row);
       }
       continue;
@@ -114,10 +135,11 @@ function mapToStructure(rows: BSLine[]) {
       type === "LIABILITY" || (codeNum >= 2000 && codeNum <= 2999);
 
     if (isLiability) {
-      // Simple split: 2000–2499 current, 2500–2999 non-current
       if (codeNum < 2500) {
+        console.log("   → Classified as CURRENT LIABILITY");
         structure.liabilities.current.push(row);
       } else {
+        console.log("   → Classified as NON‑CURRENT LIABILITY");
         structure.liabilities.non_current.push(row);
       }
       continue;
@@ -128,17 +150,21 @@ function mapToStructure(rows: BSLine[]) {
       type === "EQUITY" || (codeNum >= 3000 && codeNum <= 3999);
 
     if (isEquity) {
+      console.log("   → Classified as EQUITY");
       structure.equity.push(row);
       continue;
     }
 
-    // Anything else is ignored here (likely P&L)
+    console.log("   → IGNORED (likely P&L)");
   }
 
+  console.log("📘 [BS] Final structure:", structure);
   return structure;
 }
 
 function computeTotals(structure: Omit<BSStructure, "totals">) {
+  console.log("📘 [BS] computeTotals() input:", structure);
+
   const sum = (rows: BSLine[]) =>
     rows.reduce((a, r) => a + Number(r.balance || 0), 0);
 
@@ -150,10 +176,13 @@ function computeTotals(structure: Omit<BSStructure, "totals">) {
 
   const totalEquity = sum(structure.equity);
 
-  return {
+  const totals = {
     total_assets: totalAssets,
     total_liabilities: totalLiabilities,
     total_equity: totalEquity,
     total_liabilities_and_equity: totalLiabilities + totalEquity,
   };
+
+  console.log("📘 [BS] computeTotals() output:", totals);
+  return totals;
 }
