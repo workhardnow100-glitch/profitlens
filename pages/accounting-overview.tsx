@@ -176,9 +176,9 @@ export default function AccountingOverviewPage() {
 
   const {
     financial_health,
-    trial_balance_summary,
+    trial_balance_summary: _tbSummaryFromApi, // not used now
     profit_and_loss_summary,
-    balance_sheet_summary,
+    balance_sheet_summary: _bsSummaryFromApi, // not used now
     trial_balance_full,
     balance_sheet_full,
     profit_and_loss_full,
@@ -195,6 +195,9 @@ export default function AccountingOverviewPage() {
     quick_actions,
   } = data;
 
+  const bsDerived = computeFinancialHealthFromBS(balance_sheet_full);
+  const tbDerived = computeTBSummary(trial_balance_full);
+
   return (
     <div className="p-6 space-y-8">
       <header className="flex items-center justify-between">
@@ -210,9 +213,9 @@ export default function AccountingOverviewPage() {
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Financial Health</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Assets" value={financial_health.assets} />
-          <StatCard label="Liabilities" value={financial_health.liabilities} />
-          <StatCard label="Equity" value={financial_health.equity} />
+          <StatCard label="Assets" value={bsDerived.assets} />
+          <StatCard label="Liabilities" value={bsDerived.liabilities} />
+          <StatCard label="Equity" value={bsDerived.equity} />
           <StatCard label="Net Profit (YTD)" value={financial_health.net_profit_ytd} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -318,10 +321,10 @@ export default function AccountingOverviewPage() {
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Total Assets" value={balance_sheet_summary.total_assets} />
-            <StatCard label="Total Liabilities" value={balance_sheet_summary.total_liabilities} />
-            <StatCard label="Net Assets" value={balance_sheet_summary.net_assets} />
-            <StatCard label="Equity" value={balance_sheet_summary.equity} />
+            <StatCard label="Total Assets" value={bsDerived.assets} />
+            <StatCard label="Total Liabilities" value={bsDerived.liabilities} />
+            <StatCard label="Net Assets" value={bsDerived.assets - bsDerived.liabilities} />
+            <StatCard label="Equity" value={bsDerived.equity} />
           </div>
           <SimpleTable
             columns={["Section", "Code", "Name", "Amount"]}
@@ -343,11 +346,11 @@ export default function AccountingOverviewPage() {
             </Link>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label="Assets" value={trial_balance_summary.assets} />
-            <StatCard label="Liabilities" value={trial_balance_summary.liabilities} />
-            <StatCard label="Equity" value={trial_balance_summary.equity} />
-            <StatCard label="Income" value={trial_balance_summary.income} />
-            <StatCard label="Expenses" value={trial_balance_summary.expenses} />
+            <StatCard label="Assets" value={tbDerived.assets} />
+            <StatCard label="Liabilities" value={tbDerived.liabilities} />
+            <StatCard label="Equity" value={tbDerived.equity} />
+            <StatCard label="Income" value={tbDerived.income} />
+            <StatCard label="Expenses" value={tbDerived.expenses} />
           </div>
           <SimpleTable
             columns={["Section", "Code", "Name", "Debit", "Credit"]}
@@ -374,7 +377,7 @@ export default function AccountingOverviewPage() {
           </div>
           <SimpleTable
             columns={["Section", "Amount"]}
-            rows={director_loan_ledger.map((r, idx) => [
+            rows={director_loan_ledger.map((r) => [
               r.section,
               r.amount === null ? "-" : formatCurrency(r.amount),
             ])}
@@ -478,7 +481,40 @@ export default function AccountingOverviewPage() {
   );
 }
 
-/* Helpers */
+/* Derived helpers */
+
+function computeFinancialHealthFromBS(bs: BalanceSheetRow[]) {
+  const assets = bs
+    .filter((r) => r.section === "ASSETS")
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const liabilities = bs
+    .filter((r) => r.section === "LIABILITIES")
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  const equity = bs
+    .filter((r) => r.section === "EQUITY")
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  return { assets, liabilities, equity };
+}
+
+function computeTBSummary(tb: TrialBalanceRow[]) {
+  const sum = (section: string) =>
+    tb
+      .filter((r) => r.section === section)
+      .reduce((acc, r) => acc + (r.credit - r.debit), 0);
+
+  return {
+    assets: sum("ASSETS"),
+    liabilities: sum("LIABILITIES"),
+    equity: sum("EQUITY"),
+    income: sum("INCOME"),
+    expenses: sum("EXPENSES"),
+  };
+}
+
+/* UI helpers */
 
 function StatCard({
   label,
