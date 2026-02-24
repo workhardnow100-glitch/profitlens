@@ -231,7 +231,7 @@ export default function Home() {
           {/* Features */}
           <section style={{ marginBottom: "2rem" }}>
             <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>
-              Features
+              The UKs Ultimate Intergrated Feature Platform.
             </h2>
             <div
               style={{
@@ -245,6 +245,12 @@ export default function Home() {
             >
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
                 ✅ File MTD to HMRC
+              </div>
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ Automated Tax Engine
+              </div>
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ Intergrated COA Trial Balance & balance sheet
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
                 ✅ CRM Software & Database
@@ -401,7 +407,7 @@ export default function Home() {
             {/* Founder PIN Login — always available */}
             <section style={{ flex: "1", minWidth: "280px" }}>
               <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>
-                Founder Access
+                Founder & Admin Access
               </h2>
 
               <form
