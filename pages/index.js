@@ -211,7 +211,7 @@ export default function Home() {
             <img
               src="/logo.png"
               alt="ProfitLens Logo"
-              style={{ height: "60px", marginBottom: "1rem" }}
+              style={{ height: "90px", marginBottom: "1rem" }}
             />
             <h1 style={{ fontSize: "2rem", fontWeight: "600", margin: 0 }}>
               ProfitLens has everything your business needs to operate, file, and grow — in one place
