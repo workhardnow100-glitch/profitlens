@@ -88,16 +88,18 @@ function mapToStructure(rows: BSLine[]) {
     const bucket = row.hmrc_bucket ?? "";
 
     // ASSETS (current + non-current)
-    if (type === "ASSET" || (codeNum >= 1000 && codeNum <= 1999) || bucket === "fixed_asset") {
-      // Non-current: fixed assets
-      if (bucket === "fixed_asset" || codeNum < 1100) {
-        structure.assets.non_current.push(row);
-      } else {
-        // Current assets: bank, DL, cash withdrawals, etc.
-        structure.assets.current.push(row);
-      }
-      continue;
-    }
+    // ASSETS
+if (type === "ASSET") {
+  // Non‑current assets: fixed assets, buildings, improvements
+  if (bucket === "fixed_asset") {
+    structure.assets.non_current.push(row);
+  } else {
+    // Everything else is a current asset
+    structure.assets.current.push(row);
+  }
+  continue;
+}
+
 
     // LIABILITIES
     if (type === "LIABILITY" || (codeNum >= 2000 && codeNum <= 2999)) {
