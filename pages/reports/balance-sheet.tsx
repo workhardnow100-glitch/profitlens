@@ -3,8 +3,12 @@ import { useEffect, useState } from "react";
 
 type BSLine = {
   id?: string;
-  label: string;
-  amount: number;
+  label?: string;
+  amount?: number;
+  // custome line feild 
+  account_code?: string;
+  account_name?: string;
+  balance?: number;
   isCustom?: boolean;
 };
 
@@ -662,40 +666,44 @@ function Subsection({
               editingMeta.isCompare === isCompare;
 
             return (
-              <tr key={row.id || `${row.label}-${index}`} className="border-b">
-                <td className="py-1 text-gray-700">
-                  {isEditing ? (
-                    <input
-                      className="border p-1 w-full"
-                      value={editingLine.label}
-                      onChange={(e) =>
-                        setEditingLine({
-                          ...editingLine,
-                          label: e.target.value,
-                        })
-                      }
-                    />
-                  ) : (
-                    row.label
-                  )}
-                </td>
-                <td className="py-1 text-right font-medium">
-                  {isEditing ? (
-                    <input
-                      type="number"
-                      className="border p-1 w-24 text-right"
-                      value={editingLine.amount}
-                      onChange={(e) =>
-                        setEditingLine({
-                          ...editingLine,
-                          amount: Number(e.target.value),
-                        })
-                      }
-                    />
-                  ) : (
-                    <>£{format(row.amount)}</>
-                  )}
-                </td>
+             <tr key={row.id || `${row.account_code || row.label}-${index}`} className="border-b">
+  <td className="py-1 text-gray-700">
+    {isEditing ? (
+      <input
+        className="border p-1 w-full"
+        value={editingLine.label}
+        onChange={(e) =>
+          setEditingLine({
+            ...editingLine,
+            label: e.target.value,
+          })
+        }
+      />
+    ) : (
+      // Unified engine uses account_name; custom lines use label
+      row.label || row.account_name
+    )}
+  </td>
+
+  <td className="py-1 text-right font-medium">
+    {isEditing ? (
+      <input
+        type="number"
+        className="border p-1 w-24 text-right"
+        value={editingLine.amount}
+        onChange={(e) =>
+          setEditingLine({
+            ...editingLine,
+            amount: Number(e.target.value),
+          })
+        }
+      />
+    ) : (
+      // Unified engine uses balance; custom lines use amount
+      <>£{format(row.amount ?? row.balance ?? 0)}</>
+    )}
+  </td>
+
                 <td className="py-1 pl-2 text-right whitespace-nowrap">
                   {row.isCustom && !isCompare && (
                     <div className="flex gap-1 justify-end">
