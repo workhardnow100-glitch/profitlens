@@ -211,7 +211,7 @@ export default function Home() {
             <img
               src="/logo.png"
               alt="ProfitLens Logo"
-              style={{ height: "90px", marginBottom: "1rem" }}
+              style={{ height: "100px", marginBottom: "1rem" }}
             />
             <h1 style={{ fontSize: "2rem", fontWeight: "600", margin: 0 }}>
               ProfitLens has everything your business needs to operate, file, and grow — in one place
@@ -250,7 +250,7 @@ export default function Home() {
                 ✅ Automated Tax Engine
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
-                ✅ Intergrated COA Trial Balance & balance sheet
+                ✅ COA Trial Balance & balance sheet
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
                 ✅ CRM Software & Database
@@ -286,14 +286,14 @@ export default function Home() {
                 ✅ Open Banking
               </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
-                ✅ Visualize Profits Self Input
+                ✅ Visualize Revenue 
               </div>
             </div>
           </section>
 
           {/* Pricing */}
           <section style={{ marginBottom: "2rem" }}>
-            <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>Plans</h2>
+            <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>The Best Plans</h2>
             <div
               style={{
                 display: "flex",
