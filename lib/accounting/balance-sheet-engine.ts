@@ -68,7 +68,9 @@ function mergeSources(a: any[], b: any[]): BSLine[] {
   const addRow = (row: any) => {
     const code = String(row.account_code);
     const existing = map.get(code);
-    const balance = Number(row.balance || 0);
+
+    // ⭐ FIX: support both RPC formats (balance from A, amount from B)
+    const balance = Number(row.balance ?? row.amount ?? 0);
 
     if (!existing) {
       map.set(code, {
@@ -76,7 +78,9 @@ function mergeSources(a: any[], b: any[]): BSLine[] {
         account_name: row.account_name,
         balance,
         account_type: row.account_type ?? null,
-        hmrc_bucket: row.hmrc_bucket ?? null,
+
+        // ⭐ FIX: RPC B uses "section" instead of hmrc_bucket
+        hmrc_bucket: row.hmrc_bucket ?? row.section ?? null,
       });
     } else {
       existing.balance += balance;
@@ -117,6 +121,7 @@ function mapToStructure(rows: BSLine[]) {
       bucket === "bank" ||
       bucket === "debtors" ||
       bucket === "vat_asset" ||
+      bucket === "ASSETS" || // ⭐ RPC B support
       (codeNum >= 1000 && codeNum <= 1999);
 
     if (isAsset) {
@@ -132,7 +137,9 @@ function mapToStructure(rows: BSLine[]) {
 
     // ---- LIABILITIES ----
     const isLiability =
-      type === "LIABILITY" || (codeNum >= 2000 && codeNum <= 2999);
+      type === "LIABILITY" ||
+      bucket === "LIABILITIES" || // ⭐ RPC B support
+      (codeNum >= 2000 && codeNum <= 2999);
 
     if (isLiability) {
       if (codeNum < 2500) {
@@ -147,7 +154,9 @@ function mapToStructure(rows: BSLine[]) {
 
     // ---- EQUITY ----
     const isEquity =
-      type === "EQUITY" || (codeNum >= 3000 && codeNum <= 3999);
+      type === "EQUITY" ||
+      bucket === "EQUITY" || // ⭐ RPC B support
+      (codeNum >= 3000 && codeNum <= 3999);
 
     if (isEquity) {
       console.log("   → Classified as EQUITY");
