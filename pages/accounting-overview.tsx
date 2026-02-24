@@ -2,10 +2,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+/* -----------------------------
+   TYPE DEFINITIONS
+------------------------------ */
+
 type FinancialHealth = {
-  assets: number;
-  liabilities: number;
-  equity: number;
   revenue_mtd: number;
   revenue_ytd: number;
   expenses_mtd: number;
@@ -14,50 +15,6 @@ type FinancialHealth = {
   net_profit_ytd: number;
 };
 
-type TrialBalanceSummary = {
-  assets: number;
-  liabilities: number;
-  equity: number;
-  income: number;
-  expenses: number;
-};
-
-type ProfitAndLossSummary = {
-  revenue: number;
-  cost_of_sales: number;
-  gross_profit: number;
-  operating_expenses: number;
-  net_profit: number;
-};
-
-type BalanceSheetSummary = {
-  total_assets: number;
-  total_liabilities: number;
-  net_assets: number;
-  equity: number;
-};
-
-type CoaSummary = {
-  total_accounts: number;
-  active_accounts: number;
-  system_accounts: number;
-  uncategorised_accounts: number;
-  suspense_accounts: number;
-};
-
-type Alert = {
-  type: string;
-  count: number;
-  severity: "low" | "medium" | "high";
-  link?: string;
-};
-
-type QuickAction = {
-  label: string;
-  link: string;
-};
-
-// FULL REPORT TYPES
 type TrialBalanceRow = {
   section: string;
   account_code: string;
@@ -73,6 +30,14 @@ type BalanceSheetRow = {
   account_code: string;
   account_name: string;
   amount: number;
+};
+
+type ProfitAndLossSummary = {
+  revenue: number;
+  cost_of_sales: number;
+  gross_profit: number;
+  operating_expenses: number;
+  net_profit: number;
 };
 
 type ProfitAndLossRow = {
@@ -108,15 +73,32 @@ type CashFlowRow = {
   amount: number;
 };
 
+type CoaSummary = {
+  total_accounts: number;
+  active_accounts: number;
+  system_accounts: number;
+  uncategorised_accounts: number;
+  suspense_accounts: number;
+};
+
+type Alert = {
+  type: string;
+  count: number;
+  severity: "low" | "medium" | "high";
+  link?: string;
+};
+
+type QuickAction = {
+  label: string;
+  link: string;
+};
+
 type AccountingOverviewData = {
   financial_health: FinancialHealth;
 
-  trial_balance_summary: TrialBalanceSummary;
-  profit_and_loss_summary: ProfitAndLossSummary;
-  balance_sheet_summary: BalanceSheetSummary;
-
   trial_balance_full: TrialBalanceRow[];
   balance_sheet_full: BalanceSheetRow[];
+  profit_and_loss_summary: ProfitAndLossSummary;
   profit_and_loss_full: ProfitAndLossRow[];
   director_loan_ledger: DirectorLoanRow[];
 
@@ -133,6 +115,10 @@ type AccountingOverviewData = {
   quick_actions: QuickAction[];
 };
 
+/* -----------------------------
+   MAIN COMPONENT
+------------------------------ */
+
 export default function AccountingOverviewPage() {
   const [data, setData] = useState<AccountingOverviewData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -142,9 +128,7 @@ export default function AccountingOverviewPage() {
     const load = async () => {
       try {
         const res = await fetch("/api/accounting-overview");
-        if (!res.ok) {
-          throw new Error("Failed to load accounting overview");
-        }
+        if (!res.ok) throw new Error("Failed to load accounting overview");
         const json = await res.json();
         setData(json);
       } catch (err: any) {
@@ -174,13 +158,15 @@ export default function AccountingOverviewPage() {
     );
   }
 
+  /* -----------------------------
+     DESTRUCTURE API DATA
+  ------------------------------ */
+
   const {
     financial_health,
-    trial_balance_summary: _tbSummaryFromApi, // not used now
-    profit_and_loss_summary,
-    balance_sheet_summary: _bsSummaryFromApi, // not used now
     trial_balance_full,
     balance_sheet_full,
+    profit_and_loss_summary,
     profit_and_loss_full,
     director_loan_ledger,
     bank_accounts,
@@ -195,29 +181,39 @@ export default function AccountingOverviewPage() {
     quick_actions,
   } = data;
 
+  /* -----------------------------
+     DERIVED SUMMARY VALUES
+  ------------------------------ */
+
   const bsDerived = computeFinancialHealthFromBS(balance_sheet_full);
   const tbDerived = computeTBSummary(trial_balance_full);
 
+  /* -----------------------------
+     RENDER UI
+  ------------------------------ */
+
   return (
     <div className="p-6 space-y-8">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Accounting Overview</h1>
-          <p className="text-sm text-gray-500">
-            Cockpit-grade view of your ledger, control accounts, and performance.
-          </p>
-        </div>
+      <header>
+        <h1 className="text-2xl font-semibold">Accounting Overview</h1>
+        <p className="text-sm text-gray-500">
+          Cockpit-grade view of your ledger, control accounts, and performance.
+        </p>
       </header>
 
-      {/* TOP STRIP: HEALTH + CASH + BANK + TAX */}
+      {/* -----------------------------
+         FINANCIAL HEALTH
+      ------------------------------ */}
       <section className="space-y-4">
         <h2 className="text-lg font-semibold">Financial Health</h2>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Assets" value={bsDerived.assets} />
           <StatCard label="Liabilities" value={bsDerived.liabilities} />
           <StatCard label="Equity" value={bsDerived.equity} />
           <StatCard label="Net Profit (YTD)" value={financial_health.net_profit_ytd} />
         </div>
+
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard label="Revenue (MTD)" value={financial_health.revenue_mtd} />
           <StatCard label="Expenses (MTD)" value={financial_health.expenses_mtd} />
@@ -226,81 +222,78 @@ export default function AccountingOverviewPage() {
         </div>
       </section>
 
+      {/* -----------------------------
+         CASH FLOW + BANK + TAX
+      ------------------------------ */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Cash Flow */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Cash Flow Summary</h2>
-          </div>
-          <div className="grid grid-cols-1 gap-3">
-            {cash_flow.map((row, idx) => (
-              <StatCard key={idx} label={row.section} value={row.amount} />
-            ))}
-          </div>
+        {/* CASH FLOW */}
+        <div>
+          <h2 className="text-lg font-semibold mb-2">Cash Flow Summary</h2>
+          {cash_flow.map((row, idx) => (
+            <StatCard key={idx} label={row.section} value={row.amount} />
+          ))}
         </div>
 
-        {/* Bank Accounts */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Bank &amp; Cash</h2>
-            <Link href="/reports/bank" className="text-sm text-blue-600 hover:underline">
+        {/* BANK */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-lg font-semibold">Bank & Cash</h2>
+            <Link href="/reports/bank" className="text-blue-600 text-sm hover:underline">
               View bank report
             </Link>
           </div>
+
           {bank_accounts.length === 0 ? (
             <p className="text-sm text-gray-500">No bank accounts with activity yet.</p>
           ) : (
-            <div className="space-y-2">
-              {bank_accounts.map((b) => (
-                <div
-                  key={b.account_code}
-                  className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm text-sm"
-                >
-                  <div className="flex justify-between">
-                    <span className="font-semibold">
-                      {b.account_code} · {b.account_name}
-                    </span>
-                    <span className="text-gray-500">
-                      Closing: {formatCurrency(b.closing_balance)}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex justify-between text-xs text-gray-500">
-                    <span>In: {formatCurrency(b.money_in)}</span>
-                    <span>Out: {formatCurrency(b.money_out)}</span>
-                  </div>
+            bank_accounts.map((b) => (
+              <div
+                key={b.account_code}
+                className="border rounded p-3 mb-2 bg-white shadow-sm text-sm"
+              >
+                <div className="flex justify-between">
+                  <span className="font-semibold">
+                    {b.account_code} · {b.account_name}
+                  </span>
+                  <span>Closing: {formatCurrency(b.closing_balance)}</span>
                 </div>
-              ))}
-            </div>
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>In: {formatCurrency(b.money_in)}</span>
+                  <span>Out: {formatCurrency(b.money_out)}</span>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        {/* Tax Controls */}
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Tax Control Accounts</h2>
-          <div className="space-y-2 text-sm">
-            <ControlBlock title="VAT" rows={vat_control} link="/reports/vat" />
-            <ControlBlock title="PAYE / NI" rows={paye_control} link="/reports/paye" />
-            <ControlBlock title="Corporation Tax" rows={corporation_tax} link="/reports/corporation-tax" />
-          </div>
+        {/* TAX */}
+        <div>
+          <h2 className="text-lg font-semibold mb-2">Tax Control Accounts</h2>
+          <ControlBlock title="VAT" rows={vat_control} link="/reports/vat" />
+          <ControlBlock title="PAYE / NI" rows={paye_control} link="/reports/paye" />
+          <ControlBlock title="Corporation Tax" rows={corporation_tax} link="/reports/corporation-tax" />
         </div>
       </section>
-
-      {/* MIDDLE: FULL P&L + BS + TB */}
+      {/* -----------------------------
+         FULL P&L + BS + TB
+      ------------------------------ */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* P&L */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Profit &amp; Loss</h2>
-            <Link href="/reports/pnl" className="text-sm text-blue-600 hover:underline">
-              View full P&amp;L
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-lg font-semibold">Profit & Loss</h2>
+            <Link href="/reports/pnl" className="text-blue-600 text-sm hover:underline">
+              View full P&L
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
             <StatCard label="Revenue" value={profit_and_loss_summary.revenue} />
             <StatCard label="Operating Expenses" value={profit_and_loss_summary.operating_expenses} />
             <StatCard label="Gross Profit" value={profit_and_loss_summary.gross_profit} />
             <StatCard label="Net Profit" value={profit_and_loss_summary.net_profit} />
           </div>
+
           <SimpleTable
             columns={["Section", "Code", "Name", "Amount"]}
             rows={profit_and_loss_full.map((r) => [
@@ -312,20 +305,22 @@ export default function AccountingOverviewPage() {
           />
         </div>
 
-        {/* Balance Sheet */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        {/* BALANCE SHEET */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold">Balance Sheet</h2>
-            <Link href="/reports/balance-sheet" className="text-sm text-blue-600 hover:underline">
+            <Link href="/reports/balance-sheet" className="text-blue-600 text-sm hover:underline">
               View full Balance Sheet
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
             <StatCard label="Total Assets" value={bsDerived.assets} />
             <StatCard label="Total Liabilities" value={bsDerived.liabilities} />
             <StatCard label="Net Assets" value={bsDerived.assets - bsDerived.liabilities} />
             <StatCard label="Equity" value={bsDerived.equity} />
           </div>
+
           <SimpleTable
             columns={["Section", "Code", "Name", "Amount"]}
             rows={balance_sheet_full.map((r) => [
@@ -337,21 +332,23 @@ export default function AccountingOverviewPage() {
           />
         </div>
 
-        {/* Trial Balance */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        {/* TRIAL BALANCE */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold">Trial Balance</h2>
-            <Link href="/reports/trial-balance" className="text-sm text-blue-600 hover:underline">
+            <Link href="/reports/trial-balance" className="text-blue-600 text-sm hover:underline">
               View full Trial Balance
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+
+          <div className="grid grid-cols-2 gap-3 mb-3">
             <StatCard label="Assets" value={tbDerived.assets} />
             <StatCard label="Liabilities" value={tbDerived.liabilities} />
             <StatCard label="Equity" value={tbDerived.equity} />
             <StatCard label="Income" value={tbDerived.income} />
             <StatCard label="Expenses" value={tbDerived.expenses} />
           </div>
+
           <SimpleTable
             columns={["Section", "Code", "Name", "Debit", "Credit"]}
             rows={trial_balance_full.map((r) => [
@@ -365,16 +362,19 @@ export default function AccountingOverviewPage() {
         </div>
       </section>
 
-      {/* BOTTOM: DL, FIXED ASSETS, SUSPENSE, COA, ALERTS, QUICK ACTIONS */}
+      {/* -----------------------------
+         DIRECTOR LOAN + FIXED ASSETS + SUSPENSE + COA
+      ------------------------------ */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Director Loan */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        {/* DIRECTOR LOAN */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold">Director Loan Account</h2>
-            <Link href="/reports/director-loan" className="text-sm text-blue-600 hover:underline">
+            <Link href="/reports/director-loan" className="text-blue-600 text-sm hover:underline">
               View DL report
             </Link>
           </div>
+
           <SimpleTable
             columns={["Section", "Amount"]}
             rows={director_loan_ledger.map((r) => [
@@ -384,14 +384,15 @@ export default function AccountingOverviewPage() {
           />
         </div>
 
-        {/* Fixed Assets */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        {/* FIXED ASSETS */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
             <h2 className="text-lg font-semibold">Fixed Assets</h2>
-            <Link href="/reports/fixed-assets" className="text-sm text-blue-600 hover:underline">
+            <Link href="/reports/fixed-assets" className="text-blue-600 text-sm hover:underline">
               View fixed assets
             </Link>
           </div>
+
           {fixed_assets.length === 0 ? (
             <p className="text-sm text-gray-500">No fixed asset balances yet.</p>
           ) : (
@@ -406,15 +407,17 @@ export default function AccountingOverviewPage() {
           )}
         </div>
 
-        {/* Suspense & COA */}
+        {/* SUSPENSE + COA */}
         <div className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Suspense &amp; Uncategorized</h2>
-              <Link href="/reports/suspense" className="text-sm text-blue-600 hover:underline">
+          {/* SUSPENSE */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <h2 className="text-lg font-semibold">Suspense & Uncategorized</h2>
+              <Link href="/reports/suspense" className="text-blue-600 text-sm hover:underline">
                 View suspense
               </Link>
             </div>
+
             {suspense_and_uncategorised.length === 0 ? (
               <p className="text-sm text-gray-500">No suspense or uncategorised balances.</p>
             ) : (
@@ -429,13 +432,15 @@ export default function AccountingOverviewPage() {
             )}
           </div>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
+          {/* COA SUMMARY */}
+          <div>
+            <div className="flex justify-between items-center mb-2">
               <h2 className="text-lg font-semibold">Chart of Accounts</h2>
-              <Link href="/chart-of-accounts" className="text-sm text-blue-600 hover:underline">
+              <Link href="/chart-of-accounts" className="text-blue-600 text-sm hover:underline">
                 Open full COA
               </Link>
             </div>
+
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard label="Total Accounts" value={coa_summary.total_accounts} type="number" />
               <StatCard label="Active Accounts" value={coa_summary.active_accounts} type="number" />
@@ -447,23 +452,23 @@ export default function AccountingOverviewPage() {
         </div>
       </section>
 
-      {/* Alerts & Quick Actions */}
+      {/* -----------------------------
+         ALERTS + QUICK ACTIONS
+      ------------------------------ */}
       <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Alerts &amp; Exceptions</h2>
+        {/* ALERTS */}
+        <div>
+          <h2 className="text-lg font-semibold mb-2">Alerts & Exceptions</h2>
           {alerts.length === 0 ? (
             <p className="text-sm text-gray-500">No alerts. This ledger is flying clean.</p>
           ) : (
-            <div className="space-y-2">
-              {alerts.map((alert, idx) => (
-                <AlertRow key={idx} alert={alert} />
-              ))}
-            </div>
+            alerts.map((alert, idx) => <AlertRow key={idx} alert={alert} />)
           )}
         </div>
 
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Quick Actions</h2>
+        {/* QUICK ACTIONS */}
+        <div>
+          <h2 className="text-lg font-semibold mb-2">Quick Actions</h2>
           <div className="flex flex-wrap gap-2">
             {quick_actions.map((action, idx) => (
               <Link
@@ -481,7 +486,9 @@ export default function AccountingOverviewPage() {
   );
 }
 
-/* Derived helpers */
+/* -----------------------------
+   DERIVED SUMMARY HELPERS
+------------------------------ */
 
 function computeFinancialHealthFromBS(bs: BalanceSheetRow[]) {
   const assets = bs
@@ -514,7 +521,9 @@ function computeTBSummary(tb: TrialBalanceRow[]) {
   };
 }
 
-/* UI helpers */
+/* -----------------------------
+   UI HELPERS
+------------------------------ */
 
 function StatCard({
   label,
@@ -562,7 +571,10 @@ function SimpleTable({
         <thead className="bg-gray-50">
           <tr>
             {columns.map((col) => (
-              <th key={col} className="px-2 py-2 text-left font-semibold text-gray-600">
+              <th
+                key={col}
+                className="px-2 py-2 text-left font-semibold text-gray-600"
+              >
                 {col}
               </th>
             ))}
@@ -594,7 +606,7 @@ function ControlBlock({
   link: string;
 }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+    <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm mb-2">
       <div className="flex items-center justify-between text-xs mb-2">
         <span className="font-semibold text-gray-700">{title}</span>
         <Link href={link} className="text-blue-600 hover:underline">
@@ -646,7 +658,10 @@ function AlertRow({ alert }: { alert: Alert }) {
 
   if (alert.link) {
     return (
-      <Link href={alert.link} className="block hover:border-blue-400 hover:shadow-sm transition">
+      <Link
+        href={alert.link}
+        className="block hover:border-blue-400 hover:shadow-sm transition"
+      >
         {content}
       </Link>
     );
