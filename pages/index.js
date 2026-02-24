@@ -79,7 +79,7 @@ export default function Home() {
         <title>ProfitLens</title>
         <meta
           name="description"
-          content="Turn statements into strategy. Forecast profits. Grow smarter."
+          content="The Financial Operating System for UK Businesses."
         />
       </Head>
 
@@ -214,7 +214,7 @@ export default function Home() {
               style={{ height: "60px", marginBottom: "1rem" }}
             />
             <h1 style={{ fontSize: "2rem", fontWeight: "600", margin: 0 }}>
-              ProfitLens
+              ProfitLens-Everything your business needs to operate, file, and grow — in one place
             </h1>
             <p
               style={{
@@ -224,7 +224,7 @@ export default function Home() {
                 textAlign: "center",
               }}
             >
-              Turn statements into strategy. Forecast profits. Grow smarter.
+              The Financial Operating System for UK Businesses.
             </p>
           </section>
 
@@ -243,6 +243,18 @@ export default function Home() {
                 marginTop: "1rem",
               }}
             >
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ File MTD to HMRC
+              </div>
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ CRM Software & Database
+              </div>
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ Invoicing System
+              </div>
+              <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
+                ✅ Accountant Intergration Software
+              </div>
               <div style={{ minWidth: "220px", flex: "1", textAlign: "left" }}>
                 ✅ Real-time analytics
               </div>
