@@ -27,7 +27,9 @@ export type BSStructure = {
   };
 };
 
-export async function getUnifiedBalanceSheet(clientId: string): Promise<BSStructure> {
+export async function getUnifiedBalanceSheet(
+  clientId: string
+): Promise<BSStructure> {
   // A: journal-driven lines (must keep)
   const { data: linesA } = await supabaseAdmin.rpc(
     "balance_sheet_lines_for_client",
@@ -87,23 +89,32 @@ function mapToStructure(rows: BSLine[]) {
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
-    // ASSETS (current + non-current)
-    // ASSETS
-if (type === "ASSET") {
-  // Non‑current assets: fixed assets, buildings, improvements
-  if (bucket === "fixed_asset") {
-    structure.assets.non_current.push(row);
-  } else {
-    // Everything else is a current asset
-    structure.assets.current.push(row);
-  }
-  continue;
-}
+    // ---- ASSETS ----
+    const isAsset =
+      type === "ASSET" ||
+      bucket === "fixed_asset" ||
+      bucket === "current_asset" ||
+      bucket === "bank" ||
+      bucket === "debtors" ||
+      bucket === "vat_asset" ||
+      (codeNum >= 1000 && codeNum <= 1999);
 
+    if (isAsset) {
+      // Non‑current: fixed assets
+      if (bucket === "fixed_asset" || codeNum < 1100) {
+        structure.assets.non_current.push(row);
+      } else {
+        structure.assets.current.push(row);
+      }
+      continue;
+    }
 
-    // LIABILITIES
-    if (type === "LIABILITY" || (codeNum >= 2000 && codeNum <= 2999)) {
-      // Simple split: 2000–2499 current, 2500–2999 non-current (tweak if needed)
+    // ---- LIABILITIES ----
+    const isLiability =
+      type === "LIABILITY" || (codeNum >= 2000 && codeNum <= 2999);
+
+    if (isLiability) {
+      // Simple split: 2000–2499 current, 2500–2999 non-current
       if (codeNum < 2500) {
         structure.liabilities.current.push(row);
       } else {
@@ -112,18 +123,24 @@ if (type === "ASSET") {
       continue;
     }
 
-    // EQUITY
-    if (type === "EQUITY" || (codeNum >= 3000 && codeNum <= 3999)) {
+    // ---- EQUITY ----
+    const isEquity =
+      type === "EQUITY" || (codeNum >= 3000 && codeNum <= 3999);
+
+    if (isEquity) {
       structure.equity.push(row);
       continue;
     }
+
+    // Anything else is ignored here (likely P&L)
   }
 
   return structure;
 }
 
 function computeTotals(structure: Omit<BSStructure, "totals">) {
-  const sum = (rows: BSLine[]) => rows.reduce((a, r) => a + Number(r.balance || 0), 0);
+  const sum = (rows: BSLine[]) =>
+    rows.reduce((a, r) => a + Number(r.balance || 0), 0);
 
   const totalAssets =
     sum(structure.assets.current) + sum(structure.assets.non_current);
