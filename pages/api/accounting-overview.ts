@@ -3,6 +3,7 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+import { getUnifiedBalanceSheet } from "../../lib/accounting/balance-sheet-engine";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
@@ -31,6 +32,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const o = overviewData[0];
+
+    // ------------------------------------------------------------
+    // 1b) UNIFIED BALANCE SHEET (journals + full engine)
+    // ------------------------------------------------------------
+    const unifiedBS = await getUnifiedBalanceSheet(clientId);
 
     // ------------------------------------------------------------
     // 2) FULL REPORTING ENGINE (11 RPCs)
@@ -99,9 +105,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // FINANCIAL HEALTH SUMMARY
       // -------------------------
       financial_health: {
-        assets: o.total_assets,
-        liabilities: o.total_liabilities,
-        equity: o.equity,
+        assets: unifiedBS.totals.total_assets,
+        liabilities: unifiedBS.totals.total_liabilities,
+        equity: unifiedBS.totals.total_equity,
         revenue_mtd: o.revenue_mtd,
         revenue_ytd: o.revenue_ytd,
         expenses_mtd: o.expenses_mtd,
@@ -114,9 +120,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // SUMMARY PANELS (existing)
       // -------------------------
       trial_balance_summary: {
-        assets: o.total_assets,
-        liabilities: o.total_liabilities,
-        equity: o.equity,
+        assets: unifiedBS.totals.total_assets,
+        liabilities: unifiedBS.totals.total_liabilities,
+        equity: unifiedBS.totals.total_equity,
         income: o.total_income,
         expenses: o.total_expenses,
       },
@@ -130,10 +136,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
 
       balance_sheet_summary: {
-        total_assets: o.total_assets,
-        total_liabilities: o.total_liabilities,
-        net_assets: o.total_assets - o.total_liabilities,
-        equity: o.equity,
+        total_assets: unifiedBS.totals.total_assets,
+        total_liabilities: unifiedBS.totals.total_liabilities,
+        net_assets: unifiedBS.totals.total_assets - unifiedBS.totals.total_liabilities,
+        equity: unifiedBS.totals.total_equity,
       },
 
       // -------------------------
