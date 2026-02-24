@@ -33,14 +33,19 @@ import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
+    ...CT_MAP.other_income,
     ...CT_MAP.allowable,
     ...CT_MAP.disallowable,
-    ...CT_MAP.other_income,
+    ...CT_MAP.fixed_assets,
+    ...CT_MAP.current_assets,
+    ...CT_MAP.liabilities,
+    ...CT_MAP.equity,
     ...CT_MAP.ignore,
     ...SYSTEM_CATEGORIES,
     "Uncategorised",
   ])
 ).sort();
+
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),

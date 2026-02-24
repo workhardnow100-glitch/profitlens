@@ -33,18 +33,23 @@ function safeDate(value) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-// Unified CT category list
+// ✅ Unified category options (CT_MAP + system + Uncategorised)
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
-    ...CT_MAP.allowable,
     ...CT_MAP.other_income,
+    ...CT_MAP.allowable,
     ...CT_MAP.disallowable,
+    ...CT_MAP.fixed_assets,
+    ...CT_MAP.current_assets,
+    ...CT_MAP.liabilities,
+    ...CT_MAP.equity,
     ...CT_MAP.ignore,
     ...SYSTEM_CATEGORIES,
     "Uncategorised",
   ])
 ).sort();
+
 
 const SA_TAG_HELP_TEXT =
   "Mark transactions that should feed into Self Assessment (SA100 / SA103 / SA105 / SA110).";

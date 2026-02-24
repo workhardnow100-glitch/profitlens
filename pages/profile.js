@@ -22,17 +22,23 @@ const HighchartsReact = dynamic(
   { ssr: false }
 );
 
+// ✅ Unified category options (CT_MAP + system + Uncategorised)
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
+    ...CT_MAP.other_income,
     ...CT_MAP.allowable,
     ...CT_MAP.disallowable,
+    ...CT_MAP.fixed_assets,
+    ...CT_MAP.current_assets,
+    ...CT_MAP.liabilities,
+    ...CT_MAP.equity,
     ...CT_MAP.ignore,
-    ...CT_MAP.other_income,
     ...SYSTEM_CATEGORIES,
     "Uncategorised",
   ])
 ).sort();
+
 
 const ALLOWABLE_SET = new Set(CT_MAP.allowable);
 const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
