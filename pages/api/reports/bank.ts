@@ -50,12 +50,24 @@ export default async function handler(
 ) {
   try {
     /* -----------------------------
+       EXTRACT CLIENT ID
+    ------------------------------ */
+    const clientId =
+      (req.query.client_id as string) ||
+      (req.headers["x-client-id"] as string);
+
+    if (!clientId) {
+      return res.status(400).json({ error: "Missing client_id" });
+    }
+
+    /* -----------------------------
        1. FETCH BANK LEDGER ACCOUNTS
     ------------------------------ */
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
-      .eq("is_bank_account", true);
+      .eq("is_bank_account", true)
+      .eq("coa_id", clientId);
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
@@ -63,7 +75,6 @@ export default async function handler(
     }
 
     const bankAccountIds = accounts.map((a) => a.id);
-    const bankAccountCodes = accounts.map((a) => a.account_code);
 
     /* -----------------------------
        2. FETCH BANK FEED TRANSACTIONS
@@ -72,6 +83,7 @@ export default async function handler(
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
+      .eq("client_id", clientId)
       .order("date", { ascending: true });
 
     if (bankErr) throw bankErr;
@@ -91,11 +103,13 @@ export default async function handler(
         journal_entries (
           id,
           date,
-          description
+          description,
+          client_id
         )
       `
       )
-      .in("account_id", bankAccountIds);
+      .in("account_id", bankAccountIds)
+      .eq("journal_entries.client_id", clientId);
 
     if (ledErr) throw ledErr;
 
@@ -110,7 +124,7 @@ export default async function handler(
       const je = l.journal_entries;
       if (!je) return;
       const ledgerAmount =
-        Number(l.debit || 0) - Number(l.credit || 0); // debit-positive for bank (asset) accounts
+        Number(l.debit || 0) - Number(l.credit || 0);
       const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
       ledgerLookup.add(key);
     });
@@ -145,7 +159,7 @@ export default async function handler(
       if (!je) return;
 
       const ledgerAmount =
-        Number(l.debit || 0) - Number(l.credit || 0); // debit-positive
+        Number(l.debit || 0) - Number(l.credit || 0);
       const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
       const matched = ledgerLookup.has(key);
 
@@ -155,7 +169,7 @@ export default async function handler(
           date: je.date,
           description: je.description,
           amount: ledgerAmount,
-          category: l.account_id, // COA id reference
+          category: l.account_id,
           is_reconciled: false,
           is_director_loan: false,
           source: "ledger",
