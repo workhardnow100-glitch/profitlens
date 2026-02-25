@@ -2,68 +2,17 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
-/* -----------------------------
-   TYPE DEFINITIONS
------------------------------- */
-
-type BankReportAccount = {
-  id: string;
-  account_code: string;
-  account_name: string;
-};
-
-type BankReportTransaction = {
-  id: string;
-  date: string;
-  description: string;
-  amount: number;
-  category: string | null;
-  is_reconciled: boolean;
-  is_director_loan: boolean;
-  source: "bank" | "ledger" | "both";
-  balance_after: number | null;
-};
-
-/* -----------------------------
-   RUNNING BALANCE HELPER
------------------------------- */
-
-function computeRunningBalance(
-  transactions: BankReportTransaction[],
-  opening: number
-): BankReportTransaction[] {
-  let balance = opening;
-
-  return transactions.map((t) => {
-    balance += t.amount;
-    return { ...t, balance_after: balance };
-  });
-}
-
-/* -----------------------------
-   MAIN HANDLER
------------------------------- */
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
   try {
     /* -----------------------------
-       OPTIONAL CLIENT ID
-       (no 400 error if missing)
-    ------------------------------ */
-    const clientId =
-      (req.query.client_id as string) ||
-      (req.headers["x-client-id"] as string) ||
-      null;
-
-    /* -----------------------------
-       1. FETCH BANK LEDGER ACCOUNTS
+       1. FETCH BANK ACCOUNTS
     ------------------------------ */
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
-      .select("id, account_code, account_name")
+      .select("id, account_code, account_name, coa_id")
       .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
@@ -73,27 +22,27 @@ export default async function handler(
 
     const bankAccountIds = accounts.map((a) => a.id);
 
+    // ⭐ Infer client_id from COA
+    const clientId = accounts[0].coa_id;
+
     /* -----------------------------
-       2. FETCH BANK FEED TRANSACTIONS
+       2. BANK FEED
     ------------------------------ */
-    let bankQuery = supabaseAdmin
+    const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
+      .eq("client_id", clientId)
       .order("date", { ascending: true });
 
-    if (clientId) bankQuery = bankQuery.eq("client_id", clientId);
-
-    const { data: bankTx, error: bankErr } = await bankQuery;
     if (bankErr) throw bankErr;
 
     /* -----------------------------
-       3. FETCH LEDGER JOURNAL LINES
+       3. LEDGER LINES
     ------------------------------ */
-    let ledgerQuery = supabaseAdmin
+    const { data: ledgerLines, error: ledErr } = await supabaseAdmin
       .from("journal_lines")
-      .select(
-        `
+      .select(`
         id,
         debit,
         credit,
@@ -104,38 +53,29 @@ export default async function handler(
           description,
           client_id
         )
-      `
-      )
-      .in("account_id", bankAccountIds);
+      `)
+      .in("account_id", bankAccountIds)
+      .eq("journal_entries.client_id", clientId);
 
-    if (clientId)
-      ledgerQuery = ledgerQuery.eq("journal_entries.client_id", clientId);
-
-    const { data: ledgerLines, error: ledErr } = await ledgerQuery;
     if (ledErr) throw ledErr;
 
     /* -----------------------------
-       4. LEDGER MATCH LOOKUP
+       4. MATCHING LOGIC
     ------------------------------ */
-
     const ledgerLookup = new Set<string>();
 
     (ledgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
-      const ledgerAmount =
-        Number(l.debit || 0) - Number(l.credit || 0);
-      const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
-      ledgerLookup.add(key);
+      const amt = Number(l.debit || 0) - Number(l.credit || 0);
+      ledgerLookup.add(`${je.date}|${amt}|${je.description || ""}`);
     });
 
     /* -----------------------------
-       5. MERGE BANK + LEDGER
+       5. MERGE
     ------------------------------ */
+    const merged: any[] = [];
 
-    const merged: BankReportTransaction[] = [];
-
-    // Bank feed transactions
     (bankTx || []).forEach((b: any) => {
       const key = `${b.date}|${Number(b.amount)}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
@@ -153,14 +93,12 @@ export default async function handler(
       });
     });
 
-    // Ledger-only lines
     (ledgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
 
-      const ledgerAmount =
-        Number(l.debit || 0) - Number(l.credit || 0);
-      const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
+      const amt = Number(l.debit || 0) - Number(l.credit || 0);
+      const key = `${je.date}|${amt}|${je.description || ""}`;
       const matched = ledgerLookup.has(key);
 
       if (!matched) {
@@ -168,7 +106,7 @@ export default async function handler(
           id: `ledger:${l.id}`,
           date: je.date,
           description: je.description,
-          amount: ledgerAmount,
+          amount: amt,
           category: l.account_id,
           is_reconciled: false,
           is_director_loan: false,
@@ -178,41 +116,29 @@ export default async function handler(
       }
     });
 
-    /* -----------------------------
-       6. SORT BY DATE
-    ------------------------------ */
-    merged.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    merged.sort((a, b) => (a.date < b.date ? -1 : 1));
 
     /* -----------------------------
-       7. RUNNING BALANCES PER ACCOUNT
+       6. RUNNING BALANCE
     ------------------------------ */
-
-    const finalTx: BankReportTransaction[] = [];
-
-    for (const acc of accounts as BankReportAccount[]) {
-      const txForAcc = merged.filter(
-        (t) => t.id.startsWith(`${acc.id}:`) || t.category === acc.id
-      );
-
-      const withBalance = computeRunningBalance(txForAcc, 0);
-      finalTx.push(...withBalance);
-    }
+    let balance = 0;
+    const finalTx = merged.map((t) => {
+      balance += t.amount;
+      return { ...t, balance_after: balance };
+    });
 
     /* -----------------------------
-       8. BUILD RESPONSE
+       7. RESPONSE
     ------------------------------ */
-
-    const response = {
-      accounts: (accounts as BankReportAccount[]).map((a) => ({
+    return res.status(200).json({
+      accounts: accounts.map((a) => ({
         account_code: a.account_code,
         account_name: a.account_name,
         opening_balance: 0,
-        closing_balance: 0,
+        closing_balance: balance,
       })),
       transactions: finalTx,
-    };
-
-    return res.status(200).json(response);
+    });
   } catch (err: any) {
     console.error("Bank report error:", err);
     return res.status(500).json({ error: err.message });
