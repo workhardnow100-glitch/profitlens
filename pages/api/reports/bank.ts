@@ -1,6 +1,6 @@
 // pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../../lib/supabase-client";
+import { supabase } from "../../../lib/supabaseClient";
 
 /* -----------------------------
    TYPE DEFINITIONS
@@ -51,13 +51,16 @@ export default async function handler(
 ) {
   try {
     /* -----------------------------
-       1. FETCH BANK ACCOUNTS
+       1. FETCH BANK LEDGER ACCOUNTS
     ------------------------------ */
     const { data: accounts, error: accErr } = await supabase
-      .from("bank_accounts")
-      .select("*");
+      .from("chart_of_account_entries")
+      .select("account_code, account_name, is_bank_account")
+      .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
+
+    const bankAccountCodes = accounts.map((a) => a.account_code);
 
     /* -----------------------------
        2. FETCH BANK FEED TRANSACTIONS
@@ -65,6 +68,7 @@ export default async function handler(
     const { data: bankTx, error: bankErr } = await supabase
       .from("transactions")
       .select("*")
+      .in("account_code", bankAccountCodes)
       .order("date", { ascending: true });
 
     if (bankErr) throw bankErr;
@@ -75,6 +79,7 @@ export default async function handler(
     const { data: ledgerTx, error: ledErr } = await supabase
       .from("journal_entries")
       .select("*")
+      .in("account_code", bankAccountCodes)
       .order("date", { ascending: true });
 
     if (ledErr) throw ledErr;
@@ -141,15 +146,12 @@ export default async function handler(
 
     const finalTx: BankReportTransaction[] = [];
 
-    for (const acc of accounts as BankReportAccount[]) {
+    for (const acc of accounts) {
       const txForAcc = merged.filter((t) =>
         t.id.startsWith(`${acc.account_code}:`)
       );
 
-      const withBalance = computeRunningBalance(
-        txForAcc,
-        acc.opening_balance || 0
-      );
+      const withBalance = computeRunningBalance(txForAcc, 0);
 
       finalTx.push(...withBalance);
     }
@@ -159,11 +161,11 @@ export default async function handler(
     ------------------------------ */
 
     const response = {
-      accounts: (accounts as BankReportAccount[]).map((a) => ({
+      accounts: accounts.map((a) => ({
         account_code: a.account_code,
         account_name: a.account_name,
-        opening_balance: a.opening_balance,
-        closing_balance: a.closing_balance,
+        opening_balance: 0,
+        closing_balance: 0,
       })),
       transactions: finalTx,
     };
