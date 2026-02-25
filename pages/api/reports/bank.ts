@@ -7,10 +7,9 @@ import { supabase } from "../../../lib/supabase-client";
 ------------------------------ */
 
 type BankReportAccount = {
+  id: string;
   account_code: string;
   account_name: string;
-  opening_balance: number;
-  closing_balance: number;
 };
 
 type BankReportTransaction = {
@@ -55,11 +54,12 @@ export default async function handler(
     ------------------------------ */
     const { data: accounts, error: accErr } = await supabase
       .from("chart_of_account_entries")
-      .select("account_code, account_name, is_bank_account")
+      .select("id, account_code, account_name")
       .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
 
+    const bankAccountIds = accounts.map((a) => a.id);
     const bankAccountCodes = accounts.map((a) => a.account_code);
 
     /* -----------------------------
@@ -68,7 +68,7 @@ export default async function handler(
     const { data: bankTx, error: bankErr } = await supabase
       .from("transactions")
       .select("*")
-      .in("account_code", bankAccountCodes)
+      .in("coa_id", bankAccountIds)
       .order("date", { ascending: true });
 
     if (bankErr) throw bankErr;
@@ -100,10 +100,10 @@ export default async function handler(
       const matched = ledgerLookup.has(key);
 
       return {
-        id: `${b.account_code}:${b.id}`,
+        id: `${b.coa_id}:${b.id}`,
         date: b.date,
         description: b.description,
-        amount: b.amount,
+        amount: Number(b.amount),
         category: b.business_category,
         is_reconciled: matched,
         is_director_loan: b.business_category === "Director Loan",
@@ -125,7 +125,7 @@ export default async function handler(
           id: `ledger:${l.id}`,
           date: l.date,
           description: l.description,
-          amount: l.amount,
+          amount: Number(l.amount),
           category: l.account_code,
           is_reconciled: false,
           is_director_loan: l.account_code?.startsWith("5041") ?? false,
@@ -148,7 +148,7 @@ export default async function handler(
 
     for (const acc of accounts) {
       const txForAcc = merged.filter((t) =>
-        t.id.startsWith(`${acc.account_code}:`)
+        t.id.startsWith(`${acc.id}:`)
       );
 
       const withBalance = computeRunningBalance(txForAcc, 0);
