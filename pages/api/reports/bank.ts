@@ -95,8 +95,7 @@ export default async function handler(
         )
       `
       )
-      .in("account_id", bankAccountIds)
-      .order("journal_entries.date", { ascending: true });
+      .in("account_id", bankAccountIds);
 
     if (ledErr) throw ledErr;
 
@@ -177,8 +176,8 @@ export default async function handler(
     const finalTx: BankReportTransaction[] = [];
 
     for (const acc of accounts as BankReportAccount[]) {
-      const txForAcc = merged.filter((t) =>
-        t.id.startsWith(`${acc.id}:`) || t.category === acc.id
+      const txForAcc = merged.filter(
+        (t) => t.id.startsWith(`${acc.id}:`) || t.category === acc.id
       );
 
       const withBalance = computeRunningBalance(txForAcc, 0);
