@@ -50,15 +50,13 @@ export default async function handler(
 ) {
   try {
     /* -----------------------------
-       EXTRACT CLIENT ID
+       OPTIONAL CLIENT ID
+       (no 400 error if missing)
     ------------------------------ */
     const clientId =
       (req.query.client_id as string) ||
-      (req.headers["x-client-id"] as string);
-
-    if (!clientId) {
-      return res.status(400).json({ error: "Missing client_id" });
-    }
+      (req.headers["x-client-id"] as string) ||
+      null;
 
     /* -----------------------------
        1. FETCH BANK LEDGER ACCOUNTS
@@ -66,8 +64,7 @@ export default async function handler(
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
-      .eq("is_bank_account", true)
-      .eq("coa_id", clientId);
+      .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
@@ -79,20 +76,21 @@ export default async function handler(
     /* -----------------------------
        2. FETCH BANK FEED TRANSACTIONS
     ------------------------------ */
-    const { data: bankTx, error: bankErr } = await supabaseAdmin
+    let bankQuery = supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
-      .eq("client_id", clientId)
       .order("date", { ascending: true });
 
+    if (clientId) bankQuery = bankQuery.eq("client_id", clientId);
+
+    const { data: bankTx, error: bankErr } = await bankQuery;
     if (bankErr) throw bankErr;
 
     /* -----------------------------
        3. FETCH LEDGER JOURNAL LINES
-          (JOIN JOURNAL ENTRIES)
     ------------------------------ */
-    const { data: ledgerLines, error: ledErr } = await supabaseAdmin
+    let ledgerQuery = supabaseAdmin
       .from("journal_lines")
       .select(
         `
@@ -108,14 +106,16 @@ export default async function handler(
         )
       `
       )
-      .in("account_id", bankAccountIds)
-      .eq("journal_entries.client_id", clientId);
+      .in("account_id", bankAccountIds);
 
+    if (clientId)
+      ledgerQuery = ledgerQuery.eq("journal_entries.client_id", clientId);
+
+    const { data: ledgerLines, error: ledErr } = await ledgerQuery;
     if (ledErr) throw ledErr;
 
     /* -----------------------------
        4. LEDGER MATCH LOOKUP
-       (BANK vs LEDGER)
     ------------------------------ */
 
     const ledgerLookup = new Set<string>();
