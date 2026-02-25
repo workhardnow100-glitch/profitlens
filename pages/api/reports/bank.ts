@@ -1,0 +1,176 @@
+// pages/api/reports/bank.ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { supabase } from "../../../lib/supabase-client";
+
+/* -----------------------------
+   TYPE DEFINITIONS
+------------------------------ */
+
+type BankReportAccount = {
+  account_code: string;
+  account_name: string;
+  opening_balance: number;
+  closing_balance: number;
+};
+
+type BankReportTransaction = {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  category: string | null;
+  is_reconciled: boolean;
+  is_director_loan: boolean;
+  source: "bank" | "ledger" | "both";
+  balance_after: number | null;
+};
+
+/* -----------------------------
+   RUNNING BALANCE HELPER
+------------------------------ */
+
+function computeRunningBalance(
+  transactions: BankReportTransaction[],
+  opening: number
+): BankReportTransaction[] {
+  let balance = opening;
+
+  return transactions.map((t) => {
+    balance += t.amount;
+    return { ...t, balance_after: balance };
+  });
+}
+
+/* -----------------------------
+   MAIN HANDLER
+------------------------------ */
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    /* -----------------------------
+       1. FETCH BANK ACCOUNTS
+    ------------------------------ */
+    const { data: accounts, error: accErr } = await supabase
+      .from("bank_accounts")
+      .select("*");
+
+    if (accErr) throw accErr;
+
+    /* -----------------------------
+       2. FETCH BANK FEED TRANSACTIONS
+    ------------------------------ */
+    const { data: bankTx, error: bankErr } = await supabase
+      .from("transactions")
+      .select("*")
+      .order("date", { ascending: true });
+
+    if (bankErr) throw bankErr;
+
+    /* -----------------------------
+       3. FETCH LEDGER JOURNAL ENTRIES
+    ------------------------------ */
+    const { data: ledgerTx, error: ledErr } = await supabase
+      .from("journal_entries")
+      .select("*")
+      .order("date", { ascending: true });
+
+    if (ledErr) throw ledErr;
+
+    /* -----------------------------
+       4. LEDGER MATCH LOOKUP
+    ------------------------------ */
+    const ledgerLookup = new Set(
+      ledgerTx.map((l) => `${l.date}|${l.amount}|${l.description}`)
+    );
+
+    /* -----------------------------
+       5. MERGE BANK + LEDGER
+    ------------------------------ */
+
+    const merged: BankReportTransaction[] = bankTx.map((b) => {
+      const key = `${b.date}|${b.amount}|${b.description}`;
+      const matched = ledgerLookup.has(key);
+
+      return {
+        id: `${b.account_code}:${b.id}`,
+        date: b.date,
+        description: b.description,
+        amount: b.amount,
+        category: b.business_category,
+        is_reconciled: matched,
+        is_director_loan: b.business_category === "Director Loan",
+        source: matched ? "both" : "bank",
+        balance_after: null,
+      };
+    });
+
+    /* -----------------------------
+       6. ADD LEDGER-ONLY TRANSACTIONS
+    ------------------------------ */
+
+    ledgerTx.forEach((l) => {
+      const key = `${l.date}|${l.amount}|${l.description}`;
+      const matched = ledgerLookup.has(key);
+
+      if (!matched) {
+        merged.push({
+          id: `ledger:${l.id}`,
+          date: l.date,
+          description: l.description,
+          amount: l.amount,
+          category: l.account_code,
+          is_reconciled: false,
+          is_director_loan: l.account_code?.startsWith("5041") ?? false,
+          source: "ledger",
+          balance_after: null,
+        });
+      }
+    });
+
+    /* -----------------------------
+       7. SORT BY DATE
+    ------------------------------ */
+    merged.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    /* -----------------------------
+       8. RUNNING BALANCES PER ACCOUNT
+    ------------------------------ */
+
+    const finalTx: BankReportTransaction[] = [];
+
+    for (const acc of accounts as BankReportAccount[]) {
+      const txForAcc = merged.filter((t) =>
+        t.id.startsWith(`${acc.account_code}:`)
+      );
+
+      const withBalance = computeRunningBalance(
+        txForAcc,
+        acc.opening_balance || 0
+      );
+
+      finalTx.push(...withBalance);
+    }
+
+    /* -----------------------------
+       9. BUILD RESPONSE
+    ------------------------------ */
+
+    const response = {
+      accounts: (accounts as BankReportAccount[]).map((a) => ({
+        account_code: a.account_code,
+        account_name: a.account_name,
+        opening_balance: a.opening_balance,
+        closing_balance: a.closing_balance,
+      })),
+      transactions: finalTx,
+    };
+
+    return res.status(200).json(response);
+  } catch (err: any) {
+    console.error("Bank report error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+}
