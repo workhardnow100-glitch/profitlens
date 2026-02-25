@@ -48,6 +48,10 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // 🔥 Fix Vercel → Supabase header conflict
+  delete req.headers["x-vercel-client-id"];
+  delete req.headers["request.client_id"];
+
   try {
     /* -----------------------------
        1. FETCH BANK LEDGER ACCOUNTS
