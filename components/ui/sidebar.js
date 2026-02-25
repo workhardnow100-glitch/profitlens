@@ -818,6 +818,22 @@ const pendingUnlockCount = unlockCountData?.pending || 0;
   </Link>
 </SidebarMenuItem>
 
+{/* Bank Report */}
+<SidebarMenuItem>
+  <Link
+    href="/reports/bank"
+    className={`flex items-center gap-2 px-4 py-2 rounded transition-colors ${
+      router.pathname === "/reports/bank"
+        ? "bg-blue-50 text-blue-700 font-semibold"
+        : "text-slate-700 hover:bg-slate-100"
+    }`}
+  >
+    <FileText size={16} />
+    <span>Bank Report</span>
+  </Link>
+</SidebarMenuItem>
+
+
 {/* Trial Balance */}
 <SidebarMenuItem>
   <Link
