@@ -1,6 +1,6 @@
 // pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../../lib/supabase-client";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 /* -----------------------------
    TYPE DEFINITIONS
@@ -48,15 +48,11 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  // 🔥 Fix Vercel → Supabase header conflict
-  delete req.headers["x-vercel-client-id"];
-  delete req.headers["request.client_id"];
-
   try {
     /* -----------------------------
        1. FETCH BANK LEDGER ACCOUNTS
     ------------------------------ */
-    const { data: accounts, error: accErr } = await supabase
+    const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
       .eq("is_bank_account", true);
@@ -69,7 +65,7 @@ export default async function handler(
     /* -----------------------------
        2. FETCH BANK FEED TRANSACTIONS
     ------------------------------ */
-    const { data: bankTx, error: bankErr } = await supabase
+    const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
@@ -80,7 +76,7 @@ export default async function handler(
     /* -----------------------------
        3. FETCH LEDGER JOURNAL ENTRIES
     ------------------------------ */
-    const { data: ledgerTx, error: ledErr } = await supabase
+    const { data: ledgerTx, error: ledErr } = await supabaseAdmin
       .from("journal_entries")
       .select("*")
       .in("account_code", bankAccountCodes)
