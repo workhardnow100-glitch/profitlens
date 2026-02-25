@@ -1,6 +1,6 @@
 // pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../lib/supabase-client";
 
 /* -----------------------------
    TYPE DEFINITIONS
