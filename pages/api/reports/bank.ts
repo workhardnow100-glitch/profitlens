@@ -58,6 +58,9 @@ export default async function handler(
       .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
+    if (!accounts || accounts.length === 0) {
+      return res.status(200).json({ accounts: [], transactions: [] });
+    }
 
     const bankAccountIds = accounts.map((a) => a.id);
     const bankAccountCodes = accounts.map((a) => a.account_code);
@@ -74,32 +77,57 @@ export default async function handler(
     if (bankErr) throw bankErr;
 
     /* -----------------------------
-       3. FETCH LEDGER JOURNAL ENTRIES
+       3. FETCH LEDGER JOURNAL LINES
+          (JOIN JOURNAL ENTRIES)
     ------------------------------ */
-    const { data: ledgerTx, error: ledErr } = await supabaseAdmin
-      .from("journal_entries")
-      .select("*")
-      .in("account_code", bankAccountCodes)
-      .order("date", { ascending: true });
+    const { data: ledgerLines, error: ledErr } = await supabaseAdmin
+      .from("journal_lines")
+      .select(
+        `
+        id,
+        debit,
+        credit,
+        account_id,
+        journal_entries (
+          id,
+          date,
+          description
+        )
+      `
+      )
+      .in("account_id", bankAccountIds)
+      .order("journal_entries.date", { ascending: true });
 
     if (ledErr) throw ledErr;
 
     /* -----------------------------
        4. LEDGER MATCH LOOKUP
+       (BANK vs LEDGER)
     ------------------------------ */
-    const ledgerLookup = new Set(
-      ledgerTx.map((l) => `${l.date}|${l.amount}|${l.description}`)
-    );
+
+    const ledgerLookup = new Set<string>();
+
+    (ledgerLines || []).forEach((l: any) => {
+      const je = l.journal_entries;
+      if (!je) return;
+      const ledgerAmount =
+        Number(l.debit || 0) - Number(l.credit || 0); // debit-positive for bank (asset) accounts
+      const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
+      ledgerLookup.add(key);
+    });
 
     /* -----------------------------
        5. MERGE BANK + LEDGER
     ------------------------------ */
 
-    const merged: BankReportTransaction[] = bankTx.map((b) => {
-      const key = `${b.date}|${b.amount}|${b.description}`;
+    const merged: BankReportTransaction[] = [];
+
+    // Bank feed transactions
+    (bankTx || []).forEach((b: any) => {
+      const key = `${b.date}|${Number(b.amount)}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
 
-      return {
+      merged.push({
         id: `${b.coa_id}:${b.id}`,
         date: b.date,
         description: b.description,
@@ -109,26 +137,28 @@ export default async function handler(
         is_director_loan: b.business_category === "Director Loan",
         source: matched ? "both" : "bank",
         balance_after: null,
-      };
+      });
     });
 
-    /* -----------------------------
-       6. ADD LEDGER-ONLY TRANSACTIONS
-    ------------------------------ */
+    // Ledger-only lines
+    (ledgerLines || []).forEach((l: any) => {
+      const je = l.journal_entries;
+      if (!je) return;
 
-    ledgerTx.forEach((l) => {
-      const key = `${l.date}|${l.amount}|${l.description}`;
+      const ledgerAmount =
+        Number(l.debit || 0) - Number(l.credit || 0); // debit-positive
+      const key = `${je.date}|${ledgerAmount}|${je.description || ""}`;
       const matched = ledgerLookup.has(key);
 
       if (!matched) {
         merged.push({
           id: `ledger:${l.id}`,
-          date: l.date,
-          description: l.description,
-          amount: Number(l.amount),
-          category: l.account_code,
+          date: je.date,
+          description: je.description,
+          amount: ledgerAmount,
+          category: l.account_id, // COA id reference
           is_reconciled: false,
-          is_director_loan: l.account_code?.startsWith("5041") ?? false,
+          is_director_loan: false,
           source: "ledger",
           balance_after: null,
         });
@@ -136,32 +166,31 @@ export default async function handler(
     });
 
     /* -----------------------------
-       7. SORT BY DATE
+       6. SORT BY DATE
     ------------------------------ */
-    merged.sort((a, b) => (a.date < b.date ? -1 : 1));
+    merged.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 
     /* -----------------------------
-       8. RUNNING BALANCES PER ACCOUNT
+       7. RUNNING BALANCES PER ACCOUNT
     ------------------------------ */
 
     const finalTx: BankReportTransaction[] = [];
 
-    for (const acc of accounts) {
+    for (const acc of accounts as BankReportAccount[]) {
       const txForAcc = merged.filter((t) =>
-        t.id.startsWith(`${acc.id}:`)
+        t.id.startsWith(`${acc.id}:`) || t.category === acc.id
       );
 
       const withBalance = computeRunningBalance(txForAcc, 0);
-
       finalTx.push(...withBalance);
     }
 
     /* -----------------------------
-       9. BUILD RESPONSE
+       8. BUILD RESPONSE
     ------------------------------ */
 
     const response = {
-      accounts: accounts.map((a) => ({
+      accounts: (accounts as BankReportAccount[]).map((a) => ({
         account_code: a.account_code,
         account_name: a.account_name,
         opening_balance: 0,
