@@ -199,6 +199,12 @@ export default function AccountingOverviewPage() {
         <p className="text-sm text-gray-500">
           Cockpit-grade view of your ledger, control accounts, and performance.
         </p>
+
+        {/* Explanation Banner */}
+        <div className="mt-4 mb-2 p-3 rounded-md bg-purple-50 border border-purple-200 text-purple-800 text-sm">
+          <strong>About this page:</strong> This view shows your full accrual-based ledger, including journals, adjustments, retained earnings,
+          income and expense accounts, and balances carried forward from previous periods.
+        </div>
       </header>
 
       {/* -----------------------------
@@ -221,6 +227,7 @@ export default function AccountingOverviewPage() {
           <StatCard label="Expenses (YTD)" value={financial_health.expenses_ytd} />
         </div>
       </section>
+
 
       {/* -----------------------------
          CASH FLOW + BANK + TAX

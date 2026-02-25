@@ -276,26 +276,34 @@ export default function Dashboard() {
     };
   }, [hcReady, Highcharts, breakdown]);
 
-  return (
-    <ResponsiveLayout>
-      <h1 className="text-2xl font-bold">Dashboard</h1>
-      <p className="text-slate-600 mt-2">
-        Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this
-        is your cockpit.
-      </p>
+ return (
+  <ResponsiveLayout>
+    <h1 className="text-2xl font-bold">Dashboard</h1>
+    <p className="text-slate-600 mt-2">
+      Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this
+      is your cockpit.
+    </p>
 
-      {error && <p className="text-red-600 mt-4">{error}</p>}
-      {loading && <p className="text-slate-500 mt-4">Loading...</p>}
+    {/* Explanation Banner */}
+    <div className="mt-4 mb-6 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+      <strong>About this dashboard:</strong> This view shows cash-based activity 
+      from your bank transactions for the current year. Ledger adjustments, journals, 
+      previous-year balances, and non-cash items appear in the Accounting Overview.
+    </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-        {stats.map((s) => (
-          <ResponsiveCard key={s.label}>
-            <div className="text-slate-500">{s.label}</div>
-            <div className="text-2xl font-bold">£{s.value}</div>
-          </ResponsiveCard>
-        ))}
-      </div>
+    {error && <p className="text-red-600 mt-4">{error}</p>}
+    {loading && <p className="text-slate-500 mt-4">Loading...</p>}
+
+    {/* Stat cards */}
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+      {stats.map((s) => (
+        <ResponsiveCard key={s.label}>
+          <div className="text-slate-500">{s.label}</div>
+          <div className="text-2xl font-bold">£{s.value}</div>
+        </ResponsiveCard>
+      ))}
+    </div>
+
 
       {/* Income vs Expenses */}
       <ResponsiveCard title="Income vs Expenses">
