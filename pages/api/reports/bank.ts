@@ -21,6 +21,12 @@ type UnifiedTx = {
   balance_after: number | null;
 };
 
+function normaliseDate(d: string | null | undefined): string {
+  if (!d) return "";
+  // handles "2025-07-22" and "2025-07-22T00:00:00+00"
+  return d.slice(0, 10);
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -29,8 +35,9 @@ export default async function handler(
     const { from, to, show_unmatched, show_director_loan } = req.query;
 
     const fromDate =
-      typeof from === "string" && from.trim() !== "" ? from : null;
-    const toDate = typeof to === "string" && to.trim() !== "" ? to : null;
+      typeof from === "string" && from.trim() !== "" ? normaliseDate(from) : null;
+    const toDate =
+      typeof to === "string" && to.trim() !== "" ? normaliseDate(to) : null;
     const onlyUnmatched = show_unmatched === "true";
     const onlyDirectorLoan = show_director_loan === "true";
 
@@ -113,8 +120,9 @@ export default async function handler(
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
+      const d = normaliseDate(je.date);
       const amt = Number(l.debit || 0) - Number(l.credit || 0);
-      const key = `${je.date}|${amt}|${je.description || ""}`;
+      const key = `${d}|${amt}|${je.description || ""}`;
       ledgerLookup.add(key);
     });
 
@@ -123,9 +131,10 @@ export default async function handler(
     (directorLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
+      const d = normaliseDate(je.date);
       const amt = Number(l.debit || 0) - Number(l.credit || 0);
       const absAmt = Math.abs(amt);
-      const key = `${je.date}|${absAmt}`;
+      const key = `${d}|${absAmt}`;
       directorLookup.add(key);
     });
 
@@ -134,18 +143,20 @@ export default async function handler(
 
     // BANK FEED rows
     (bankTx || []).forEach((b: any) => {
+      const d = normaliseDate(b.date);
       const amt = Number(b.amount);
-      const reconKey = `${b.date}|${amt}|${b.description || ""}`;
+
+      const reconKey = `${d}|${amt}|${b.description || ""}`;
       const matched = ledgerLookup.has(reconKey);
 
       // Director detection: date + ABS(amount), description-agnostic
-      const directorKey = `${b.date}|${Math.abs(amt)}`;
+      const directorKey = `${d}|${Math.abs(amt)}`;
       const isDirectorFromJournal = directorLookup.has(directorKey);
 
       unified.push({
         id: `${b.coa_id}:${b.id}`,
         account_id: b.coa_id,
-        date: b.date,
+        date: d,
         description: b.description,
         amount: amt,
         category: b.business_category || bankAccountNameById[b.coa_id] || null,
@@ -161,14 +172,15 @@ export default async function handler(
       const je = l.journal_entries;
       if (!je) return;
 
+      const d = normaliseDate(je.date);
       const amt = Number(l.debit || 0) - Number(l.credit || 0);
-      const key = `${je.date}|${amt}|${je.description || ""}`;
+      const key = `${d}|${amt}|${je.description || ""}`;
       const matched = ledgerLookup.has(key);
 
       unified.push({
         id: `ledger:${l.id}`,
         account_id: l.account_id,
-        date: je.date,
+        date: d,
         description: je.description,
         amount: amt,
         category: bankAccountNameById[l.account_id] || null,
