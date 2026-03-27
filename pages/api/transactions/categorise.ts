@@ -44,16 +44,7 @@ export default async function handler(
       });
     }
 
-    // 2) Prevent duplicate journals
-    if (tx.journal_entry_id) {
-      return res.status(200).json({
-        success: true,
-        journal_entry_id: tx.journal_entry_id,
-        message: "Journal already exists — skipping creation",
-      });
-    }
-
-    // 3) Resolve COA account
+    // 2) Resolve COA account
     const { data: categoryAccount, error: catErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name")
@@ -68,7 +59,7 @@ export default async function handler(
 
     const categoryAccountId = categoryAccount.id;
 
-    // 4) Resolve bank account
+    // 3) Resolve bank account
     const { data: bankAccount, error: bankErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id")
@@ -82,13 +73,13 @@ export default async function handler(
 
     const bankAccountId = bankAccount.id;
 
-    // 5) Create journal entry
+    // 4) Create journal entry
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
         date: tx.date,
         description: tx.description || `Categorised as ${category_name}`,
-        client_id: tx.client_id, // REQUIRED
+        client_id: tx.client_id,
       })
       .select("id")
       .single();
@@ -97,7 +88,7 @@ export default async function handler(
 
     const journalEntryId = je.id;
 
-    // 6) Build double-entry lines (correct column: journal_id)
+    // 5) Build double-entry lines
     const absAmount = Math.abs(amount);
 
     const lines =
@@ -137,13 +128,12 @@ export default async function handler(
 
     if (jlErr) throw jlErr;
 
-    // 7) Update transaction (⭐ no is_reconciled)
+    // 6) Update transaction (⭐ NO journal_entry_id, NO is_reconciled)
     const { error: txUpdateErr } = await supabaseAdmin
       .from("transactions")
       .update({
         business_category: category_name,
         coa_id: categoryAccountId,
-        journal_entry_id: journalEntryId,
       })
       .eq("id", transaction_id);
 
