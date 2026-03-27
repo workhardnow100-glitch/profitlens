@@ -6,7 +6,6 @@ type BankAccount = {
   id: string;
   account_code: string;
   account_name: string;
-  opening_balance: number;
 };
 
 type UnifiedTx = {
@@ -23,7 +22,7 @@ type UnifiedTx = {
 
 function normaliseDate(d: string | null | undefined): string {
   if (!d) return "";
-  return d.slice(0, 10); // handles timestamps
+  return d.slice(0, 10);
 }
 
 export default async function handler(
@@ -39,10 +38,10 @@ export default async function handler(
       typeof to === "string" && to.trim() !== "" ? normaliseDate(to) : null;
     const onlyUnmatched = show_unmatched === "true";
 
-    // 1) Fetch BANK accounts (with opening balance)
+    // 1) Fetch BANK accounts
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
-      .select("id, account_code, account_name, opening_balance")
+      .select("id, account_code, account_name")
       .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
@@ -54,9 +53,6 @@ export default async function handler(
     const bankAccountIds = bankAccounts.map((a) => a.id);
     const bankAccountNameById = Object.fromEntries(
       bankAccounts.map((a) => [a.id, a.account_name])
-    );
-    const openingMap = Object.fromEntries(
-      bankAccounts.map((a) => [a.id, Number(a.opening_balance || 0)])
     );
 
     // 2) BANK FEED rows
@@ -148,7 +144,7 @@ export default async function handler(
     if (toDate) filtered = filtered.filter((t) => t.date <= toDate);
     if (onlyUnmatched) filtered = filtered.filter((t) => t.source !== "both");
 
-    // 7) Collapse duplicates (bank+ledger)
+    // 7) Collapse duplicates
     const priority = { both: 3, bank: 2, ledger: 1 };
     const collapsed = new Map<string, UnifiedTx>();
 
@@ -166,14 +162,28 @@ export default async function handler(
 
     const finalList = Array.from(collapsed.values());
 
-    // 8) Running balances (COA opening balance)
+    // 8) Compute opening balance from ledger entries BEFORE the earliest bank feed date
     const openingByAccount: Record<string, number> = {};
     const closingByAccount: Record<string, number> = {};
 
     bankAccountIds.forEach((accId) => {
-      openingByAccount[accId] = openingMap[accId] ?? 0;
+      const opening = (bankLedgerLines || [])
+        .filter((l: any) => {
+          const je = l.journal_entries;
+          if (!je) return false;
+          const d = normaliseDate(je.date);
+          return d < (fromDate || "0000-00-00");
+        })
+        .filter((l: any) => l.account_id === accId)
+        .reduce((sum: number, l: any) => {
+          const amt = Number(l.debit || 0) - Number(l.credit || 0);
+          return sum + amt;
+        }, 0);
+
+      openingByAccount[accId] = opening;
     });
 
+    // 9) Running balances
     finalList.sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const runningByAccount: Record<string, number> = { ...openingByAccount };
@@ -189,7 +199,7 @@ export default async function handler(
       closingByAccount[accId] = runningByAccount[accId];
     });
 
-    // 9) Response
+    // 10) Response
     const responseAccounts = bankAccounts.map((a) => ({
       id: a.id,
       account_code: a.account_code,
