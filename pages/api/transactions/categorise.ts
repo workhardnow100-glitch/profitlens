@@ -82,12 +82,14 @@ export default async function handler(
 
     const bankAccountId = bankAccount.id;
 
-    // 5) Create journal entry
+    // 5) Create journal entry (⭐ FIX: include client_id + user_id)
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
         date: tx.date,
         description: tx.description || `Categorised as ${category_name}`,
+        client_id: tx.client_id,   // ⭐ REQUIRED
+        user_id: tx.user_id,       // optional but recommended
       })
       .select("id")
       .single();
