@@ -47,7 +47,7 @@ export default async function handler(
     const bankAccounts = accounts as BankAccount[];
     const bankAccountIds = bankAccounts.map((a) => a.id);
 
-    // ⭐ NEW: detect all director-related accounts
+    // ⭐ Fetch ALL accounts to detect director accounts
     const { data: allAccounts } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name");
@@ -113,7 +113,7 @@ export default async function handler(
         amount: Number(b.amount),
         category: b.business_category,
 
-        // ⭐ NEW: mark director loan movements
+        // ⭐ Director loan movement ONLY if bank feed is categorised as director
         is_director_loan:
           b.business_category === "Director Loan" ||
           directorAccountIds.includes(b.coa_id),
@@ -141,7 +141,7 @@ export default async function handler(
         amount: amt,
         category: l.account_id,
 
-        // ⭐ NEW: mark director loan ledger movements
+        // ⭐ Director loan movement ONLY if this ledger line hits a director account
         is_director_loan: directorAccountIds.includes(l.account_id),
 
         is_reconciled: matched,
