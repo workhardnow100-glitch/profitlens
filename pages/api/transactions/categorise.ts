@@ -19,7 +19,7 @@ export default async function handler(
       });
     }
 
-    // 0) Ignore "Uncategorised" — no journal should be created
+    // 0) Ignore "Uncategorised"
     if (category_name.trim() === "Uncategorised") {
       return res.status(200).json({
         success: true,
@@ -28,7 +28,7 @@ export default async function handler(
       });
     }
 
-    // 1) Load the bank transaction
+    // 1) Load the transaction
     const { data: tx, error: txErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -44,7 +44,7 @@ export default async function handler(
       });
     }
 
-    // 2) Prevent duplicate journals (re-categorisation)
+    // 2) Prevent duplicate journals
     if (tx.journal_entry_id) {
       return res.status(200).json({
         success: true,
@@ -53,7 +53,7 @@ export default async function handler(
       });
     }
 
-    // 3) Resolve COA account by account_name
+    // 3) Resolve COA account
     const { data: categoryAccount, error: catErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name")
@@ -68,7 +68,7 @@ export default async function handler(
 
     const categoryAccountId = categoryAccount.id;
 
-    // 4) Resolve the bank account
+    // 4) Resolve bank account
     const { data: bankAccount, error: bankErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id")
@@ -82,13 +82,13 @@ export default async function handler(
 
     const bankAccountId = bankAccount.id;
 
-    // 5) Create journal entry (⭐ FIX: include ONLY client_id)
+    // 5) Create journal entry (⭐ includes client_id)
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
         date: tx.date,
         description: tx.description || `Categorised as ${category_name}`,
-        client_id: tx.client_id,   // ⭐ REQUIRED
+        client_id: tx.client_id, // REQUIRED
       })
       .select("id")
       .single();
@@ -97,20 +97,20 @@ export default async function handler(
 
     const journalEntryId = je.id;
 
-    // 6) Build double-entry lines
+    // 6) Build double-entry lines (⭐ use journal_id)
     const absAmount = Math.abs(amount);
 
     const lines =
       amount < 0
         ? [
             {
-              journal_entry_id: journalEntryId,
+              journal_id: journalEntryId,
               account_id: categoryAccountId,
               debit: absAmount,
               credit: 0,
             },
             {
-              journal_entry_id: journalEntryId,
+              journal_id: journalEntryId,
               account_id: bankAccountId,
               debit: 0,
               credit: absAmount,
@@ -118,13 +118,13 @@ export default async function handler(
           ]
         : [
             {
-              journal_entry_id: journalEntryId,
+              journal_id: journalEntryId,
               account_id: bankAccountId,
               debit: absAmount,
               credit: 0,
             },
             {
-              journal_entry_id: journalEntryId,
+              journal_id: journalEntryId,
               account_id: categoryAccountId,
               debit: 0,
               credit: absAmount,
