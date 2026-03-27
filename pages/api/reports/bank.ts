@@ -108,7 +108,7 @@ export default async function handler(
       )
       .in("account_id", directorAccountIds);
 
-    // 6) Build reconciliation lookup (bank ledger lines)
+    // 6) Build reconciliation lookup (bank ledger lines: date + amount + description)
     const ledgerLookup = new Set<string>();
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
@@ -118,14 +118,14 @@ export default async function handler(
       ledgerLookup.add(key);
     });
 
-    // 7) Build director-loan lookup (director ledger lines)
+    // 7) Build director-loan lookup (director ledger lines: date + ABS(amount), IGNORE description)
     const directorLookup = new Set<string>();
     (directorLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
       const amt = Number(l.debit || 0) - Number(l.credit || 0);
       const absAmt = Math.abs(amt);
-      const key = `${je.date}|${absAmt}|${je.description || ""}`;
+      const key = `${je.date}|${absAmt}`;
       directorLookup.add(key);
     });
 
@@ -135,10 +135,11 @@ export default async function handler(
     // BANK FEED rows
     (bankTx || []).forEach((b: any) => {
       const amt = Number(b.amount);
-      const key = `${b.date}|${amt}|${b.description || ""}`;
-      const matched = ledgerLookup.has(key);
+      const reconKey = `${b.date}|${amt}|${b.description || ""}`;
+      const matched = ledgerLookup.has(reconKey);
 
-      const directorKey = `${b.date}|${Math.abs(amt)}|${b.description || ""}`;
+      // Director detection: date + ABS(amount), description-agnostic
+      const directorKey = `${b.date}|${Math.abs(amt)}`;
       const isDirectorFromJournal = directorLookup.has(directorKey);
 
       unified.push({
