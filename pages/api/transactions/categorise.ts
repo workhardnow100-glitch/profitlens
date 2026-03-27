@@ -19,6 +19,15 @@ export default async function handler(
       });
     }
 
+    // 0) Ignore "Uncategorised" — no journal should be created
+    if (category_name.trim() === "Uncategorised") {
+      return res.status(200).json({
+        success: true,
+        journal_entry_id: null,
+        message: "Uncategorised selected — no journal created",
+      });
+    }
+
     // 1) Load the bank transaction
     const { data: tx, error: txErr } = await supabaseAdmin
       .from("transactions")
@@ -35,11 +44,20 @@ export default async function handler(
       });
     }
 
-    // 2) Resolve the COA account by account_name
+    // 2) Prevent duplicate journals (re-categorisation)
+    if (tx.journal_entry_id) {
+      return res.status(200).json({
+        success: true,
+        journal_entry_id: tx.journal_entry_id,
+        message: "Journal already exists — skipping creation",
+      });
+    }
+
+    // 3) Resolve COA account by account_name
     const { data: categoryAccount, error: catErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name")
-      .eq("account_name", category_name.trim())
+      .ilike("account_name", category_name.trim()) // case-insensitive
       .single();
 
     if (catErr || !categoryAccount) {
@@ -50,7 +68,7 @@ export default async function handler(
 
     const categoryAccountId = categoryAccount.id;
 
-    // 3) Resolve the bank account (assume single main bank for now)
+    // 4) Resolve the bank account (first is_bank_account = true)
     const { data: bankAccount, error: bankErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id")
@@ -59,12 +77,12 @@ export default async function handler(
       .single();
 
     if (bankErr || !bankAccount) {
-      throw bankErr || new Error("Bank account not found");
+      throw new Error("Bank account not found");
     }
 
     const bankAccountId = bankAccount.id;
 
-    // 4) Create journal entry
+    // 5) Create journal entry
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
@@ -78,7 +96,7 @@ export default async function handler(
 
     const journalEntryId = je.id;
 
-    // 5) Build double-entry lines
+    // 6) Build double-entry lines
     const absAmount = Math.abs(amount);
 
     const lines =
@@ -118,7 +136,7 @@ export default async function handler(
 
     if (jlErr) throw jlErr;
 
-    // 6) Update transaction: link JE + mark reconciled + store category
+    // 7) Update transaction
     const { error: txUpdateErr } = await supabaseAdmin
       .from("transactions")
       .update({
