@@ -47,6 +47,9 @@ export default async function handler(
 
     const bankAccounts = accounts as BankAccount[];
     const bankAccountIds = bankAccounts.map((a) => a.id);
+    const bankAccountNameById = Object.fromEntries(
+      bankAccounts.map((a) => [a.id, a.account_name])
+    );
 
     // 2) Fetch ALL accounts to detect director accounts
     const { data: allAccounts, error: allAccErr } = await supabaseAdmin
@@ -73,8 +76,8 @@ export default async function handler(
 
     if (bankErr) throw bankErr;
 
-    // 4) LEDGER rows for those same bank accounts
-    const { data: ledgerLines, error: ledErr } = await supabaseAdmin
+    // 4) LEDGER rows for BANK accounts (for reconciliation)
+    const { data: bankLedgerLines, error: bankLedErr } = await supabaseAdmin
       .from("journal_lines")
       .select(
         `
@@ -91,12 +94,33 @@ export default async function handler(
       )
       .in("account_id", bankAccountIds);
 
-    if (ledErr) throw ledErr;
+    if (bankLedErr) throw bankLedErr;
 
-    // 5) Build match lookup (date + amount + description)
+    // 5) LEDGER rows for DIRECTOR accounts (for director loan detection)
+    const { data: directorLedgerLines, error: dirLedErr } =
+      await supabaseAdmin
+        .from("journal_lines")
+        .select(
+          `
+        id,
+        debit,
+        credit,
+        account_id,
+        journal_entries (
+          id,
+          date,
+          description
+        )
+      `
+        )
+        .in("account_id", directorAccountIds);
+
+    if (dirLedErr) throw dirLedErr;
+
+    // 6) Build match lookup (date + amount + description) for BANK ledger lines
     const ledgerLookup = new Set<string>();
 
-    (ledgerLines || []).forEach((l: any) => {
+    (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
       const amt = Number(l.debit || 0) - Number(l.credit || 0);
@@ -104,12 +128,25 @@ export default async function handler(
       ledgerLookup.add(key);
     });
 
-    // 6) Build unified list
+    // 7) Build director-loan lookup keyed by date + ABS(amount) + description
+    const directorLookup = new Set<string>();
+
+    (directorLedgerLines || []).forEach((l: any) => {
+      const je = l.journal_entries;
+      if (!je) return;
+      const amt = Number(l.debit || 0) - Number(l.credit || 0);
+      const absAmt = Math.abs(amt);
+      const key = `${je.date}|${absAmt}|${je.description || ""}`;
+      directorLookup.add(key);
+    });
+
+    // 8) Build unified list
     const unified: UnifiedTx[] = [];
 
     // Bank feed rows
     (bankTx || []).forEach((b: any) => {
-      const key = `${b.date}|${Number(b.amount)}|${b.description || ""}`;
+      const amt = Number(b.amount);
+      const key = `${b.date}|${amt}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
 
       const businessCategory =
@@ -119,24 +156,25 @@ export default async function handler(
         .toLowerCase()
         .includes("director");
 
-      const isDirectorFromCoa = directorAccountIds.includes(b.coa_id);
+      const directorKey = `${b.date}|${Math.abs(amt)}|${b.description || ""}`;
+      const isDirectorFromJournal = directorLookup.has(directorKey);
 
       unified.push({
         id: `${b.coa_id}:${b.id}`,
         account_id: b.coa_id,
         date: b.date,
         description: b.description,
-        amount: Number(b.amount),
-        category: b.business_category,
-        is_director_loan: isDirectorFromCategory || isDirectorFromCoa,
+        amount: amt,
+        category: businessCategory || bankAccountNameById[b.coa_id] || null,
+        is_director_loan: isDirectorFromCategory || isDirectorFromJournal,
         is_reconciled: matched,
         source: matched ? "both" : "bank",
         balance_after: null,
       });
     });
 
-    // Ledger rows — ALWAYS include them
-    (ledgerLines || []).forEach((l: any) => {
+    // Ledger rows for BANK accounts — ALWAYS include them
+    (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
 
@@ -150,15 +188,15 @@ export default async function handler(
         date: je.date,
         description: je.description,
         amount: amt,
-        category: l.account_id, // still COA id; UI can resolve if needed
-        is_director_loan: directorAccountIds.includes(l.account_id),
+        category: bankAccountNameById[l.account_id] || null,
+        is_director_loan: false, // director side is on director accounts, not bank
         is_reconciled: matched,
         source: matched ? "both" : "ledger",
         balance_after: null,
       });
     });
 
-    // 7) Apply filters
+    // 9) Apply filters
     let filtered = unified;
 
     if (fromDate) filtered = filtered.filter((t) => t.date >= fromDate);
@@ -167,7 +205,7 @@ export default async function handler(
     if (onlyDirectorLoan)
       filtered = filtered.filter((t) => t.is_director_loan);
 
-    // 8) Opening + running + closing balances
+    // 10) Opening + running + closing balances
     const openingByAccount: Record<string, number> = {};
     const closingByAccount: Record<string, number> = {};
 
@@ -198,7 +236,7 @@ export default async function handler(
         runningByAccount[accId] ?? openingByAccount[accId];
     });
 
-    // 9) Response
+    // 11) Response
     const responseAccounts = bankAccounts.map((a) => ({
       id: a.id,
       account_code: a.account_code,
