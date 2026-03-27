@@ -72,7 +72,7 @@ export default async function handler(
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
       .eq("is_bank_account", true)
-      .eq("client_id", clientId);
+      
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
