@@ -59,7 +59,7 @@ export default function BankReportPage() {
     if (!data) return [];
 
     return data.transactions.filter((t) => {
-      // ✅ correct account filter: compare COA id to selectedAccount
+      // ⭐ FIXED: correct account filtering using account_id
       if (selectedAccount !== "all" && t.account_id !== selectedAccount) {
         return false;
       }
@@ -106,10 +106,6 @@ export default function BankReportPage() {
         <p className="text-sm text-gray-500">
           Detailed, accountant-grade view of your bank activity, unmatched items, and reconciliation status.
         </p>
-        <div className="mt-2 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
-          <strong>About this report:</strong> This page shows bank transactions alongside their ledger status.
-          Use it to review unmatched items, director loan movements, and reconciliation differences between the bank feed and the ledger.
-        </div>
         <Link href="/accounting-overview" className="text-xs text-blue-600 hover:underline">
           ← Back to Accounting Overview
         </Link>
@@ -154,6 +150,8 @@ export default function BankReportPage() {
               onChange={(e) => setSelectedAccount(e.target.value)}
             >
               <option value="all">All accounts</option>
+
+              {/* ⭐ FIXED: use COA ID, not account_code */}
               {data.accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.account_code} · {a.account_name}
@@ -189,7 +187,7 @@ export default function BankReportPage() {
               checked={showUnmatchedOnly}
               onChange={(e) => setShowUnmatchedOnly(e.target.checked)}
             />
-            Show unmatched (bank vs ledger) only
+            Show unmatched only
           </label>
 
           <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -199,12 +197,12 @@ export default function BankReportPage() {
               checked={showDirectorLoanOnly}
               onChange={(e) => setShowDirectorLoanOnly(e.target.checked)}
             />
-            Show director loan movements only
+            Show director loan only
           </label>
         </div>
       </section>
 
-      {/* Transactions table */}
+      {/* Transactions */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Bank Transactions</h2>
         {filteredTransactions.length === 0 ? (
@@ -229,9 +227,7 @@ export default function BankReportPage() {
                   <tr key={t.id} className="border-t border-gray-100">
                     <td className="px-2 py-1 text-gray-700">{t.date}</td>
                     <td className="px-2 py-1 text-gray-700">{t.description}</td>
-                    <td className="px-2 py-1 text-gray-700">
-                      {formatCurrency(t.amount)}
-                    </td>
+                    <td className="px-2 py-1 text-gray-700">{formatCurrency(t.amount)}</td>
                     <td className="px-2 py-1 text-gray-700">
                       {t.balance_after === null ? "-" : formatCurrency(t.balance_after)}
                     </td>
