@@ -109,7 +109,7 @@ export default function BankReportPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-6">
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">Bank Report</h1>
         <p className="text-sm text-gray-500">
@@ -126,7 +126,7 @@ export default function BankReportPage() {
         {data.accounts.length === 0 ? (
           <p className="text-sm text-gray-500">No bank accounts with activity yet.</p>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {data.accounts.map((a) => (
               <div
                 key={a.id}
@@ -151,10 +151,10 @@ export default function BankReportPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Filters</h2>
         <div className="flex flex-wrap gap-3 items-end">
-          <div className="flex flex-col text-sm">
+          <div className="flex flex-col text-sm w-full sm:w-auto">
             <label className="text-gray-600 mb-1">Account</label>
             <select
-              className="border rounded px-2 py-1 text-sm"
+              className="border rounded px-2 py-2 text-sm"
               value={selectedAccount}
               onChange={(e) => setSelectedAccount(e.target.value)}
             >
@@ -167,27 +167,27 @@ export default function BankReportPage() {
             </select>
           </div>
 
-          <div className="flex flex-col text-sm">
+          <div className="flex flex-col text-sm w-full sm:w-auto">
             <label className="text-gray-600 mb-1">From</label>
             <input
               type="date"
-              className="border rounded px-2 py-1 text-sm"
+              className="border rounded px-2 py-2 text-sm"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
             />
           </div>
 
-          <div className="flex flex-col text-sm">
+          <div className="flex flex-col text-sm w-full sm:w-auto">
             <label className="text-gray-600 mb-1">To</label>
             <input
               type="date"
-              className="border rounded px-2 py-1 text-sm"
+              className="border rounded px-2 py-2 text-sm"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-gray-700">
+          <label className="flex items-center gap-2 text-sm text-gray-700 w-full sm:w-auto">
             <input
               type="checkbox"
               className="rounded border-gray-300"
@@ -221,23 +221,25 @@ export default function BankReportPage() {
               <tbody>
                 {filteredTransactions.map((t) => (
                   <tr key={t.id} className="border-t border-gray-100">
-                    <td className="px-2 py-1 text-gray-700">{t.date}</td>
-                    <td className="px-2 py-1 text-gray-700">{t.description}</td>
-                    <td className="px-2 py-1 text-gray-700">{formatCurrency(t.amount)}</td>
-                    <td className="px-2 py-1 text-gray-700">
+                    <td className="px-2 py-2 text-gray-700 whitespace-nowrap">{t.date}</td>
+                    <td className="px-2 py-2 text-gray-700">{t.description}</td>
+                    <td className="px-2 py-2 text-gray-700 whitespace-nowrap">
+                      {formatCurrency(t.amount)}
+                    </td>
+                    <td className="px-2 py-2 text-gray-700 whitespace-nowrap">
                       {t.balance_after === null ? "-" : formatCurrency(t.balance_after)}
                     </td>
-                    <td className="px-2 py-1 text-gray-700">
+                    <td className="px-2 py-2 text-gray-700">
                       {t.category ?? <span className="text-gray-400 italic">Uncategorised</span>}
                     </td>
-                    <td className="px-2 py-1 text-gray-700">
+                    <td className="px-2 py-2 text-gray-700 whitespace-nowrap">
                       {t.source === "both"
                         ? "Bank + Ledger"
                         : t.source === "bank"
                         ? "Bank only"
                         : "Ledger only"}
                     </td>
-                    <td className="px-2 py-1 text-gray-700">
+                    <td className="px-2 py-2 text-gray-700 whitespace-nowrap">
                       {t.is_reconciled ? (
                         <span className="text-green-600 font-semibold">Yes</span>
                       ) : (

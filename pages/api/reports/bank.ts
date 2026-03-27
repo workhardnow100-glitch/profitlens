@@ -1,6 +1,7 @@
 // pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { requireRole } from "../../../lib/rbac";
 
 type BankAccount = {
   id: string;
@@ -30,6 +31,34 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
+    // ⭐ RBAC + subscription + client scoping
+    const guard = await requireRole(req, res, [
+      "USER",
+      "ACCOUNTANT",
+      "ADMIN",
+      "FOUNDER",
+    ]);
+    if (!guard.ok) return;
+
+    const role = guard.role;
+    const isFounder = role === "FOUNDER";
+    const isAccountant = role === "ACCOUNTANT";
+
+    const subscriptionStatus =
+      (req as any)?.session?.user?.subscriptionStatus || "incomplete";
+    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(
+      subscriptionStatus
+    );
+
+    if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
+      return res.status(403).json({ error: "Upgrade required" });
+    }
+
+    const clientId = guard.actingAsClientId || guard.clientId;
+    if (!clientId || clientId === "unknown-client") {
+      return res.status(400).json({ error: "Invalid client ID" });
+    }
+
     const { from, to, show_unmatched } = req.query;
 
     const fromDate =
@@ -38,11 +67,12 @@ export default async function handler(
       typeof to === "string" && to.trim() !== "" ? normaliseDate(to) : null;
     const onlyUnmatched = show_unmatched === "true";
 
-    // 1) Fetch BANK accounts
+    // 1) Fetch BANK accounts for this client
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
-      .eq("is_bank_account", true);
+      .eq("is_bank_account", true)
+      .eq("client_id", clientId);
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
@@ -55,15 +85,18 @@ export default async function handler(
       bankAccounts.map((a) => [a.id, a.account_name])
     );
 
-    // 2) BANK FEED rows
-    const { data: bankTx } = await supabaseAdmin
+    // 2) BANK FEED rows (scoped to client)
+    const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
+      .eq("client_id", clientId)
       .order("date", { ascending: true });
 
-    // 3) LEDGER rows for BANK accounts
-    const { data: bankLedgerLines } = await supabaseAdmin
+    if (bankErr) throw bankErr;
+
+    // 3) LEDGER rows for BANK accounts (scoped to client)
+    const { data: bankLedgerLines, error: ledgerErr } = await supabaseAdmin
       .from("journal_lines")
       .select(
         `
@@ -71,6 +104,7 @@ export default async function handler(
         debit,
         credit,
         account_id,
+        client_id,
         journal_entries (
           id,
           date,
@@ -78,7 +112,10 @@ export default async function handler(
         )
       `
       )
-      .in("account_id", bankAccountIds);
+      .in("account_id", bankAccountIds)
+      .eq("client_id", clientId);
+
+    if (ledgerErr) throw ledgerErr;
 
     // 4) Build reconciliation lookup
     const ledgerLookup = new Set<string>();
@@ -162,7 +199,7 @@ export default async function handler(
 
     const finalList = Array.from(collapsed.values());
 
-    // 8) Compute opening balance from ledger entries BEFORE the earliest bank feed date
+    // 8) Compute opening balance from ledger entries BEFORE fromDate
     const openingByAccount: Record<string, number> = {};
     const closingByAccount: Record<string, number> = {};
 
@@ -214,6 +251,6 @@ export default async function handler(
     });
   } catch (err: any) {
     console.error("Bank report error:", err);
-    return res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: "Unexpected error" });
   }
 }
