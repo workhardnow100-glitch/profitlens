@@ -57,7 +57,7 @@ export default async function handler(
     const { data: categoryAccount, error: catErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name")
-      .ilike("account_name", category_name.trim()) // case-insensitive
+      .ilike("account_name", category_name.trim())
       .single();
 
     if (catErr || !categoryAccount) {
@@ -68,7 +68,7 @@ export default async function handler(
 
     const categoryAccountId = categoryAccount.id;
 
-    // 4) Resolve the bank account (first is_bank_account = true)
+    // 4) Resolve the bank account
     const { data: bankAccount, error: bankErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id")
@@ -82,14 +82,13 @@ export default async function handler(
 
     const bankAccountId = bankAccount.id;
 
-    // 5) Create journal entry (⭐ FIX: include client_id + user_id)
+    // 5) Create journal entry (⭐ FIX: include ONLY client_id)
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
         date: tx.date,
         description: tx.description || `Categorised as ${category_name}`,
         client_id: tx.client_id,   // ⭐ REQUIRED
-        user_id: tx.user_id,       // optional but recommended
       })
       .select("id")
       .single();
