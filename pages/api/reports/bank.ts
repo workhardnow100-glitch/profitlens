@@ -1,3 +1,4 @@
+// pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
@@ -106,7 +107,7 @@ export default async function handler(
       });
     });
 
-    // Ledger-only rows
+    // Ledger rows — ALWAYS include them
     (ledgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -115,20 +116,18 @@ export default async function handler(
       const key = `${je.date}|${amt}|${je.description || ""}`;
       const matched = ledgerLookup.has(key);
 
-      if (!matched) {
-        unified.push({
-          id: `ledger:${l.id}`,
-          account_id: l.account_id,
-          date: je.date,
-          description: je.description,
-          amount: amt,
-          category: l.account_id,
-          is_reconciled: false,
-          is_director_loan: false,
-          source: "ledger",
-          balance_after: null,
-        });
-      }
+      unified.push({
+        id: `ledger:${l.id}`,
+        account_id: l.account_id,
+        date: je.date,
+        description: je.description,
+        amount: amt,
+        category: l.account_id,
+        is_reconciled: matched,
+        is_director_loan: false,
+        source: matched ? "both" : "ledger",
+        balance_after: null,
+      });
     });
 
     // 6) Apply filters
