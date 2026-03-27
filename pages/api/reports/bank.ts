@@ -67,12 +67,11 @@ export default async function handler(
       typeof to === "string" && to.trim() !== "" ? normaliseDate(to) : null;
     const onlyUnmatched = show_unmatched === "true";
 
-    // 1) Fetch BANK accounts for this client
+    // 1) Fetch BANK accounts (COA is NOT client-scoped)
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
-      .eq("is_bank_account", true)
-      
+      .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
@@ -95,7 +94,8 @@ export default async function handler(
 
     if (bankErr) throw bankErr;
 
-    // 3) LEDGER rows for BANK accounts (scoped to client)
+    // 3) LEDGER rows for BANK accounts
+    // journal_lines has NO client_id column → filter via journal_entries instead
     const { data: bankLedgerLines, error: ledgerErr } = await supabaseAdmin
       .from("journal_lines")
       .select(
@@ -104,22 +104,26 @@ export default async function handler(
         debit,
         credit,
         account_id,
-        client_id,
         journal_entries (
           id,
           date,
-          description
+          description,
+          client_id
         )
       `
       )
-      .in("account_id", bankAccountIds)
-      .eq("client_id", clientId);
+      .in("account_id", bankAccountIds);
 
     if (ledgerErr) throw ledgerErr;
 
+    // Filter ledger rows by client_id via journal_entries
+    const scopedLedgerLines = (bankLedgerLines || []).filter(
+      (l: any) => l.journal_entries?.client_id === clientId
+    );
+
     // 4) Build reconciliation lookup
     const ledgerLookup = new Set<string>();
-    (bankLedgerLines || []).forEach((l: any) => {
+    scopedLedgerLines.forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
       const d = normaliseDate(je.date);
@@ -152,7 +156,7 @@ export default async function handler(
     });
 
     // LEDGER rows
-    (bankLedgerLines || []).forEach((l: any) => {
+    scopedLedgerLines.forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
 
@@ -204,7 +208,7 @@ export default async function handler(
     const closingByAccount: Record<string, number> = {};
 
     bankAccountIds.forEach((accId) => {
-      const opening = (bankLedgerLines || [])
+      const opening = scopedLedgerLines
         .filter((l: any) => {
           const je = l.journal_entries;
           if (!je) return false;
