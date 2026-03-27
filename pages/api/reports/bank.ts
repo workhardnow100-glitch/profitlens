@@ -6,6 +6,7 @@ type BankAccount = {
   id: string;
   account_code: string;
   account_name: string;
+  opening_balance: number;
 };
 
 type UnifiedTx = {
@@ -16,15 +17,13 @@ type UnifiedTx = {
   amount: number;
   category: string | null;
   is_reconciled: boolean;
-  is_director_loan: boolean;
   source: "bank" | "ledger" | "both";
   balance_after: number | null;
 };
 
 function normaliseDate(d: string | null | undefined): string {
   if (!d) return "";
-  // handles "2025-07-22" and "2025-07-22T00:00:00+00"
-  return d.slice(0, 10);
+  return d.slice(0, 10); // handles timestamps
 }
 
 export default async function handler(
@@ -32,19 +31,18 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
-    const { from, to, show_unmatched, show_director_loan } = req.query;
+    const { from, to, show_unmatched } = req.query;
 
     const fromDate =
       typeof from === "string" && from.trim() !== "" ? normaliseDate(from) : null;
     const toDate =
       typeof to === "string" && to.trim() !== "" ? normaliseDate(to) : null;
     const onlyUnmatched = show_unmatched === "true";
-    const onlyDirectorLoan = show_director_loan === "true";
 
-    // 1) Fetch BANK accounts only
+    // 1) Fetch BANK accounts (with opening balance)
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
-      .select("id, account_code, account_name")
+      .select("id, account_code, account_name, opening_balance")
       .eq("is_bank_account", true);
 
     if (accErr) throw accErr;
@@ -57,29 +55,18 @@ export default async function handler(
     const bankAccountNameById = Object.fromEntries(
       bankAccounts.map((a) => [a.id, a.account_name])
     );
+    const openingMap = Object.fromEntries(
+      bankAccounts.map((a) => [a.id, Number(a.opening_balance || 0)])
+    );
 
-    // 2) Fetch ALL accounts to detect director accounts
-    const { data: allAccounts } = await supabaseAdmin
-      .from("chart_of_account_entries")
-      .select("id, account_name");
-
-    const directorAccountIds =
-      allAccounts
-        ?.filter(
-          (a: any) =>
-            typeof a.account_name === "string" &&
-            a.account_name.toLowerCase().includes("director")
-        )
-        .map((a: any) => a.id) ?? [];
-
-    // 3) BANK FEED rows
+    // 2) BANK FEED rows
     const { data: bankTx } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
       .order("date", { ascending: true });
 
-    // 4) LEDGER rows for BANK accounts
+    // 3) LEDGER rows for BANK accounts
     const { data: bankLedgerLines } = await supabaseAdmin
       .from("journal_lines")
       .select(
@@ -97,25 +84,7 @@ export default async function handler(
       )
       .in("account_id", bankAccountIds);
 
-    // 5) LEDGER rows for DIRECTOR accounts
-    const { data: directorLedgerLines } = await supabaseAdmin
-      .from("journal_lines")
-      .select(
-        `
-        id,
-        debit,
-        credit,
-        account_id,
-        journal_entries (
-          id,
-          date,
-          description
-        )
-      `
-      )
-      .in("account_id", directorAccountIds);
-
-    // 6) Build reconciliation lookup (bank ledger lines: date + amount + description)
+    // 4) Build reconciliation lookup
     const ledgerLookup = new Set<string>();
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
@@ -126,32 +95,15 @@ export default async function handler(
       ledgerLookup.add(key);
     });
 
-    // 7) Build director-loan lookup (director ledger lines: date + ABS(amount), IGNORE description)
-    const directorLookup = new Set<string>();
-    (directorLedgerLines || []).forEach((l: any) => {
-      const je = l.journal_entries;
-      if (!je) return;
-      const d = normaliseDate(je.date);
-      const amt = Number(l.debit || 0) - Number(l.credit || 0);
-      const absAmt = Math.abs(amt);
-      const key = `${d}|${absAmt}`;
-      directorLookup.add(key);
-    });
-
-    // 8) Build unified list
+    // 5) Build unified list
     const unified: UnifiedTx[] = [];
 
     // BANK FEED rows
     (bankTx || []).forEach((b: any) => {
       const d = normaliseDate(b.date);
       const amt = Number(b.amount);
-
       const reconKey = `${d}|${amt}|${b.description || ""}`;
       const matched = ledgerLookup.has(reconKey);
-
-      // Director detection: date + ABS(amount), description-agnostic
-      const directorKey = `${d}|${Math.abs(amt)}`;
-      const isDirectorFromJournal = directorLookup.has(directorKey);
 
       unified.push({
         id: `${b.coa_id}:${b.id}`,
@@ -160,14 +112,13 @@ export default async function handler(
         description: b.description,
         amount: amt,
         category: b.business_category || bankAccountNameById[b.coa_id] || null,
-        is_director_loan: isDirectorFromJournal,
         is_reconciled: matched,
         source: matched ? "both" : "bank",
         balance_after: null,
       });
     });
 
-    // LEDGER rows for BANK accounts
+    // LEDGER rows
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -184,42 +135,50 @@ export default async function handler(
         description: je.description,
         amount: amt,
         category: bankAccountNameById[l.account_id] || null,
-        is_director_loan: false,
         is_reconciled: matched,
         source: matched ? "both" : "ledger",
         balance_after: null,
       });
     });
 
-    // 9) Apply filters
+    // 6) Apply filters
     let filtered = unified;
 
     if (fromDate) filtered = filtered.filter((t) => t.date >= fromDate);
     if (toDate) filtered = filtered.filter((t) => t.date <= toDate);
     if (onlyUnmatched) filtered = filtered.filter((t) => t.source !== "both");
-    if (onlyDirectorLoan)
-      filtered = filtered.filter((t) => t.is_director_loan);
 
-    // 10) Opening + running + closing balances
+    // 7) Collapse duplicates (bank+ledger)
+    const priority = { both: 3, bank: 2, ledger: 1 };
+    const collapsed = new Map<string, UnifiedTx>();
+
+    for (const tx of filtered) {
+      const key = `${tx.date}|${tx.amount}|${tx.description}`;
+      if (!collapsed.has(key)) {
+        collapsed.set(key, tx);
+        continue;
+      }
+      const existing = collapsed.get(key)!;
+      if (priority[tx.source] > priority[existing.source]) {
+        collapsed.set(key, tx);
+      }
+    }
+
+    const finalList = Array.from(collapsed.values());
+
+    // 8) Running balances (COA opening balance)
     const openingByAccount: Record<string, number> = {};
     const closingByAccount: Record<string, number> = {};
 
-    if (fromDate) {
-      bankAccountIds.forEach((accId) => {
-        const opening = unified
-          .filter((t) => t.account_id === accId && t.date < fromDate)
-          .reduce((sum, t) => sum + t.amount, 0);
-        openingByAccount[accId] = opening;
-      });
-    } else {
-      bankAccountIds.forEach((accId) => (openingByAccount[accId] = 0));
-    }
+    bankAccountIds.forEach((accId) => {
+      openingByAccount[accId] = openingMap[accId] ?? 0;
+    });
 
-    filtered.sort((a, b) => (a.date < b.date ? -1 : 1));
+    finalList.sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const runningByAccount: Record<string, number> = { ...openingByAccount };
 
-    const finalTx = filtered.map((t) => {
+    const finalTx = finalList.map((t) => {
       const current = runningByAccount[t.account_id] ?? 0;
       const next = current + t.amount;
       runningByAccount[t.account_id] = next;
@@ -227,11 +186,10 @@ export default async function handler(
     });
 
     bankAccountIds.forEach((accId) => {
-      closingByAccount[accId] =
-        runningByAccount[accId] ?? openingByAccount[accId];
+      closingByAccount[accId] = runningByAccount[accId];
     });
 
-    // 11) Response
+    // 9) Response
     const responseAccounts = bankAccounts.map((a) => ({
       id: a.id,
       account_code: a.account_code,
