@@ -52,11 +52,9 @@ export default async function handler(
     );
 
     // 2) Fetch ALL accounts to detect director accounts
-    const { data: allAccounts, error: allAccErr } = await supabaseAdmin
+    const { data: allAccounts } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_name");
-
-    if (allAccErr) throw allAccErr;
 
     const directorAccountIds =
       allAccounts
@@ -67,17 +65,15 @@ export default async function handler(
         )
         .map((a: any) => a.id) ?? [];
 
-    // 3) BANK FEED rows (transactions hitting bank COA accounts)
-    const { data: bankTx, error: bankErr } = await supabaseAdmin
+    // 3) BANK FEED rows
+    const { data: bankTx } = await supabaseAdmin
       .from("transactions")
       .select("*")
       .in("coa_id", bankAccountIds)
       .order("date", { ascending: true });
 
-    if (bankErr) throw bankErr;
-
-    // 4) LEDGER rows for BANK accounts (for reconciliation)
-    const { data: bankLedgerLines, error: bankLedErr } = await supabaseAdmin
+    // 4) LEDGER rows for BANK accounts
+    const { data: bankLedgerLines } = await supabaseAdmin
       .from("journal_lines")
       .select(
         `
@@ -94,14 +90,11 @@ export default async function handler(
       )
       .in("account_id", bankAccountIds);
 
-    if (bankLedErr) throw bankLedErr;
-
-    // 5) LEDGER rows for DIRECTOR accounts (for director loan detection)
-    const { data: directorLedgerLines, error: dirLedErr } =
-      await supabaseAdmin
-        .from("journal_lines")
-        .select(
-          `
+    // 5) LEDGER rows for DIRECTOR accounts
+    const { data: directorLedgerLines } = await supabaseAdmin
+      .from("journal_lines")
+      .select(
+        `
         id,
         debit,
         credit,
@@ -112,14 +105,11 @@ export default async function handler(
           description
         )
       `
-        )
-        .in("account_id", directorAccountIds);
+      )
+      .in("account_id", directorAccountIds);
 
-    if (dirLedErr) throw dirLedErr;
-
-    // 6) Build match lookup (date + amount + description) for BANK ledger lines
+    // 6) Build reconciliation lookup (bank ledger lines)
     const ledgerLookup = new Set<string>();
-
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -128,9 +118,8 @@ export default async function handler(
       ledgerLookup.add(key);
     });
 
-    // 7) Build director-loan lookup keyed by date + ABS(amount) + description
+    // 7) Build director-loan lookup (director ledger lines)
     const directorLookup = new Set<string>();
-
     (directorLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -143,18 +132,11 @@ export default async function handler(
     // 8) Build unified list
     const unified: UnifiedTx[] = [];
 
-    // Bank feed rows
+    // BANK FEED rows
     (bankTx || []).forEach((b: any) => {
       const amt = Number(b.amount);
       const key = `${b.date}|${amt}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
-
-      const businessCategory =
-        typeof b.business_category === "string" ? b.business_category : "";
-
-      const isDirectorFromCategory = businessCategory
-        .toLowerCase()
-        .includes("director");
 
       const directorKey = `${b.date}|${Math.abs(amt)}|${b.description || ""}`;
       const isDirectorFromJournal = directorLookup.has(directorKey);
@@ -165,15 +147,15 @@ export default async function handler(
         date: b.date,
         description: b.description,
         amount: amt,
-        category: businessCategory || bankAccountNameById[b.coa_id] || null,
-        is_director_loan: isDirectorFromCategory || isDirectorFromJournal,
+        category: b.business_category || bankAccountNameById[b.coa_id] || null,
+        is_director_loan: isDirectorFromJournal,
         is_reconciled: matched,
         source: matched ? "both" : "bank",
         balance_after: null,
       });
     });
 
-    // Ledger rows for BANK accounts — ALWAYS include them
+    // LEDGER rows for BANK accounts
     (bankLedgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -189,7 +171,7 @@ export default async function handler(
         description: je.description,
         amount: amt,
         category: bankAccountNameById[l.account_id] || null,
-        is_director_loan: false, // director side is on director accounts, not bank
+        is_director_loan: false,
         is_reconciled: matched,
         source: matched ? "both" : "ledger",
         balance_after: null,
