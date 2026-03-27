@@ -82,7 +82,7 @@ export default async function handler(
 
     const bankAccountId = bankAccount.id;
 
-    // 5) Create journal entry (⭐ includes client_id)
+    // 5) Create journal entry
     const { data: je, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .insert({
@@ -97,7 +97,7 @@ export default async function handler(
 
     const journalEntryId = je.id;
 
-    // 6) Build double-entry lines (⭐ use journal_id)
+    // 6) Build double-entry lines (correct column: journal_id)
     const absAmount = Math.abs(amount);
 
     const lines =
@@ -137,14 +137,13 @@ export default async function handler(
 
     if (jlErr) throw jlErr;
 
-    // 7) Update transaction
+    // 7) Update transaction (⭐ no is_reconciled)
     const { error: txUpdateErr } = await supabaseAdmin
       .from("transactions")
       .update({
         business_category: category_name,
         coa_id: categoryAccountId,
         journal_entry_id: journalEntryId,
-        is_reconciled: true,
       })
       .eq("id", transaction_id);
 
