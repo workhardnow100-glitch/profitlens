@@ -5,8 +5,6 @@ export async function getServerSideProps() {
   return { props: {} };
 }
 
-
-
 import React, { useEffect, useState, useMemo } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend } from "recharts";
 import { useSession } from "next-auth/react";
@@ -45,7 +43,6 @@ const CT_CATEGORY_OPTIONS = Array.from(
     "Uncategorised",
   ])
 ).sort();
-
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
@@ -276,34 +273,34 @@ export default function Dashboard() {
     };
   }, [hcReady, Highcharts, breakdown]);
 
- return (
-  <ResponsiveLayout>
-    <h1 className="text-2xl font-bold">Dashboard</h1>
-    <p className="text-slate-600 mt-2">
-      Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this
-      is your cockpit.
-    </p>
+  return (
+    <ResponsiveLayout>
+      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <p className="text-slate-600 mt-2">
+        Welcome {session?.user?.role === "admin" ? "Founder" : "Client"} — this
+        is your cockpit.
+      </p>
 
-    {/* Explanation Banner */}
-    <div className="mt-4 mb-6 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
-      <strong>About this dashboard:</strong> This view shows cash-based activity 
-      from your bank transactions for the current year. Ledger adjustments, journals, 
-      previous-year balances, and non-cash items appear in the Accounting Overview.
-    </div>
+      {/* Explanation Banner */}
+      <div className="mt-4 mb-6 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
+        <strong>About this dashboard:</strong> This view shows cash-based
+        activity from your bank transactions for the current year. Ledger
+        adjustments, journals, previous-year balances, and non-cash items appear
+        in the Accounting Overview.
+      </div>
 
-    {error && <p className="text-red-600 mt-4">{error}</p>}
-    {loading && <p className="text-slate-500 mt-4">Loading...</p>}
+      {error && <p className="text-red-600 mt-4">{error}</p>}
+      {loading && <p className="text-slate-500 mt-4">Loading...</p>}
 
-    {/* Stat cards */}
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
-      {stats.map((s) => (
-        <ResponsiveCard key={s.label}>
-          <div className="text-slate-500">{s.label}</div>
-          <div className="text-2xl font-bold">£{s.value}</div>
-        </ResponsiveCard>
-      ))}
-    </div>
-
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
+        {stats.map((s) => (
+          <ResponsiveCard key={s.label}>
+            <div className="text-slate-500">{s.label}</div>
+            <div className="text-2xl font-bold">£{s.value}</div>
+          </ResponsiveCard>
+        ))}
+      </div>
 
       {/* Income vs Expenses */}
       <ResponsiveCard title="Income vs Expenses">
@@ -363,11 +360,12 @@ export default function Dashboard() {
               <td className="p-2 border">
                 <select
                   value={r.business_category || "Uncategorised"}
-
                   onChange={async (e) => {
                     const newCategory = e.target.value;
+
                     try {
-                      const res = await fetch("/api/dashboard", {
+                      // 🔥 1) Persist UI category (existing behaviour)
+                      const resDashboard = await fetch("/api/dashboard", {
                         method: "PATCH",
                         credentials: "include",
                         headers: {
@@ -378,18 +376,58 @@ export default function Dashboard() {
                           category: newCategory,
                         }),
                       });
-                      if (!res.ok)
+                      if (!resDashboard.ok)
                         throw new Error("Failed to update category");
+
+                      // 🔥 2) Trigger autopilot double-entry engine
+                      const resAuto = await fetch(
+                        "/api/transactions/categorise",
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({
+                            transaction_id: r.id,
+                            // API should resolve this name → COA id server-side
+                            category_name: newCategory,
+                          }),
+                        }
+                      );
+
+                      const dataAuto = await resAuto.json();
+
+                      if (!resAuto.ok) {
+                        console.error(
+                          "Autopilot categorisation failed:",
+                          dataAuto.error
+                        );
+                        alert(
+                          "Category saved, but journal not created: " +
+                            dataAuto.error
+                        );
+                      }
+
+                      // ✅ 3) Update UI state
                       setRecent((prev) =>
                         prev.map((tx) =>
                           tx.id === r.id
                             ? { ...tx, business_category: newCategory }
-
                             : tx
                         )
                       );
+
+                      if (dataAuto?.journal_entry_id) {
+                        console.log(
+                          "Journal created:",
+                          dataAuto.journal_entry_id
+                        );
+                      }
                     } catch (err) {
-                      alert(err.message || "Failed to update category");
+                      alert(
+                        err.message ||
+                          "Failed to update category / create journal"
+                      );
                     }
                   }}
                   className="border rounded px-2 py-1"
