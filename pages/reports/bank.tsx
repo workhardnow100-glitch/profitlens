@@ -55,11 +55,37 @@ export default function BankReportPage() {
     load();
   }, []);
 
-  const filteredTransactions = useMemo(() => {
+  // ⭐ NEW: Collapse bank + ledger duplicates
+  const collapsedTransactions = useMemo(() => {
     if (!data) return [];
 
-    return data.transactions.filter((t) => {
-      // ⭐ FIXED: correct account filtering using account_id
+    const map = new Map<string, BankTransaction>();
+
+    for (const tx of data.transactions) {
+      const key = `${tx.date}|${tx.amount}|${tx.description}`;
+
+      // If no entry yet, store it
+      if (!map.has(key)) {
+        map.set(key, tx);
+        continue;
+      }
+
+      const existing = map.get(key)!;
+
+      // Prefer BANK row over LEDGER row
+      if (existing.source === "ledger" && tx.source !== "ledger") {
+        map.set(key, tx);
+      }
+    }
+
+    return Array.from(map.values());
+  }, [data]);
+
+  // ⭐ Apply filters AFTER collapsing
+  const filteredTransactions = useMemo(() => {
+    if (!collapsedTransactions) return [];
+
+    return collapsedTransactions.filter((t) => {
       if (selectedAccount !== "all" && t.account_id !== selectedAccount) {
         return false;
       }
@@ -73,7 +99,7 @@ export default function BankReportPage() {
       return true;
     });
   }, [
-    data,
+    collapsedTransactions,
     selectedAccount,
     showUnmatchedOnly,
     showDirectorLoanOnly,
@@ -150,8 +176,6 @@ export default function BankReportPage() {
               onChange={(e) => setSelectedAccount(e.target.value)}
             >
               <option value="all">All accounts</option>
-
-              {/* ⭐ FIXED: use COA ID, not account_code */}
               {data.accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.account_code} · {a.account_name}
