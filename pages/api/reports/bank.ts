@@ -1,4 +1,3 @@
-// pages/api/reports/bank.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
@@ -33,7 +32,7 @@ export default async function handler(
     const onlyUnmatched = show_unmatched === "true";
     const onlyDirectorLoan = show_director_loan === "true";
 
-    // 1) Bank accounts only – no guessing
+    // 1) Fetch BANK accounts only
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
@@ -47,7 +46,7 @@ export default async function handler(
     const bankAccounts = accounts as BankAccount[];
     const bankAccountIds = bankAccounts.map((a) => a.id);
 
-    // 2) Bank feed
+    // 2) BANK FEED rows
     const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -56,7 +55,7 @@ export default async function handler(
 
     if (bankErr) throw bankErr;
 
-    // 3) Ledger lines for those same bank accounts
+    // 3) LEDGER rows for those same bank accounts
     const { data: ledgerLines, error: ledErr } = await supabaseAdmin
       .from("journal_lines")
       .select(`
@@ -74,7 +73,7 @@ export default async function handler(
 
     if (ledErr) throw ledErr;
 
-    // 4) Match lookup
+    // 4) Build match lookup
     const ledgerLookup = new Set<string>();
 
     (ledgerLines || []).forEach((l: any) => {
@@ -85,10 +84,10 @@ export default async function handler(
       ledgerLookup.add(key);
     });
 
-    // 5) Unified list
+    // 5) Build unified list
     const unified: UnifiedTx[] = [];
 
-    // Bank rows
+    // Bank feed rows
     (bankTx || []).forEach((b: any) => {
       const key = `${b.date}|${Number(b.amount)}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
@@ -107,7 +106,7 @@ export default async function handler(
       });
     });
 
-    // Ledger‑only rows
+    // Ledger-only rows
     (ledgerLines || []).forEach((l: any) => {
       const je = l.journal_entries;
       if (!je) return;
@@ -125,7 +124,7 @@ export default async function handler(
           amount: amt,
           category: l.account_id,
           is_reconciled: false,
-          is_director_loan: false, // we don’t guess here
+          is_director_loan: false,
           source: "ledger",
           balance_after: null,
         });
@@ -135,20 +134,12 @@ export default async function handler(
     // 6) Apply filters
     let filtered = unified;
 
-    if (fromDate) {
-      filtered = filtered.filter((t) => t.date >= fromDate);
-    }
-    if (toDate) {
-      filtered = filtered.filter((t) => t.date <= toDate);
-    }
-    if (onlyUnmatched) {
-      filtered = filtered.filter((t) => t.source !== "both");
-    }
-    if (onlyDirectorLoan) {
-      filtered = filtered.filter((t) => t.is_director_loan);
-    }
+    if (fromDate) filtered = filtered.filter((t) => t.date >= fromDate);
+    if (toDate) filtered = filtered.filter((t) => t.date <= toDate);
+    if (onlyUnmatched) filtered = filtered.filter((t) => t.source !== "both");
+    if (onlyDirectorLoan) filtered = filtered.filter((t) => t.is_director_loan);
 
-    // 7) Opening / running / closing per account
+    // 7) Opening + running + closing balances
     const openingByAccount: Record<string, number> = {};
     const closingByAccount: Record<string, number> = {};
 
@@ -160,15 +151,14 @@ export default async function handler(
         openingByAccount[accId] = opening;
       });
     } else {
-      bankAccountIds.forEach((accId) => {
-        openingByAccount[accId] = 0;
-      });
+      bankAccountIds.forEach((accId) => (openingByAccount[accId] = 0));
     }
 
-    filtered.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    filtered.sort((a, b) => (a.date < b.date ? -1 : 1));
 
     const runningByAccount: Record<string, number> = { ...openingByAccount };
-    const finalTx: UnifiedTx[] = filtered.map((t) => {
+
+    const finalTx = filtered.map((t) => {
       const current = runningByAccount[t.account_id] ?? 0;
       const next = current + t.amount;
       runningByAccount[t.account_id] = next;
@@ -176,11 +166,10 @@ export default async function handler(
     });
 
     bankAccountIds.forEach((accId) => {
-      const last = runningByAccount[accId] ?? openingByAccount[accId] ?? 0;
-      closingByAccount[accId] = last;
+      closingByAccount[accId] = runningByAccount[accId] ?? openingByAccount[accId];
     });
 
-    // 8) Response – include id for frontend
+    // 8) Response
     const responseAccounts = bankAccounts.map((a) => ({
       id: a.id,
       account_code: a.account_code,

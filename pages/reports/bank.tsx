@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type BankAccount = {
-  id: string;                // ⭐ added
+  id: string;
   account_code: string;
   account_name: string;
   opening_balance: number;
@@ -12,7 +12,7 @@ type BankAccount = {
 
 type BankTransaction = {
   id: string;
-  account_id: string;        // ⭐ added
+  account_id: string;
   date: string;
   description: string;
   amount: number;
@@ -59,7 +59,7 @@ export default function BankReportPage() {
     if (!data) return [];
 
     return data.transactions.filter((t) => {
-      // ⭐ FIXED: correct account filtering
+      // ✅ correct account filter: compare COA id to selectedAccount
       if (selectedAccount !== "all" && t.account_id !== selectedAccount) {
         return false;
       }
@@ -154,8 +154,6 @@ export default function BankReportPage() {
               onChange={(e) => setSelectedAccount(e.target.value)}
             >
               <option value="all">All accounts</option>
-
-              {/* ⭐ FIXED: use COA UUID as value */}
               {data.accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.account_code} · {a.account_name}
