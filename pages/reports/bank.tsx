@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 type BankAccount = {
+  id: string;                // ⭐ added
   account_code: string;
   account_name: string;
   opening_balance: number;
@@ -11,6 +12,7 @@ type BankAccount = {
 
 type BankTransaction = {
   id: string;
+  account_id: string;        // ⭐ added
   date: string;
   description: string;
   amount: number;
@@ -57,8 +59,8 @@ export default function BankReportPage() {
     if (!data) return [];
 
     return data.transactions.filter((t) => {
-      if (selectedAccount !== "all" && t.id.split(":")[0] !== selectedAccount) {
-        // assuming id is `${account_code}:${tx_id}` – adjust if needed
+      // ⭐ FIXED: correct account filtering
+      if (selectedAccount !== "all" && t.account_id !== selectedAccount) {
         return false;
       }
 
@@ -70,7 +72,14 @@ export default function BankReportPage() {
 
       return true;
     });
-  }, [data, selectedAccount, showUnmatchedOnly, showDirectorLoanOnly, dateFrom, dateTo]);
+  }, [
+    data,
+    selectedAccount,
+    showUnmatchedOnly,
+    showDirectorLoanOnly,
+    dateFrom,
+    dateTo,
+  ]);
 
   if (loading) {
     return (
@@ -98,7 +107,7 @@ export default function BankReportPage() {
           Detailed, accountant-grade view of your bank activity, unmatched items, and reconciliation status.
         </p>
         <div className="mt-2 p-3 rounded-md bg-blue-50 border border-blue-200 text-blue-800 text-sm">
-          <strong>About this report:</strong> This page shows bank transactions alongside their ledger status. 
+          <strong>About this report:</strong> This page shows bank transactions alongside their ledger status.
           Use it to review unmatched items, director loan movements, and reconciliation differences between the bank feed and the ledger.
         </div>
         <Link href="/accounting-overview" className="text-xs text-blue-600 hover:underline">
@@ -115,7 +124,7 @@ export default function BankReportPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {data.accounts.map((a) => (
               <div
-                key={a.account_code}
+                key={a.id}
                 className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm text-sm"
               >
                 <div className="flex justify-between">
@@ -145,8 +154,10 @@ export default function BankReportPage() {
               onChange={(e) => setSelectedAccount(e.target.value)}
             >
               <option value="all">All accounts</option>
+
+              {/* ⭐ FIXED: use COA UUID as value */}
               {data.accounts.map((a) => (
-                <option key={a.account_code} value={a.account_code}>
+                <option key={a.id} value={a.id}>
                   {a.account_code} · {a.account_name}
                 </option>
               ))}
