@@ -47,6 +47,18 @@ export default async function handler(
     const bankAccounts = accounts as BankAccount[];
     const bankAccountIds = bankAccounts.map((a) => a.id);
 
+    // ⭐ NEW: detect all director-related accounts
+    const { data: allAccounts } = await supabaseAdmin
+      .from("chart_of_account_entries")
+      .select("id, account_name");
+
+    const directorAccountIds =
+      allAccounts
+        ?.filter((a: any) =>
+          a.account_name.toLowerCase().includes("director")
+        )
+        .map((a: any) => a.id) ?? [];
+
     // 2) BANK FEED rows
     const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
@@ -100,8 +112,13 @@ export default async function handler(
         description: b.description,
         amount: Number(b.amount),
         category: b.business_category,
+
+        // ⭐ NEW: mark director loan movements
+        is_director_loan:
+          b.business_category === "Director Loan" ||
+          directorAccountIds.includes(b.coa_id),
+
         is_reconciled: matched,
-        is_director_loan: b.business_category === "Director Loan",
         source: matched ? "both" : "bank",
         balance_after: null,
       });
@@ -123,8 +140,11 @@ export default async function handler(
         description: je.description,
         amount: amt,
         category: l.account_id,
+
+        // ⭐ NEW: mark director loan ledger movements
+        is_director_loan: directorAccountIds.includes(l.account_id),
+
         is_reconciled: matched,
-        is_director_loan: false,
         source: matched ? "both" : "ledger",
         balance_after: null,
       });
