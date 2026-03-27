@@ -6,6 +6,7 @@ type BankAccount = {
   id: string;
   account_code: string;
   account_name: string;
+  is_bank_account: boolean;
 };
 
 type UnifiedTx = {
@@ -34,25 +35,48 @@ export default async function handler(
     const onlyUnmatched = show_unmatched === "true";
     const onlyDirectorLoan = show_director_loan === "true";
 
-    // -------- 2. Fetch bank accounts (COA) --------
+    // -------- 2. Fetch accounts (bank + director loan) --------
+    // We include:
+    // - all bank accounts (is_bank_account = true)
+    // - any account whose name contains "director" and "loan"
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
-      .select("id, account_code, account_name")
-      .eq("is_bank_account", true);
+      .select("id, account_code, account_name, is_bank_account");
 
     if (accErr) throw accErr;
     if (!accounts || accounts.length === 0) {
       return res.status(200).json({ accounts: [], transactions: [] });
     }
 
-    const bankAccounts = accounts as BankAccount[];
-    const bankAccountIds = bankAccounts.map((a) => a.id);
+    const allAccounts = accounts as BankAccount[];
+
+    const directorLoanAccount = allAccounts.find((a) => {
+      const name = a.account_name.toLowerCase();
+      return name.includes("director") && name.includes("loan");
+    });
+
+    const directorLoanId = directorLoanAccount?.id ?? null;
+
+    // Accounts we expose in the summary:
+    // - all bank accounts
+    // - plus director loan account if present
+    const summaryAccounts: BankAccount[] = allAccounts.filter((a) => {
+      if (a.is_bank_account) return true;
+      if (directorLoanId && a.id === directorLoanId) return true;
+      return false;
+    });
+
+    if (summaryAccounts.length === 0) {
+      return res.status(200).json({ accounts: [], transactions: [] });
+    }
+
+    const allAccountIds = summaryAccounts.map((a) => a.id);
 
     // -------- 3. Fetch bank feed (transactions) --------
     const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
-      .in("coa_id", bankAccountIds)
+      .in("coa_id", allAccountIds)
       .order("date", { ascending: true });
 
     if (bankErr) throw bankErr;
@@ -71,7 +95,7 @@ export default async function handler(
           description
         )
       `)
-      .in("account_id", bankAccountIds);
+      .in("account_id", allAccountIds);
 
     if (ledErr) throw ledErr;
 
@@ -94,6 +118,10 @@ export default async function handler(
       const key = `${b.date}|${Number(b.amount)}|${b.description || ""}`;
       const matched = ledgerLookup.has(key);
 
+      const isDirectorLoan =
+        (directorLoanId && b.coa_id === directorLoanId) ||
+        b.business_category === "Director Loan";
+
       unified.push({
         id: `${b.coa_id}:${b.id}`,
         account_id: b.coa_id,
@@ -102,7 +130,7 @@ export default async function handler(
         amount: Number(b.amount),
         category: b.business_category,
         is_reconciled: matched,
-        is_director_loan: b.business_category === "Director Loan",
+        is_director_loan: !!isDirectorLoan,
         source: matched ? "both" : "bank",
         balance_after: null,
       });
@@ -118,6 +146,8 @@ export default async function handler(
       const matched = ledgerLookup.has(key);
 
       if (!matched) {
+        const isDirectorLoan = directorLoanId && l.account_id === directorLoanId;
+
         unified.push({
           id: `ledger:${l.id}`,
           account_id: l.account_id,
@@ -126,7 +156,7 @@ export default async function handler(
           amount: amt,
           category: l.account_id,
           is_reconciled: false,
-          is_director_loan: false,
+          is_director_loan: !!isDirectorLoan,
           source: "ledger",
           balance_after: null,
         });
@@ -155,14 +185,14 @@ export default async function handler(
 
     // Opening = sum of all movements BEFORE fromDate
     if (fromDate) {
-      bankAccountIds.forEach((accId) => {
+      allAccountIds.forEach((accId) => {
         const opening = unified
           .filter((t) => t.account_id === accId && t.date < fromDate)
           .reduce((sum, t) => sum + t.amount, 0);
         openingByAccount[accId] = opening;
       });
     } else {
-      bankAccountIds.forEach((accId) => {
+      allAccountIds.forEach((accId) => {
         openingByAccount[accId] = 0;
       });
     }
@@ -180,13 +210,14 @@ export default async function handler(
     });
 
     // Closing = last running balance per account (or opening if no tx)
-    bankAccountIds.forEach((accId) => {
+    allAccountIds.forEach((accId) => {
       const last = runningByAccount[accId] ?? openingByAccount[accId] ?? 0;
       closingByAccount[accId] = last;
     });
 
     // -------- 9. Build response --------
-    const responseAccounts = bankAccounts.map((a) => ({
+    const responseAccounts = summaryAccounts.map((a) => ({
+      id: a.id,
       account_code: a.account_code,
       account_name: a.account_name,
       opening_balance: openingByAccount[a.id] ?? 0,
