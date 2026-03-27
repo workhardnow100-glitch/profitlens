@@ -19,7 +19,6 @@ type BankTransaction = {
   balance_after: number | null;
   category: string | null;
   is_reconciled: boolean;
-  is_director_loan: boolean;
   source: "bank" | "ledger" | "both";
 };
 
@@ -35,7 +34,6 @@ export default function BankReportPage() {
 
   const [selectedAccount, setSelectedAccount] = useState<string>("all");
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false);
-  const [showDirectorLoanOnly, setShowDirectorLoanOnly] = useState(false);
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
 
@@ -55,25 +53,23 @@ export default function BankReportPage() {
     load();
   }, []);
 
-  // ⭐ NEW: Collapse bank + ledger duplicates
+  // Collapse duplicate bank+ledger rows
   const collapsedTransactions = useMemo(() => {
     if (!data) return [];
 
     const map = new Map<string, BankTransaction>();
+    const priority = { both: 3, bank: 2, ledger: 1 };
 
     for (const tx of data.transactions) {
       const key = `${tx.date}|${tx.amount}|${tx.description}`;
 
-      // If no entry yet, store it
       if (!map.has(key)) {
         map.set(key, tx);
         continue;
       }
 
       const existing = map.get(key)!;
-
-      // Prefer BANK row over LEDGER row
-      if (existing.source === "ledger" && tx.source !== "ledger") {
+      if (priority[tx.source] > priority[existing.source]) {
         map.set(key, tx);
       }
     }
@@ -81,31 +77,18 @@ export default function BankReportPage() {
     return Array.from(map.values());
   }, [data]);
 
-  // ⭐ Apply filters AFTER collapsing
+  // Apply filters
   const filteredTransactions = useMemo(() => {
     if (!collapsedTransactions) return [];
 
     return collapsedTransactions.filter((t) => {
-      if (selectedAccount !== "all" && t.account_id !== selectedAccount) {
-        return false;
-      }
-
+      if (selectedAccount !== "all" && t.account_id !== selectedAccount) return false;
       if (showUnmatchedOnly && t.source === "both") return false;
-      if (showDirectorLoanOnly && !t.is_director_loan) return false;
-
       if (dateFrom && t.date < dateFrom) return false;
       if (dateTo && t.date > dateTo) return false;
-
       return true;
     });
-  }, [
-    collapsedTransactions,
-    selectedAccount,
-    showUnmatchedOnly,
-    showDirectorLoanOnly,
-    dateFrom,
-    dateTo,
-  ]);
+  }, [collapsedTransactions, selectedAccount, showUnmatchedOnly, dateFrom, dateTo]);
 
   if (loading) {
     return (
@@ -130,7 +113,7 @@ export default function BankReportPage() {
       <header className="space-y-2">
         <h1 className="text-2xl font-semibold">Bank Report</h1>
         <p className="text-sm text-gray-500">
-          Detailed, accountant-grade view of your bank activity, unmatched items, and reconciliation status.
+          Detailed, accountant-grade view of your bank activity and reconciliation status.
         </p>
         <Link href="/accounting-overview" className="text-xs text-blue-600 hover:underline">
           ← Back to Accounting Overview
@@ -213,16 +196,6 @@ export default function BankReportPage() {
             />
             Show unmatched only
           </label>
-
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              className="rounded border-gray-300"
-              checked={showDirectorLoanOnly}
-              onChange={(e) => setShowDirectorLoanOnly(e.target.checked)}
-            />
-            Show director loan only
-          </label>
         </div>
       </section>
 
@@ -243,7 +216,6 @@ export default function BankReportPage() {
                   <th className="px-2 py-2 text-left font-semibold text-gray-600">Category</th>
                   <th className="px-2 py-2 text-left font-semibold text-gray-600">Source</th>
                   <th className="px-2 py-2 text-left font-semibold text-gray-600">Reconciled</th>
-                  <th className="px-2 py-2 text-left font-semibold text-gray-600">Director Loan</th>
                 </tr>
               </thead>
               <tbody>
@@ -270,13 +242,6 @@ export default function BankReportPage() {
                         <span className="text-green-600 font-semibold">Yes</span>
                       ) : (
                         <span className="text-amber-600 font-semibold">No</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-1 text-gray-700">
-                      {t.is_director_loan ? (
-                        <span className="text-purple-700 font-semibold">Yes</span>
-                      ) : (
-                        <span className="text-gray-400">No</span>
                       )}
                     </td>
                   </tr>
