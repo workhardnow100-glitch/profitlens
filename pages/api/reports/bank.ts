@@ -7,6 +7,9 @@ export default async function handler(
   res: NextApiResponse
 ) {
   try {
+    /* -----------------------------
+       1. FETCH BANK ACCOUNTS
+    ------------------------------ */
     const { data: accounts, error: accErr } = await supabaseAdmin
       .from("chart_of_account_entries")
       .select("id, account_code, account_name")
@@ -19,7 +22,10 @@ export default async function handler(
 
     const bankAccountIds = accounts.map((a) => a.id);
 
-    // BANK FEED – from transactions table, linked by coa_id
+    /* -----------------------------
+       2. BANK FEED (transactions)
+       Linked via coa_id → COA.id
+    ------------------------------ */
     const { data: bankTx, error: bankErr } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -28,7 +34,10 @@ export default async function handler(
 
     if (bankErr) throw bankErr;
 
-    // LEDGER – from journal_lines + journal_entries
+    /* -----------------------------
+       3. LEDGER (journal_lines + journal_entries)
+       Linked via account_id → COA.id
+    ------------------------------ */
     const { data: ledgerLines, error: ledErr } = await supabaseAdmin
       .from("journal_lines")
       .select(`
@@ -46,6 +55,9 @@ export default async function handler(
 
     if (ledErr) throw ledErr;
 
+    /* -----------------------------
+       4. MATCHING LOGIC
+    ------------------------------ */
     const ledgerLookup = new Set<string>();
 
     (ledgerLines || []).forEach((l: any) => {
@@ -55,6 +67,9 @@ export default async function handler(
       ledgerLookup.add(`${je.date}|${amt}|${je.description || ""}`);
     });
 
+    /* -----------------------------
+       5. MERGE BANK + LEDGER
+    ------------------------------ */
     const merged: any[] = [];
 
     // Bank feed rows
@@ -99,6 +114,9 @@ export default async function handler(
       }
     });
 
+    /* -----------------------------
+       6. SORT + RUNNING BALANCE
+    ------------------------------ */
     merged.sort((a, b) => (a.date < b.date ? -1 : 1));
 
     let balance = 0;
@@ -107,6 +125,9 @@ export default async function handler(
       return { ...t, balance_after: balance };
     });
 
+    /* -----------------------------
+       7. RESPONSE
+    ------------------------------ */
     return res.status(200).json({
       accounts: accounts.map((a) => ({
         account_code: a.account_code,
