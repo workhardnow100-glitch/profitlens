@@ -136,7 +136,7 @@ function mapToStructure(rows: BSLine[]) {
   const profit = totalCredits - totalDebits;
 
   structure.equity.push({
-    account_code: "9998",
+    account_code: "PROFIT", // SAFE VIRTUAL CODE
     account_name: "Current Year Profit",
     balance: profit,
   });
