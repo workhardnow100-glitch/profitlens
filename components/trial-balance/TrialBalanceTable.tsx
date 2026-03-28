@@ -31,10 +31,8 @@ export function TrialBalanceTable({ clientId }: { clientId: string }) {
     return <div className="text-gray-500">Loading trial balance…</div>;
   }
 
-  // ⭐ FILTER OUT SYSTEM ACCOUNTS (9000+)
-  const filteredRows = rows.filter(
-    (r) => Number(r.account_code) < 9000
-  );
+ // ⭐ DO NOT FILTER OUT SYSTEM ACCOUNTS — THEY CONTAIN REAL MOVEMENTS
+const filteredRows = rows;
 
   const totalDebit = filteredRows.reduce((sum, r) => sum + r.debit, 0);
   const totalCredit = filteredRows.reduce((sum, r) => sum + r.credit, 0);
