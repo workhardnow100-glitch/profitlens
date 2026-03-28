@@ -126,7 +126,7 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- IGNORE SYSTEM ACCOUNTS (9000–9999) ----
+    // ---- IGNORE SYSTEM ACCOUNTS ----
     if (type === "SYSTEM") {
       continue;
     }
