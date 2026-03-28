@@ -38,7 +38,8 @@
  */
 
 // pages/api/reports.js
-// ⭐ REAL REVENUE REPORTS API — FINAL VERSION
+// ⭐ HUMAN‑READABLE REPORTS API (NO COA FILTERING)
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { requireRole } from "../../lib/rbac";
 import { CT_MAP } from "../../lib/constants/ctMap";
@@ -46,13 +47,6 @@ import { CT_MAP } from "../../lib/constants/ctMap";
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 5000;
 
-// ⭐ REAL revenue categories
-const REVENUE_CATEGORIES = new Set(CT_MAP.revenue);
-
-// ⭐ Categories that must NOT count as revenue
-const NON_REVENUE_INCOME = new Set(CT_MAP.other_income);
-
-// ⭐ Categories to ignore entirely (transfers etc.)
 const IGNORE_CATEGORIES = new Set(CT_MAP.ignore);
 
 function getQuarter(date) {
@@ -79,18 +73,14 @@ function extractClientLabel(description = "") {
 
 function parseLabelToDate(label) {
   if (!label) return new Date(0);
-
   const qMatch = label.match(/^(\d{4})-Q([1-4])$/);
   if (qMatch) {
     return new Date(parseInt(qMatch[1], 10), (parseInt(qMatch[2], 10) - 1) * 3, 1);
   }
-
   const parsed = Date.parse(label);
   if (!isNaN(parsed)) return new Date(parsed);
-
   const yMatch = label.match(/^(\d{4})$/);
   if (yMatch) return new Date(parseInt(yMatch[1], 10), 0, 1);
-
   return new Date(0);
 }
 
@@ -100,7 +90,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // RBAC
     const guard = await requireRole(req, res, [
       "USER",
       "ACCOUNTANT",
@@ -109,17 +98,6 @@ export default async function handler(req, res) {
     ]);
     if (!guard.ok) return;
 
-    const role = guard.role;
-    const isFounder = role === "FOUNDER";
-    const isAccountant = role === "ACCOUNTANT";
-
-    const subscriptionStatus = req?.session?.user?.subscriptionStatus;
-    const isSubscribedOrTrial = ["basic", "pro", "trialing"].includes(subscriptionStatus);
-
-    if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
-      return res.status(403).json({ error: "Upgrade required" });
-    }
-
     const clientId = guard.actingAsClientId || guard.clientId;
     if (!clientId || clientId === "unknown-client") {
       return res.status(400).json({ error: "Invalid client ID" });
@@ -127,24 +105,7 @@ export default async function handler(req, res) {
 
     const { from, to, page = DEFAULT_PAGE, limit = DEFAULT_LIMIT, client: clientFilter } = req.query;
 
-    // Audit
-    await supabaseAdmin.from("audit").insert([
-      {
-        client_id: clientId,
-        actor_email: req.session?.user?.email || "unknown",
-        action: isAccountant ? "ACCOUNTANT_VIEW_REPORTS" : "VIEW_REPORTS",
-        details: `Viewed reports`,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
-    // Filters
-    const filters = {
-      ...(from && !isNaN(new Date(from)) && { gte: new Date(from).toISOString() }),
-      ...(to && !isNaN(new Date(to)) && { lte: new Date(to).toISOString() }),
-    };
-
-    // ⭐ 1) Fetch transactions
+    // ⭐ Fetch transactions (simple, human-readable)
     let txQuery = supabaseAdmin
       .from("transactions")
       .select(`
@@ -155,38 +116,17 @@ export default async function handler(req, res) {
         business_category,
         type,
         is_reversal,
-        includedinct,
-        coa_id
+        includedinct
       `)
       .eq("client_id", clientId);
 
-    if (filters.gte) txQuery = txQuery.gte("date", filters.gte);
-    if (filters.lte) txQuery = txQuery.lte("date", filters.lte);
+    if (from) txQuery = txQuery.gte("date", from);
+    if (to) txQuery = txQuery.lte("date", to);
 
     const { data: transactions = [], error: txErr } = await txQuery;
     if (txErr) {
       console.error("Reports API: transaction fetch error", txErr);
       return res.status(500).json({ error: "Failed to fetch transactions" });
-    }
-
-    const txs = transactions ?? [];
-
-    // ⭐ 2) Build COA map
-    const distinctCoaIds = Array.from(new Set(txs.map((t) => t.coa_id).filter(Boolean)));
-
-    const coaMap = new Map();
-    if (distinctCoaIds.length > 0) {
-      const { data: coaRows, error: coaErr } = await supabaseAdmin
-        .from("chart_of_account_entries")
-        .select("id, account_type, hmrc_bucket, is_control_account, is_bank_account")
-        .in("id", distinctCoaIds);
-
-      if (coaErr) {
-        console.error("Reports API: COA fetch error", coaErr);
-        return res.status(500).json({ error: "Failed to fetch COA" });
-      }
-
-      (coaRows || []).forEach((row) => coaMap.set(row.id, row));
     }
 
     const monthly = {};
@@ -195,8 +135,8 @@ export default async function handler(req, res) {
     const clientSet = new Set();
     const categorySet = new Set();
 
-    // ⭐ 3) COA maths + CT_MAP categories
-    for (const tx of txs) {
+    // ⭐ HUMAN‑READABLE LOOP (NO COA FILTERING)
+    for (const tx of transactions) {
       if (tx.is_reversal) continue;
       if (tx.includedinct === false) continue;
 
@@ -207,35 +147,18 @@ export default async function handler(req, res) {
       const quarter = getQuarter(tx.date);
       const year = String(date.getFullYear());
 
-      const clientLabel = extractClientLabel(tx.description);
-
-      const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
-      if (!coa) continue;
-
-      const accType = (coa.account_type || "").toUpperCase();
-
-      const isControl =
-        coa.is_control_account ||
-        coa.is_bank_account ||
-        ["CONTROL", "SYSTEM", "BALANCE_SHEET", "EQUITY", "LIABILITIES", "ASSETS"]
-          .includes((coa.hmrc_bucket || "").toUpperCase());
-
-      if (isControl) continue;
-
-      if (accType !== "INCOME" && accType !== "EXPENSE") continue;
-
-      const amount = Number(tx.amount || 0);
-
       const category =
         (tx.business_category && String(tx.business_category).trim()) ||
         "Uncategorised";
 
-      // Ignore transfers entirely
       if (IGNORE_CATEGORIES.has(category)) continue;
 
-      if (amount > 0) clientSet.add(clientLabel);
+      const amount = Number(tx.amount || 0);
+      const clientLabel = extractClientLabel(tx.description);
+
       if (clientFilter && clientLabel !== clientFilter) continue;
 
+      clientSet.add(clientLabel);
       categorySet.add(category);
 
       const addTo = (map, key) => {
@@ -252,19 +175,8 @@ export default async function handler(req, res) {
 
         const bucket = map[key];
 
-        // ⭐ REAL REVENUE ONLY
-        if (
-          accType === "INCOME" &&
-          amount > 0 &&
-          REVENUE_CATEGORIES.has(category)
-        ) {
-          bucket.revenue += amount;
-        }
-
-        // ⭐ REAL EXPENSES ONLY
-        if (accType === "EXPENSE" && amount < 0) {
-          bucket.expenses += Math.abs(amount);
-        }
+        if (amount > 0) bucket.revenue += amount;
+        if (amount < 0) bucket.expenses += Math.abs(amount);
 
         bucket.net = bucket.revenue - bucket.expenses;
 
@@ -312,54 +224,6 @@ export default async function handler(req, res) {
 
     const paginated = allMonthly.slice(start, end);
 
-    const returnedTxs = txs
-      .filter((tx) => {
-        const coa = tx.coa_id ? coaMap.get(tx.coa_id) : null;
-        if (!coa) return false;
-
-        const accType = (coa.account_type || "").toUpperCase();
-        if (accType !== "INCOME" && accType !== "EXPENSE") return false;
-
-        if (tx.includedinct === false) return false;
-        if (tx.is_reversal) return false;
-
-        const category =
-          (tx.business_category && String(tx.business_category).trim()) ||
-          "Uncategorised";
-
-        if (IGNORE_CATEGORIES.has(category)) return false;
-
-        const clientLabel = extractClientLabel(tx.description);
-        if (clientFilter && clientLabel !== clientFilter) return false;
-
-        return true;
-      })
-      .map((tx) => {
-        const category =
-          (tx.business_category && String(tx.business_category).trim()) ||
-          "Uncategorised";
-
-        return {
-          id: tx.id,
-          date: tx.date,
-          description: tx.description,
-          amount: formatCurrency(tx.amount),
-          category,
-          type: tx.type,
-        };
-      });
-
-    // Audit filtered
-    await supabaseAdmin.from("audit").insert([
-      {
-        client_id: clientId,
-        actor_email: req.session?.user?.email || "unknown",
-        action: isAccountant ? "ACCOUNTANT_FILTER_REPORTS" : "FILTER_REPORTS",
-        details: `Filtered reports`,
-        timestamp: new Date().toISOString(),
-      },
-    ]);
-
     return res.status(200).json({
       pagination: {
         total: allMonthly.length,
@@ -372,7 +236,16 @@ export default async function handler(req, res) {
         quarterly: allQuarterly,
         yearly: allYearly,
       },
-      transactions: returnedTxs,
+      transactions: transactions.map((tx) => ({
+        id: tx.id,
+        date: tx.date,
+        description: tx.description,
+        amount: formatCurrency(tx.amount),
+        category:
+          (tx.business_category && String(tx.business_category).trim()) ||
+          "Uncategorised",
+        type: tx.type,
+      })),
       clients: Array.from(clientSet).sort(),
       categories: Array.from(categorySet).sort(),
     });
@@ -381,3 +254,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to generate report" });
   }
 }
+
+
