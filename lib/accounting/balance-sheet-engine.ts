@@ -32,27 +32,28 @@ export async function getUnifiedBalanceSheet(
 ): Promise<BSStructure> {
   console.log("📘 [BS] Fetching balance sheet for client:", clientId);
 
-  // A: journal-driven lines
+  // ✅ Use ONLY the journal-driven RPC (A)
   const { data: linesA, error: errA } = await supabaseAdmin.rpc(
     "balance_sheet_lines_for_client",
     { p_client_id: clientId }
   );
-  console.log("📘 [BS] RPC A (journal-driven) returned:", linesA);
+
+  console.log("📘 [BS] RPC A returned:", linesA);
   if (errA) console.log("❌ [BS] RPC A error:", errA);
 
-  // B: full balance sheet engine
-  const { data: linesB, error: errB } = await supabaseAdmin.rpc(
-    "balance_sheet_for_client",
-    { p_client_id: clientId }
-  );
-  console.log("📘 [BS] RPC B (full engine) returned:", linesB);
-  if (errB) console.log("❌ [BS] RPC B error:", errB);
+  // If no data, return empty structure
+  const rows = (linesA || []).map((row: any) => ({
+    account_code: String(row.account_code),
+    account_name: row.account_name,
+    balance: Number(row.balance ?? 0),
+    account_type: row.account_type ?? null,
+    hmrc_bucket: row.hmrc_bucket ?? null,
+  }));
 
-  const merged = mergeSources(linesA || [], linesB || []);
-  console.log("📘 [BS] MERGED rows:", merged);
+  console.log("📘 [BS] Normalized rows:", rows);
 
-  const structure = mapToStructure(merged);
-  console.log("📘 [BS] STRUCTURE after classification:", structure);
+  const structure = mapToStructure(rows);
+  console.log("📘 [BS] STRUCTURE:", structure);
 
   const totals = computeTotals(structure);
   console.log("📘 [BS] TOTALS:", totals);
@@ -60,44 +61,7 @@ export async function getUnifiedBalanceSheet(
   return { ...structure, totals };
 }
 
-function mergeSources(a: any[], b: any[]): BSLine[] {
-  console.log("📘 [BS] mergeSources() A count:", a.length, "B count:", b.length);
-
-  const map = new Map<string, BSLine>();
-
-  const addRow = (row: any) => {
-    const code = String(row.account_code);
-    const existing = map.get(code);
-
-    // ⭐ FIX: support both RPC formats (balance from A, amount from B)
-    const balance = Number(row.balance ?? row.amount ?? 0);
-
-    if (!existing) {
-      map.set(code, {
-        account_code: code,
-        account_name: row.account_name,
-        balance,
-        account_type: row.account_type ?? null,
-
-        // ⭐ FIX: RPC B uses "section" instead of hmrc_bucket
-        hmrc_bucket: row.hmrc_bucket ?? row.section ?? null,
-      });
-    } else {
-      existing.balance += balance;
-    }
-  };
-
-  a.forEach(addRow);
-  b.forEach(addRow);
-
-  const merged = Array.from(map.values());
-  console.log("📘 [BS] mergeSources() final merged:", merged);
-  return merged;
-}
-
 function mapToStructure(rows: BSLine[]) {
-  console.log("📘 [BS] mapToStructure() input rows:", rows);
-
   const structure: Omit<BSStructure, "totals"> = {
     assets: { non_current: [], current: [] },
     liabilities: { non_current: [], current: [] },
@@ -109,10 +73,6 @@ function mapToStructure(rows: BSLine[]) {
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
-    console.log(
-      `🔍 [BS] Classifying ${row.account_code} ${row.account_name} | type=${type} bucket=${bucket}`
-    );
-
     // ---- ASSETS ----
     const isAsset =
       type === "ASSET" ||
@@ -121,15 +81,13 @@ function mapToStructure(rows: BSLine[]) {
       bucket === "bank" ||
       bucket === "debtors" ||
       bucket === "vat_asset" ||
-      bucket === "ASSETS" || // ⭐ RPC B support
+      bucket === "ASSETS" ||
       (codeNum >= 1000 && codeNum <= 1999);
 
     if (isAsset) {
       if (bucket === "fixed_asset" || codeNum < 1100) {
-        console.log("   → Classified as NON‑CURRENT ASSET");
         structure.assets.non_current.push(row);
       } else {
-        console.log("   → Classified as CURRENT ASSET");
         structure.assets.current.push(row);
       }
       continue;
@@ -138,15 +96,13 @@ function mapToStructure(rows: BSLine[]) {
     // ---- LIABILITIES ----
     const isLiability =
       type === "LIABILITY" ||
-      bucket === "LIABILITIES" || // ⭐ RPC B support
+      bucket === "LIABILITIES" ||
       (codeNum >= 2000 && codeNum <= 2999);
 
     if (isLiability) {
       if (codeNum < 2500) {
-        console.log("   → Classified as CURRENT LIABILITY");
         structure.liabilities.current.push(row);
       } else {
-        console.log("   → Classified as NON‑CURRENT LIABILITY");
         structure.liabilities.non_current.push(row);
       }
       continue;
@@ -155,25 +111,19 @@ function mapToStructure(rows: BSLine[]) {
     // ---- EQUITY ----
     const isEquity =
       type === "EQUITY" ||
-      bucket === "EQUITY" || // ⭐ RPC B support
+      bucket === "EQUITY" ||
       (codeNum >= 3000 && codeNum <= 3999);
 
     if (isEquity) {
-      console.log("   → Classified as EQUITY");
       structure.equity.push(row);
       continue;
     }
-
-    console.log("   → IGNORED (likely P&L)");
   }
 
-  console.log("📘 [BS] Final structure:", structure);
   return structure;
 }
 
 function computeTotals(structure: Omit<BSStructure, "totals">) {
-  console.log("📘 [BS] computeTotals() input:", structure);
-
   const sum = (rows: BSLine[]) =>
     rows.reduce((a, r) => a + Number(r.balance || 0), 0);
 
@@ -185,13 +135,10 @@ function computeTotals(structure: Omit<BSStructure, "totals">) {
 
   const totalEquity = sum(structure.equity);
 
-  const totals = {
+  return {
     total_assets: totalAssets,
     total_liabilities: totalLiabilities,
     total_equity: totalEquity,
     total_liabilities_and_equity: totalLiabilities + totalEquity,
   };
-
-  console.log("📘 [BS] computeTotals() output:", totals);
-  return totals;
 }
