@@ -89,13 +89,21 @@ function mapToStructure(rows: BSLine[]) {
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
+    const isSystem = type === "SYSTEM" || bucket === "ignore";
+    const isControl = type === "CONTROL" || bucket === "control";
+    if (isSystem || isControl) {
+      continue;
+    }
+
     // ---- ASSETS ----
-    if (
-      type === "ASSET" ||
+    const isAssetBucket =
       bucket === "fixed_asset" ||
       bucket === "current_asset" ||
-      bucket === "bank"
-    ) {
+      bucket === "balance_sheet" ||
+      bucket === "assets" ||
+      bucket === "bank";
+
+    if (type === "ASSET" || type === "BANK" || isAssetBucket) {
       if (bucket === "fixed_asset") {
         structure.assets.non_current.push(row);
       } else {
@@ -105,7 +113,11 @@ function mapToStructure(rows: BSLine[]) {
     }
 
     // ---- LIABILITIES ----
-    if (type === "LIABILITY") {
+    const isLiabilityBucket =
+      bucket === "liabilities" || bucket === "vat" || type === "VAT_CONTROL";
+
+    if (type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || isLiabilityBucket) {
+      // you can later split current/non-current by code if needed
       structure.liabilities.current.push(row);
       continue;
     }
@@ -116,28 +128,15 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- TRUE P&L ACCOUNTS ONLY ----
-    const isExpense = bucket === "allowable" || bucket === "disallowable";
-    const isTradingIncome = bucket === "trading_income"; // future-proof
-
-    if (isExpense || isTradingIncome) {
+    // ---- P&L: ALL INCOME + EXPENSE (TRADING + NON-TRADING), EXCLUDING SYSTEM/IGNORE ----
+    if (type === "INCOME" || type === "EXPENSE") {
       totalDebits += row.debit ?? 0;
       totalCredits += row.credit ?? 0;
       continue;
     }
-
-    // ---- IGNORE NON-TRADING INCOME ----
-    if (bucket === "income") {
-      continue;
-    }
-
-    // ---- IGNORE SYSTEM ----
-    if (type === "SYSTEM") {
-      continue;
-    }
   }
 
-  // ---- COMPUTE CURRENT YEAR PROFIT ----
+  // ---- CURRENT YEAR PROFIT (FULL P&L) ----
   const profit = totalCredits - totalDebits;
 
   structure.equity.push({
