@@ -73,12 +73,15 @@ async function getJournalLines(clientId: string) {
   const { data, error } = await supabaseAdmin
     .from("journal_lines")
     .select(`
-      account_code,
-      account_name,
-      account_type,
-      hmrc_bucket,
       debit,
-      credit
+      credit,
+      account_id,
+      chart_of_account_entries:account_id (
+        account_code,
+        account_name,
+        account_type,
+        hmrc_bucket
+      )
     `)
     .eq("client_id", clientId);
 
@@ -87,8 +90,17 @@ async function getJournalLines(clientId: string) {
     return [];
   }
 
-  return data;
+  // Flatten join into enriched journal rows
+  return data.map((row: any) => ({
+    debit: Number(row.debit ?? 0),
+    credit: Number(row.credit ?? 0),
+    account_code: String(row.chart_of_account_entries?.account_code ?? ""),
+    account_name: row.chart_of_account_entries?.account_name ?? "",
+    account_type: row.chart_of_account_entries?.account_type ?? null,
+    hmrc_bucket: row.chart_of_account_entries?.hmrc_bucket ?? null,
+  }));
 }
+
 
 // ------------------------------------------------------------
 // CORE: group journal lines into account-level balances
