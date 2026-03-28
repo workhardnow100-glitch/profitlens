@@ -32,7 +32,6 @@ export async function getUnifiedBalanceSheet(
 ): Promise<BSStructure> {
   console.log("📘 [BS] Fetching balance sheet for client:", clientId);
 
-  // ✅ Use ONLY the journal-driven RPC (A)
   const { data: linesA, error: errA } = await supabaseAdmin.rpc(
     "balance_sheet_lines_for_client",
     { p_client_id: clientId }
@@ -41,7 +40,6 @@ export async function getUnifiedBalanceSheet(
   console.log("📘 [BS] RPC A returned:", linesA);
   if (errA) console.log("❌ [BS] RPC A error:", errA);
 
-  // If no data, return empty structure
   const rows = (linesA || []).map((row: any) => ({
     account_code: String(row.account_code),
     account_name: row.account_name,
@@ -108,13 +106,19 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- EQUITY ----
+    // ---- EQUITY (including P&L accounts) ----
     const isEquity =
       type === "EQUITY" ||
       bucket === "EQUITY" ||
       (codeNum >= 3000 && codeNum <= 3999);
 
-    if (isEquity) {
+    // P&L accounts collapse into equity
+    const isPL =
+      type === "INCOME" ||
+      type === "EXPENSE" ||
+      (codeNum >= 4000 && codeNum <= 9999);
+
+    if (isEquity || isPL) {
       structure.equity.push(row);
       continue;
     }
