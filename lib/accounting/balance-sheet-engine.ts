@@ -1,5 +1,6 @@
 // lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
+console.log("🔥 USING UPDATED BALANCE SHEET ENGINE");
 
 export type BSLine = {
   account_code: string;
