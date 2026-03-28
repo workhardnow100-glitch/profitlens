@@ -76,46 +76,55 @@ export default async function handler(
     }
 
     // ------------------------------------------------------------
-    // 3) BUILD RESPONSE
+    // 3) BUILD RESPONSE (ALL NUMBERS SAFE)
     // ------------------------------------------------------------
     const pl = unifiedPL.summary;
     const tb = unifiedTB.summary;
     const bs = unifiedBS.totals;
 
     return res.status(200).json({
+      // -------------------------
+      // FINANCIAL HEALTH SUMMARY
+      // -------------------------
       financial_health: {
-        assets: bs.total_assets,
-        liabilities: bs.total_liabilities,
-        equity: bs.total_equity,
-        revenue_mtd: pl.revenue,
-        revenue_ytd: pl.revenue,
-        expenses_mtd: pl.operating_expenses,
-        expenses_ytd: pl.operating_expenses,
-        net_profit_mtd: pl.net_profit,
-        net_profit_ytd: pl.net_profit,
+        assets: Number(bs.total_assets || 0),
+        liabilities: Number(bs.total_liabilities || 0),
+        equity: Number(bs.total_equity || 0),
+
+        revenue_mtd: Number(pl.revenue || 0),
+        revenue_ytd: Number(pl.revenue || 0),
+
+        expenses_mtd: Number(pl.operating_expenses || 0),
+        expenses_ytd: Number(pl.operating_expenses || 0),
+
+        net_profit_mtd: Number(pl.net_profit || 0),
+        net_profit_ytd: Number(pl.net_profit || 0),
       },
 
+      // -------------------------
+      // SUMMARY PANELS
+      // -------------------------
       trial_balance_summary: {
-        assets: tb.assets,
-        liabilities: tb.liabilities,
-        equity: tb.equity,
-        income: tb.income,
-        expenses: tb.expenses,
+        assets: Number(tb.assets || 0),
+        liabilities: Number(tb.liabilities || 0),
+        equity: Number(tb.equity || 0),
+        income: Number(tb.income || 0),
+        expenses: Number(tb.expenses || 0),
       },
 
       profit_and_loss_summary: {
-        revenue: pl.revenue,
-        cost_of_sales: pl.cost_of_sales,
-        gross_profit: pl.gross_profit,
-        operating_expenses: pl.operating_expenses,
-        net_profit: pl.net_profit,
+        revenue: Number(pl.revenue || 0),
+        cost_of_sales: Number(pl.cost_of_sales || 0),
+        gross_profit: Number(pl.gross_profit || 0),
+        operating_expenses: Number(pl.operating_expenses || 0),
+        net_profit: Number(pl.net_profit || 0),
       },
 
       balance_sheet_summary: {
-        total_assets: bs.total_assets,
-        total_liabilities: bs.total_liabilities,
-        net_assets: bs.total_assets - bs.total_liabilities,
-        equity: bs.total_equity,
+        total_assets: Number(bs.total_assets || 0),
+        total_liabilities: Number(bs.total_liabilities || 0),
+        net_assets: Number(bs.total_assets - bs.total_liabilities || 0),
+        equity: Number(bs.total_equity || 0),
       },
 
       // -------------------------
@@ -143,6 +152,9 @@ export default async function handler(
 
       cash_flow: unifiedCF.lines,
 
+      // -------------------------
+      // COA SUMMARY
+      // -------------------------
       coa_summary: {
         total_accounts: totalAccounts,
         active_accounts: activeAccounts,
