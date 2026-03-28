@@ -3,7 +3,13 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
-import { getUnifiedBalanceSheet } from "../../lib/accounting/balance-sheet-engine";
+import {
+  getUnifiedBalanceSheet,
+  getUnifiedTrialBalance,
+  getUnifiedProfitAndLoss,
+  getUnifiedDirectorLoan,
+  getUnifiedCashFlow,
+} from "../../lib/accounting/balance-sheet-engine";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {
@@ -19,56 +25,24 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ------------------------------------------------------------
-    // 1) MAIN OVERVIEW SUMMARY (existing RPC)
-    // ------------------------------------------------------------
-    const { data: overviewData, error: overviewError } = await supabaseAdmin.rpc(
-      "accounting_overview_for_client",
-      { p_client_id: clientId }
-    );
-
-    if (overviewError || !overviewData || !overviewData[0]) {
-      console.error("Overview RPC error:", overviewError);
-      return res.status(200).json(emptyOverview());
-    }
-
-    const o = overviewData[0];
-
-    // ------------------------------------------------------------
-    // 1b) UNIFIED BALANCE SHEET (journals + full engine)
-    // ------------------------------------------------------------
-    const unifiedBS = await getUnifiedBalanceSheet(clientId);
-
-    // ------------------------------------------------------------
-    // 2) FULL REPORTING ENGINE (11 RPCs)
+    // 1) UNIFIED JOURNAL-DRIVEN ENGINE
     // ------------------------------------------------------------
     const [
-      { data: tbFull },
-      { data: bsFull },
-      { data: plFull },
-      { data: dlFull },
-      { data: bankAccounts },
-      { data: vatControl },
-      { data: payeControl },
-      { data: corporationTax },
-      { data: fixedAssets },
-      { data: suspenseData },
-      { data: cashFlow }
+      unifiedBS,
+      unifiedTB,
+      unifiedPL,
+      unifiedDL,
+      unifiedCF,
     ] = await Promise.all([
-      supabaseAdmin.rpc("trial_balance_full_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("balance_sheet_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("profit_and_loss_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("director_loan_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("bank_accounts_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("vat_control_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("paye_control_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("corporation_tax_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("fixed_assets_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("suspense_and_uncategorised_for_client", { p_client_id: clientId }),
-      supabaseAdmin.rpc("cash_flow_for_client", { p_client_id: clientId })
+      getUnifiedBalanceSheet(clientId),
+      getUnifiedTrialBalance(clientId),
+      getUnifiedProfitAndLoss(clientId),
+      getUnifiedDirectorLoan(clientId),
+      getUnifiedCashFlow(clientId),
     ]);
 
     // ------------------------------------------------------------
-    // 3) COA SUMMARY (existing logic)
+    // 2) COA SUMMARY (unchanged, still from COA tables)
     // ------------------------------------------------------------
     const { data: coa, error: coaError } = await supabaseAdmin
       .from("chart_of_accounts")
@@ -98,65 +72,70 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // ------------------------------------------------------------
-    // 4) RETURN UNIFIED COCKPIT PAYLOAD
+    // 3) RETURN UNIFIED COCKPIT PAYLOAD (ALL FROM JOURNALS)
     // ------------------------------------------------------------
+    const plSummary = unifiedPL.summary;
+    const tbSummary = unifiedTB.summary;
+    const bsTotals = unifiedBS.totals;
+
     return res.status(200).json({
       // -------------------------
       // FINANCIAL HEALTH SUMMARY
       // -------------------------
       financial_health: {
-        assets: unifiedBS.totals.total_assets,
-        liabilities: unifiedBS.totals.total_liabilities,
-        equity: unifiedBS.totals.total_equity,
-        revenue_mtd: o.revenue_mtd,
-        revenue_ytd: o.revenue_ytd,
-        expenses_mtd: o.expenses_mtd,
-        expenses_ytd: o.expenses_ytd,
-        net_profit_mtd: o.net_profit_mtd,
-        net_profit_ytd: o.net_profit_ytd,
+        assets: bsTotals.total_assets,
+        liabilities: bsTotals.total_liabilities,
+        equity: bsTotals.total_equity,
+        // For now, MTD/YTD mirror full-period totals (all journal data)
+        revenue_mtd: plSummary.revenue,
+        revenue_ytd: plSummary.revenue,
+        expenses_mtd: plSummary.operating_expenses,
+        expenses_ytd: plSummary.operating_expenses,
+        net_profit_mtd: plSummary.net_profit,
+        net_profit_ytd: plSummary.net_profit,
       },
 
       // -------------------------
-      // SUMMARY PANELS (existing)
+      // SUMMARY PANELS
       // -------------------------
       trial_balance_summary: {
-        assets: unifiedBS.totals.total_assets,
-        liabilities: unifiedBS.totals.total_liabilities,
-        equity: unifiedBS.totals.total_equity,
-        income: o.total_income,
-        expenses: o.total_expenses,
+        assets: tbSummary.assets,
+        liabilities: tbSummary.liabilities,
+        equity: tbSummary.equity,
+        income: tbSummary.income,
+        expenses: tbSummary.expenses,
       },
 
       profit_and_loss_summary: {
-        revenue: o.total_income,
-        cost_of_sales: 0,
-        gross_profit: o.total_income,
-        operating_expenses: o.total_expenses,
-        net_profit: o.net_profit,
+        revenue: plSummary.revenue,
+        cost_of_sales: plSummary.cost_of_sales,
+        gross_profit: plSummary.gross_profit,
+        operating_expenses: plSummary.operating_expenses,
+        net_profit: plSummary.net_profit,
       },
 
       balance_sheet_summary: {
-        total_assets: unifiedBS.totals.total_assets,
-        total_liabilities: unifiedBS.totals.total_liabilities,
-        net_assets: unifiedBS.totals.total_assets - unifiedBS.totals.total_liabilities,
-        equity: unifiedBS.totals.total_equity,
+        total_assets: bsTotals.total_assets,
+        total_liabilities: bsTotals.total_liabilities,
+        net_assets: bsTotals.total_assets - bsTotals.total_liabilities,
+        equity: bsTotals.total_equity,
       },
 
       // -------------------------
-      // FULL REPORTING ENGINE
+      // FULL REPORTING ENGINE (JOURNAL-DRIVEN)
       // -------------------------
-      trial_balance_full: tbFull ?? [],
-      balance_sheet_full: bsFull ?? [],
-      profit_and_loss_full: plFull ?? [],
-      director_loan_ledger: dlFull ?? [],
+      trial_balance_full: unifiedTB.lines,
+      balance_sheet_full: unifiedBS,
+      profit_and_loss_full: unifiedPL.lines,
+      director_loan_ledger: unifiedDL.lines,
 
-      bank_accounts: bankAccounts ?? [],
-      vat_control: vatControl ?? [],
-      paye_control: payeControl ?? [],
-      corporation_tax: corporationTax ?? [],
-      fixed_assets: fixedAssets ?? [],
-      suspense_and_uncategorised: suspenseData ?? [],
-      cash_flow: cashFlow ?? [],
+      bank_accounts: [], // can be derived later if you want from journals
+      vat_control: [],
+      paye_control: [],
+      corporation_tax: [],
+      fixed_assets: [],
+      suspense_and_uncategorised: [],
+      cash_flow: unifiedCF.summary,
 
       // -------------------------
       // COA SUMMARY
