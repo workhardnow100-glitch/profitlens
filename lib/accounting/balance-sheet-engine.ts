@@ -30,17 +30,17 @@ export type BSStructure = {
 export async function getUnifiedBalanceSheet(
   clientId: string
 ): Promise<BSStructure> {
-  console.log("📘 [BS] Fetching balance sheet for client:", clientId);
-
-  const { data: linesA, error: errA } = await supabaseAdmin.rpc(
+  const { data: rows, error } = await supabaseAdmin.rpc(
     "balance_sheet_lines_for_client",
     { p_client_id: clientId }
   );
 
-  console.log("📘 [BS] RPC A returned:", linesA);
-  if (errA) console.log("❌ [BS] RPC A error:", errA);
+  if (error) {
+    console.error("❌ [BS] RPC error:", error);
+    return emptyStructure();
+  }
 
-  const rows = (linesA || []).map((row: any) => ({
+  const normalized = (rows || []).map((row: any) => ({
     account_code: String(row.account_code),
     account_name: row.account_name,
     balance: Number(row.balance ?? 0),
@@ -48,15 +48,24 @@ export async function getUnifiedBalanceSheet(
     hmrc_bucket: row.hmrc_bucket ?? null,
   }));
 
-  console.log("📘 [BS] Normalized rows:", rows);
-
-  const structure = mapToStructure(rows);
-  console.log("📘 [BS] STRUCTURE:", structure);
-
+  const structure = mapToStructure(normalized);
   const totals = computeTotals(structure);
-  console.log("📘 [BS] TOTALS:", totals);
 
   return { ...structure, totals };
+}
+
+function emptyStructure(): BSStructure {
+  return {
+    assets: { non_current: [], current: [] },
+    liabilities: { non_current: [], current: [] },
+    equity: [],
+    totals: {
+      total_assets: 0,
+      total_liabilities: 0,
+      total_equity: 0,
+      total_liabilities_and_equity: 0,
+    },
+  };
 }
 
 function mapToStructure(rows: BSLine[]) {
@@ -66,24 +75,23 @@ function mapToStructure(rows: BSLine[]) {
     equity: [],
   };
 
+  let totalIncome = 0;
+  let totalExpenses = 0;
+
   for (const row of rows) {
-    const codeNum = parseInt(row.account_code, 10);
+    const code = parseInt(row.account_code, 10);
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
     // ---- ASSETS ----
-    const isAsset =
+    if (
       type === "ASSET" ||
       bucket === "fixed_asset" ||
       bucket === "current_asset" ||
       bucket === "bank" ||
-      bucket === "debtors" ||
-      bucket === "vat_asset" ||
-      bucket === "ASSETS" ||
-      (codeNum >= 1000 && codeNum <= 1999);
-
-    if (isAsset) {
-      if (bucket === "fixed_asset" || codeNum < 1100) {
+      (code >= 1000 && code <= 1999)
+    ) {
+      if (bucket === "fixed_asset" || code < 1100) {
         structure.assets.non_current.push(row);
       } else {
         structure.assets.current.push(row);
@@ -92,13 +100,8 @@ function mapToStructure(rows: BSLine[]) {
     }
 
     // ---- LIABILITIES ----
-    const isLiability =
-      type === "LIABILITY" ||
-      bucket === "LIABILITIES" ||
-      (codeNum >= 2000 && codeNum <= 2999);
-
-    if (isLiability) {
-      if (codeNum < 2500) {
+    if (type === "LIABILITY" || (code >= 2000 && code <= 2999)) {
+      if (code < 2500) {
         structure.liabilities.current.push(row);
       } else {
         structure.liabilities.non_current.push(row);
@@ -106,23 +109,38 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- EQUITY (including P&L accounts) ----
-    const isEquity =
-      type === "EQUITY" ||
-      bucket === "EQUITY" ||
-      (codeNum >= 3000 && codeNum <= 3999);
-
-    // P&L accounts collapse into equity
-    const isPL =
-      type === "INCOME" ||
-      type === "EXPENSE" ||
-      (codeNum >= 4000 && codeNum <= 9999);
-
-    if (isEquity || isPL) {
+    // ---- EQUITY (REAL EQUITY ONLY) ----
+    if (type === "EQUITY" || (code >= 3000 && code <= 3999)) {
       structure.equity.push(row);
       continue;
     }
+
+    // ---- P&L ACCOUNTS (COLLECT BUT DO NOT DISPLAY) ----
+    if (type === "INCOME" || (code >= 4000 && code <= 4999)) {
+      totalIncome += row.balance;
+      continue;
+    }
+
+    if (type === "EXPENSE" || (code >= 5000 && code <= 5999)) {
+      totalExpenses += row.balance;
+      continue;
+    }
+
+    // ---- SYSTEM ACCOUNTS (ALSO PART OF PROFIT) ----
+    if (code >= 9000 && code <= 9999) {
+      totalIncome += row.balance; // system accounts are net movements
+      continue;
+    }
   }
+
+  // ---- COMPUTE CURRENT YEAR PROFIT ----
+  const profit = totalIncome - totalExpenses;
+
+  structure.equity.push({
+    account_code: "9998",
+    account_name: "Current Year Profit",
+    balance: profit,
+  });
 
   return structure;
 }
