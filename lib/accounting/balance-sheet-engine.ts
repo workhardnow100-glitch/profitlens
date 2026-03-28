@@ -7,6 +7,8 @@ export type BSLine = {
   balance: number;
   account_type?: string | null;
   hmrc_bucket?: string | null;
+  debit?: number;
+  credit?: number;
 };
 
 export type BSStructure = {
@@ -46,6 +48,8 @@ export async function getUnifiedBalanceSheet(
     balance: Number(row.balance ?? 0),
     account_type: row.account_type ?? null,
     hmrc_bucket: row.hmrc_bucket ?? null,
+    debit: Number(row.debit ?? 0),
+    credit: Number(row.credit ?? 0),
   }));
 
   const structure = mapToStructure(normalized);
@@ -75,8 +79,8 @@ function mapToStructure(rows: BSLine[]) {
     equity: [],
   };
 
-  let totalIncome = 0;
-  let totalExpenses = 0;
+  let totalDebits = 0;
+  let totalCredits = 0;
 
   for (const row of rows) {
     const code = parseInt(row.account_code, 10);
@@ -115,26 +119,20 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- P&L ACCOUNTS (COLLECT BUT DO NOT DISPLAY) ----
-    if (type === "INCOME" || (code >= 4000 && code <= 4999)) {
-      totalIncome += row.balance;
-      continue;
-    }
-
-    if (type === "EXPENSE" || (code >= 5000 && code <= 5999)) {
-      totalExpenses += row.balance;
-      continue;
-    }
-
-    // ---- SYSTEM ACCOUNTS (ALSO PART OF PROFIT) ----
-    if (code >= 9000 && code <= 9999) {
-      totalIncome += row.balance; // system accounts are net movements
+    // ---- P&L ACCOUNTS (COLLECT DEBITS/CREDITS ONLY) ----
+    if (
+      type === "INCOME" ||
+      type === "EXPENSE" ||
+      (code >= 4000 && code <= 9999)
+    ) {
+      totalDebits += row.debit ?? 0;
+      totalCredits += row.credit ?? 0;
       continue;
     }
   }
 
-  // ---- COMPUTE CURRENT YEAR PROFIT ----
-  const profit = totalIncome - totalExpenses;
+  // ---- COMPUTE CURRENT YEAR PROFIT (CORRECT FORMULA) ----
+  const profit = totalCredits - totalDebits;
 
   structure.equity.push({
     account_code: "9998",
