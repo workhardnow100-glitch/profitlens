@@ -284,16 +284,17 @@ export default function AccountingOverviewPage() {
         <div>
           <h2 className="text-lg font-semibold mb-2">Cash Flow Summary</h2>
           {cash_flow.length === 0 ? (
-            <p className="text-sm text-gray-500">No cash movements yet.</p>
-          ) : (
-            cash_flow.map((row, idx) => (
-              <StatCard
-                key={idx}
-                label={row.account_name}
-                value={safeNumber(row.debit) - safeNumber(row.credit)}
-              />
-            ))
-          )}
+  <p className="text-sm text-gray-500">No cash movements yet.</p>
+) : (
+  cash_flow.slice(0, 6).map((row, idx) => (
+    <StatCard
+      key={idx}
+      label={row.account_name}
+      value={safeNumber(row.debit) - safeNumber(row.credit)}
+    />
+  ))
+)}
+
         </div>
 
         {/* BANK */}
