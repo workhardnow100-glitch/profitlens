@@ -12,6 +12,19 @@ import {
   getUnifiedCashFlow,
 } from "../../lib/accounting/balance-sheet-engine";
 
+// Normalise every BSLine row so UI never receives undefined values
+function normalizeLine(line: any) {
+  return {
+    account_code: String(line.account_code || ""),
+    account_name: String(line.account_name || ""),
+    account_type: line.account_type || null,
+    hmrc_bucket: line.hmrc_bucket || null,
+    debit: Number(line.debit || 0),
+    credit: Number(line.credit || 0),
+    balance: Number(line.balance || 0),
+  };
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
@@ -128,9 +141,9 @@ export default async function handler(
       },
 
       // -------------------------
-      // FULL REPORTING ENGINE (ARRAYS ONLY)
+      // FULL REPORTING ENGINE (ARRAYS ONLY + NORMALIZED)
       // -------------------------
-      trial_balance_full: unifiedTB.lines,
+      trial_balance_full: unifiedTB.lines.map(normalizeLine),
 
       balance_sheet_full: [
         ...unifiedBS.assets.current,
@@ -138,10 +151,10 @@ export default async function handler(
         ...unifiedBS.liabilities.current,
         ...unifiedBS.liabilities.non_current,
         ...unifiedBS.equity,
-      ],
+      ].map(normalizeLine),
 
-      profit_and_loss_full: unifiedPL.lines,
-      director_loan_ledger: unifiedDL.lines,
+      profit_and_loss_full: unifiedPL.lines.map(normalizeLine),
+      director_loan_ledger: unifiedDL.lines.map(normalizeLine),
 
       bank_accounts: [],
       vat_control: [],
@@ -150,7 +163,11 @@ export default async function handler(
       fixed_assets: [],
       suspense_and_uncategorised: [],
 
-      cash_flow: unifiedCF.lines,
+      cash_flow: unifiedCF.lines.map((l) => ({
+        ...l,
+        debit: Number(l.debit || 0),
+        credit: Number(l.credit || 0),
+      })),
 
       // -------------------------
       // COA SUMMARY
