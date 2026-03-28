@@ -258,8 +258,9 @@ export default async function handler(req, res) {
         if (isControl) continue;
 
         // Respect CT toggles for profit maths
-        const includeForProfit = tx.includedinct !== false; // default true
-        if (!includeForProfit) continue;
+// const includeForProfit = tx.includedinct !== false; // default true
+// if (!includeForProfit) continue
+
 
         // ❌ Ignore categories explicitly marked as ignore
         if (IGNORE_SET.has(uiCategory)) continue;
