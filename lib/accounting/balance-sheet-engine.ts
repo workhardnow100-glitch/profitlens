@@ -94,10 +94,9 @@ function mapToStructure(rows: BSLine[]) {
       type === "ASSET" ||
       bucket === "fixed_asset" ||
       bucket === "current_asset" ||
-      bucket === "bank" ||
-      (code >= 1000 && code <= 1999)
+      bucket === "bank"
     ) {
-      if (bucket === "fixed_asset" || code < 1100) {
+      if (bucket === "fixed_asset") {
         structure.assets.non_current.push(row);
       } else {
         structure.assets.current.push(row);
@@ -106,29 +105,33 @@ function mapToStructure(rows: BSLine[]) {
     }
 
     // ---- LIABILITIES ----
-    if (type === "LIABILITY" || (code >= 2000 && code <= 2999)) {
-      if (code < 2500) {
-        structure.liabilities.current.push(row);
-      } else {
-        structure.liabilities.non_current.push(row);
-      }
+    if (type === "LIABILITY") {
+      structure.liabilities.current.push(row);
       continue;
     }
 
     // ---- EQUITY ----
-    if (type === "EQUITY" || (code >= 3000 && code <= 3999)) {
+    if (type === "EQUITY") {
       structure.equity.push(row);
       continue;
     }
 
-    // ---- P&L ACCOUNTS (INCOME + EXPENSE ONLY) ----
-    if (type === "INCOME" || type === "EXPENSE") {
+    // ---- TRUE P&L ACCOUNTS ONLY ----
+    const isExpense = bucket === "allowable" || bucket === "disallowable";
+    const isTradingIncome = bucket === "trading_income"; // future-proof
+
+    if (isExpense || isTradingIncome) {
       totalDebits += row.debit ?? 0;
       totalCredits += row.credit ?? 0;
       continue;
     }
 
-    // ---- IGNORE SYSTEM ACCOUNTS ----
+    // ---- IGNORE NON-TRADING INCOME ----
+    if (bucket === "income") {
+      continue;
+    }
+
+    // ---- IGNORE SYSTEM ----
     if (type === "SYSTEM") {
       continue;
     }
@@ -138,7 +141,7 @@ function mapToStructure(rows: BSLine[]) {
   const profit = totalCredits - totalDebits;
 
   structure.equity.push({
-    account_code: "PROFIT", // virtual, non-COA code
+    account_code: "PROFIT",
     account_name: "Current Year Profit",
     balance: profit,
   });
