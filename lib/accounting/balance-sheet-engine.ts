@@ -1,3 +1,4 @@
+// lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
 
 console.log("🔥 USING UNIFIED JOURNAL-DRIVEN ACCOUNTING ENGINE");
@@ -68,6 +69,7 @@ export type CashFlowResult = {
 
 // ------------------------------------------------------------
 // CORE: pull all journal lines for a client
+// via journal_entries (client_id) + COA join
 // ------------------------------------------------------------
 async function getJournalLines(clientId: string) {
   const { data, error } = await supabaseAdmin
@@ -76,6 +78,9 @@ async function getJournalLines(clientId: string) {
       debit,
       credit,
       account_id,
+      journal_entries!inner (
+        client_id
+      ),
       chart_of_account_entries:account_id (
         account_code,
         account_name,
@@ -83,14 +88,13 @@ async function getJournalLines(clientId: string) {
         hmrc_bucket
       )
     `)
-    .eq("client_id", clientId);
+    .eq("journal_entries.client_id", clientId);
 
   if (error || !data) {
     console.error("❌ Journal pull error:", error);
     return [];
   }
 
-  // Flatten join into enriched journal rows
   return data.map((row: any) => ({
     debit: Number(row.debit ?? 0),
     credit: Number(row.credit ?? 0),
@@ -101,7 +105,6 @@ async function getJournalLines(clientId: string) {
   }));
 }
 
-
 // ------------------------------------------------------------
 // CORE: group journal lines into account-level balances
 // ------------------------------------------------------------
@@ -109,7 +112,8 @@ function groupByAccount(lines: any[]): BSLine[] {
   const grouped: Record<string, BSLine> = {};
 
   for (const row of lines) {
-    const code = String(row.account_code);
+    const code = String(row.account_code || "");
+    if (!code) continue;
 
     if (!grouped[code]) {
       grouped[code] = {
@@ -136,7 +140,9 @@ function groupByAccount(lines: any[]): BSLine[] {
 // ------------------------------------------------------------
 // BALANCE SHEET (journal-driven)
 // ------------------------------------------------------------
-export async function getUnifiedBalanceSheet(clientId: string): Promise<BSStructure> {
+export async function getUnifiedBalanceSheet(
+  clientId: string
+): Promise<BSStructure> {
   const lines = await getJournalLines(clientId);
   if (!lines.length) return emptyStructure();
 
@@ -177,9 +183,7 @@ function mapToStructure(rows: BSLine[]) {
 
     const isSystem = type === "SYSTEM" || bucket === "ignore";
     const isControl = type === "CONTROL" || bucket === "control";
-    if (isSystem || isControl) {
-      continue;
-    }
+    if (isSystem || isControl) continue;
 
     // ---- ASSETS ----
     const isAssetBucket =
@@ -213,7 +217,7 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- P&L: ALL INCOME + EXPENSE (TRADING + NON-TRADING), EXCLUDING SYSTEM/IGNORE ----
+    // ---- P&L: INCOME + EXPENSE ----
     if (type === "INCOME" || type === "EXPENSE") {
       totalDebits += row.debit ?? 0;
       totalCredits += row.credit ?? 0;
@@ -256,7 +260,9 @@ function computeTotals(structure: Omit<BSStructure, "totals">) {
 // ------------------------------------------------------------
 // TRIAL BALANCE (journal-driven)
 // ------------------------------------------------------------
-export async function getUnifiedTrialBalance(clientId: string): Promise<TrialBalanceResult> {
+export async function getUnifiedTrialBalance(
+  clientId: string
+): Promise<TrialBalanceResult> {
   const lines = await getJournalLines(clientId);
   const accounts = groupByAccount(lines);
 
@@ -332,7 +338,7 @@ export async function getUnifiedDirectorLoan(
   const lines = await getJournalLines(clientId);
   const accounts = groupByAccount(lines);
 
-  // 5041 = Director Loan – Drawings (per your COA)
+  // Adjust this code to your actual Director Loan account code
   const dl = accounts.find((a) => a.account_code === "5041");
 
   return {
@@ -344,12 +350,17 @@ export async function getUnifiedDirectorLoan(
 // ------------------------------------------------------------
 // CASH FLOW (journal-driven, simple version)
 // ------------------------------------------------------------
-export async function getUnifiedCashFlow(clientId: string): Promise<CashFlowResult> {
+export async function getUnifiedCashFlow(
+  clientId: string
+): Promise<CashFlowResult> {
   const lines = await getJournalLines(clientId);
 
   const operating = lines
     .filter((l) => l.account_type === "EXPENSE" || l.account_type === "INCOME")
-    .reduce((sum, l) => sum + Number(l.debit ?? 0) - Number(l.credit ?? 0), 0);
+    .reduce(
+      (sum, l) => sum + Number(l.debit ?? 0) - Number(l.credit ?? 0),
+      0
+    );
 
   return {
     lines,
