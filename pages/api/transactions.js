@@ -188,7 +188,7 @@ function computeSummary(transactions, coaMap) {
 
     // 3. Respect CT toggle
     // Do not filter charts by CT flag
-// if (tx.includedinct === false) continue;
+  if (tx.includedinct === false) continue;
 
 
     // 4. Ignore reversals
