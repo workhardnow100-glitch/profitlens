@@ -118,8 +118,19 @@ export default async function handler(
         equity: bs.total_equity,
       },
 
+      // -------------------------
+      // FULL REPORTING ENGINE (ARRAYS ONLY)
+      // -------------------------
       trial_balance_full: unifiedTB.lines,
-      balance_sheet_full: unifiedBS,
+
+      balance_sheet_full: [
+        ...unifiedBS.assets.current,
+        ...unifiedBS.assets.non_current,
+        ...unifiedBS.liabilities.current,
+        ...unifiedBS.liabilities.non_current,
+        ...unifiedBS.equity,
+      ],
+
       profit_and_loss_full: unifiedPL.lines,
       director_loan_ledger: unifiedDL.lines,
 
@@ -129,15 +140,16 @@ export default async function handler(
       corporation_tax: [],
       fixed_assets: [],
       suspense_and_uncategorised: [],
-      cash_flow: unifiedCF.summary,
 
-     coa_summary: {
-  total_accounts: totalAccounts,
-  active_accounts: activeAccounts,
-  system_accounts: systemAccounts,
-  uncategorised_accounts: uncategorisedAccounts,
-  suspense_accounts: suspenseAccounts,
-},
+      cash_flow: unifiedCF.lines,
+
+      coa_summary: {
+        total_accounts: totalAccounts,
+        active_accounts: activeAccounts,
+        system_accounts: systemAccounts,
+        uncategorised_accounts: uncategorisedAccounts,
+        suspense_accounts: suspenseAccounts,
+      },
 
       alerts: [],
       quick_actions: [
