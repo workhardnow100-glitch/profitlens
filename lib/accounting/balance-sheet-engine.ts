@@ -1,5 +1,6 @@
 // lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
+
 console.log("🔥 USING UPDATED BALANCE SHEET ENGINE");
 
 export type BSLine = {
@@ -137,7 +138,7 @@ function mapToStructure(rows: BSLine[]) {
   const profit = totalCredits - totalDebits;
 
   structure.equity.push({
-    account_code: "PROFIT", // SAFE VIRTUAL CODE
+    account_code: "PROFIT", // virtual, non-COA code
     account_name: "Current Year Profit",
     balance: profit,
   });
