@@ -16,20 +16,23 @@ type FinancialHealth = {
 };
 
 type TrialBalanceRow = {
-  section: string;
   account_code: string;
   account_name: string;
   account_type: string;
   hmrc_bucket: string | null;
   debit: number;
   credit: number;
+  balance: number;
 };
 
 type BalanceSheetRow = {
-  section: string;
   account_code: string;
   account_name: string;
-  amount: number;
+  account_type: string | null;
+  hmrc_bucket: string | null;
+  debit: number;
+  credit: number;
+  balance: number;
 };
 
 type ProfitAndLossSummary = {
@@ -41,16 +44,17 @@ type ProfitAndLossSummary = {
 };
 
 type ProfitAndLossRow = {
-  section: string;
   account_code: string;
   account_name: string;
-  amount: number;
+  balance: number;
 };
 
 type DirectorLoanRow = {
-  section: string;
-  date: string | null;
-  amount: number | null;
+  account_code: string;
+  account_name: string;
+  debit: number;
+  credit: number;
+  balance: number;
 };
 
 type BankAccountRow = {
@@ -69,8 +73,27 @@ type SimpleControlRow = {
 };
 
 type CashFlowRow = {
-  section: string;
-  amount: number;
+  debit: number;
+  credit: number;
+  account_code: string;
+  account_name: string;
+  account_type: string;
+  hmrc_bucket: string | null;
+};
+
+type BalanceSheetSummary = {
+  total_assets: number;
+  total_liabilities: number;
+  net_assets: number;
+  equity: number;
+};
+
+type TrialBalanceSummary = {
+  assets: number;
+  liabilities: number;
+  equity: number;
+  income: number;
+  expenses: number;
 };
 
 type CoaSummary = {
@@ -96,6 +119,9 @@ type QuickAction = {
 type AccountingOverviewData = {
   financial_health: FinancialHealth;
 
+  trial_balance_summary: TrialBalanceSummary;
+  balance_sheet_summary: BalanceSheetSummary;
+
   trial_balance_full: TrialBalanceRow[];
   balance_sheet_full: BalanceSheetRow[];
   profit_and_loss_summary: ProfitAndLossSummary;
@@ -114,6 +140,20 @@ type AccountingOverviewData = {
   alerts: Alert[];
   quick_actions: QuickAction[];
 };
+
+/* -----------------------------
+   SAFE HELPERS
+------------------------------ */
+
+const safeNumber = (v: any) => Number(v || 0);
+
+function formatCurrency(value: number) {
+  const n = safeNumber(value);
+  return `£${n.toLocaleString("en-GB", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
 /* -----------------------------
    MAIN COMPONENT
@@ -164,6 +204,8 @@ export default function AccountingOverviewPage() {
 
   const {
     financial_health,
+    trial_balance_summary,
+    balance_sheet_summary,
     trial_balance_full,
     balance_sheet_full,
     profit_and_loss_summary,
@@ -181,12 +223,19 @@ export default function AccountingOverviewPage() {
     quick_actions,
   } = data;
 
-  /* -----------------------------
-     DERIVED SUMMARY VALUES
-  ------------------------------ */
+  const bsDerived = {
+    assets: safeNumber(balance_sheet_summary.total_assets),
+    liabilities: safeNumber(balance_sheet_summary.total_liabilities),
+    equity: safeNumber(balance_sheet_summary.equity),
+  };
 
-  const bsDerived = computeFinancialHealthFromBS(balance_sheet_full);
-  const tbDerived = computeTBSummary(trial_balance_full);
+  const tbDerived = {
+    assets: safeNumber(trial_balance_summary.assets),
+    liabilities: safeNumber(trial_balance_summary.liabilities),
+    equity: safeNumber(trial_balance_summary.equity),
+    income: safeNumber(trial_balance_summary.income),
+    expenses: safeNumber(trial_balance_summary.expenses),
+  };
 
   /* -----------------------------
      RENDER UI
@@ -200,7 +249,6 @@ export default function AccountingOverviewPage() {
           Cockpit-grade view of your ledger, control accounts, and performance.
         </p>
 
-        {/* Explanation Banner */}
         <div className="mt-4 mb-2 p-3 rounded-md bg-purple-50 border border-purple-200 text-purple-800 text-sm">
           <strong>About this page:</strong> This view shows your full accrual-based ledger, including journals, adjustments, retained earnings,
           income and expense accounts, and balances carried forward from previous periods.
@@ -228,7 +276,6 @@ export default function AccountingOverviewPage() {
         </div>
       </section>
 
-
       {/* -----------------------------
          CASH FLOW + BANK + TAX
       ------------------------------ */}
@@ -236,9 +283,17 @@ export default function AccountingOverviewPage() {
         {/* CASH FLOW */}
         <div>
           <h2 className="text-lg font-semibold mb-2">Cash Flow Summary</h2>
-          {cash_flow.map((row, idx) => (
-            <StatCard key={idx} label={row.section} value={row.amount} />
-          ))}
+          {cash_flow.length === 0 ? (
+            <p className="text-sm text-gray-500">No cash movements yet.</p>
+          ) : (
+            cash_flow.map((row, idx) => (
+              <StatCard
+                key={idx}
+                label={row.account_name}
+                value={safeNumber(row.debit) - safeNumber(row.credit)}
+              />
+            ))
+          )}
         </div>
 
         {/* BANK */}
@@ -281,6 +336,7 @@ export default function AccountingOverviewPage() {
           <ControlBlock title="Corporation Tax" rows={corporation_tax} link="/reports/corporation-tax" />
         </div>
       </section>
+
       {/* -----------------------------
          FULL P&L + BS + TB
       ------------------------------ */}
@@ -302,12 +358,11 @@ export default function AccountingOverviewPage() {
           </div>
 
           <SimpleTable
-            columns={["Section", "Code", "Name", "Amount"]}
+            columns={["Code", "Name", "Balance"]}
             rows={profit_and_loss_full.map((r) => [
-              r.section,
               r.account_code,
               r.account_name,
-              formatCurrency(r.amount),
+              formatCurrency(r.balance),
             ])}
           />
         </div>
@@ -329,12 +384,11 @@ export default function AccountingOverviewPage() {
           </div>
 
           <SimpleTable
-            columns={["Section", "Code", "Name", "Amount"]}
+            columns={["Code", "Name", "Balance"]}
             rows={balance_sheet_full.map((r) => [
-              r.section,
               r.account_code,
               r.account_name,
-              formatCurrency(r.amount),
+              formatCurrency(r.balance),
             ])}
           />
         </div>
@@ -357,9 +411,8 @@ export default function AccountingOverviewPage() {
           </div>
 
           <SimpleTable
-            columns={["Section", "Code", "Name", "Debit", "Credit"]}
+            columns={["Code", "Name", "Debit", "Credit"]}
             rows={trial_balance_full.map((r) => [
-              r.section,
               r.account_code,
               r.account_name,
               formatCurrency(r.debit),
@@ -383,10 +436,11 @@ export default function AccountingOverviewPage() {
           </div>
 
           <SimpleTable
-            columns={["Section", "Amount"]}
+            columns={["Code", "Name", "Balance"]}
             rows={director_loan_ledger.map((r) => [
-              r.section,
-              r.amount === null ? "-" : formatCurrency(r.amount),
+              r.account_code,
+              r.account_name,
+              formatCurrency(r.balance),
             ])}
           />
         </div>
@@ -494,41 +548,6 @@ export default function AccountingOverviewPage() {
 }
 
 /* -----------------------------
-   DERIVED SUMMARY HELPERS
------------------------------- */
-
-function computeFinancialHealthFromBS(bs: BalanceSheetRow[]) {
-  const assets = bs
-    .filter((r) => r.section === "ASSETS")
-    .reduce((sum, r) => sum + r.amount, 0);
-
-  const liabilities = bs
-    .filter((r) => r.section === "LIABILITIES")
-    .reduce((sum, r) => sum + r.amount, 0);
-
-  const equity = bs
-    .filter((r) => r.section === "EQUITY")
-    .reduce((sum, r) => sum + r.amount, 0);
-
-  return { assets, liabilities, equity };
-}
-
-function computeTBSummary(tb: TrialBalanceRow[]) {
-  const sum = (section: string) =>
-    tb
-      .filter((r) => r.section === section)
-      .reduce((acc, r) => acc + (r.credit - r.debit), 0);
-
-  return {
-    assets: sum("ASSETS"),
-    liabilities: sum("LIABILITIES"),
-    equity: sum("EQUITY"),
-    income: sum("INCOME"),
-    expenses: sum("EXPENSES"),
-  };
-}
-
-/* -----------------------------
    UI HELPERS
 ------------------------------ */
 
@@ -541,10 +560,11 @@ function StatCard({
   value: number;
   type?: "currency" | "number";
 }) {
+  const n = safeNumber(value);
   const formatted =
     type === "currency"
-      ? formatCurrency(value)
-      : value.toLocaleString("en-GB");
+      ? formatCurrency(n)
+      : n.toLocaleString("en-GB");
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
@@ -552,13 +572,6 @@ function StatCard({
       <div className="mt-1 text-base font-semibold">{formatted}</div>
     </div>
   );
-}
-
-function formatCurrency(value: number) {
-  return `£${value.toLocaleString("en-GB", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 function SimpleTable({
