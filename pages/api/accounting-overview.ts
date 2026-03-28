@@ -1,363 +1,214 @@
+// pages/api/accounting-overview.ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth";
+import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-console.log("🔥 USING UNIFIED JOURNAL-DRIVEN ACCOUNTING ENGINE");
+import {
+  getUnifiedBalanceSheet,
+  getUnifiedTrialBalance,
+  getUnifiedProfitAndLoss,
+  getUnifiedDirectorLoan,
+  getUnifiedCashFlow,
+} from "../../lib/accounting/balance-sheet-engine";
 
-export type BSLine = {
-  account_code: string;
-  account_name: string;
-  balance: number;
-  account_type?: string | null;
-  hmrc_bucket?: string | null;
-  debit?: number;
-  credit?: number;
-};
-
-export type BSStructure = {
-  assets: {
-    non_current: BSLine[];
-    current: BSLine[];
-  };
-  liabilities: {
-    non_current: BSLine[];
-    current: BSLine[];
-  };
-  equity: BSLine[];
-  totals: {
-    total_assets: number;
-    total_liabilities: number;
-    total_equity: number;
-    total_liabilities_and_equity: number;
-  };
-};
-
-export type TrialBalanceResult = {
-  lines: BSLine[];
-  summary: {
-    assets: number;
-    liabilities: number;
-    equity: number;
-    income: number;
-    expenses: number;
-  };
-};
-
-export type ProfitAndLossResult = {
-  summary: {
-    revenue: number;
-    cost_of_sales: number;
-    gross_profit: number;
-    operating_expenses: number;
-    net_profit: number;
-  };
-  lines: BSLine[];
-};
-
-export type DirectorLoanResult = {
-  lines: BSLine[];
-  balance: number;
-};
-
-export type CashFlowResult = {
-  lines: any[];
-  summary: {
-    operating: number;
-    investing: number;
-    financing: number;
-  };
-};
-
-// ------------------------------------------------------------
-// CORE: pull all journal lines for a client (JOIN COA ENTRIES)
-// ------------------------------------------------------------
-async function getJournalLines(clientId: string) {
-  const { data, error } = await supabaseAdmin
-    .from("journal_lines")
-    .select(`
-      debit,
-      credit,
-      account_id,
-      chart_of_account_entries (
-        account_code,
-        account_name,
-        account_type,
-        hmrc_bucket
-      )
-    `)
-    .eq("client_id", clientId);
-
-  if (error || !data) {
-    console.error("❌ Journal pull error:", error);
-    return [];
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Flatten join into enriched journal rows
-  return data.map((row: any) => ({
-    debit: Number(row.debit ?? 0),
-    credit: Number(row.credit ?? 0),
-    account_code: String(row.chart_of_account_entries?.account_code ?? ""),
-    account_name: row.chart_of_account_entries?.account_name ?? "",
-    account_type: row.chart_of_account_entries?.account_type ?? null,
-    hmrc_bucket: row.chart_of_account_entries?.hmrc_bucket ?? null,
-  }));
-}
+  try {
+    const session = await getServerSession(req, res, authOptions);
+    const clientId = session?.user?.clientId;
 
-// ------------------------------------------------------------
-// CORE: group journal lines into account-level balances
-// ------------------------------------------------------------
-function groupByAccount(lines: any[]): BSLine[] {
-  const grouped: Record<string, BSLine> = {};
-
-  for (const row of lines) {
-    const code = String(row.account_code || "");
-
-    if (!code) continue; // skip if no mapped account_code
-
-    if (!grouped[code]) {
-      grouped[code] = {
-        account_code: code,
-        account_name: row.account_name,
-        account_type: row.account_type,
-        hmrc_bucket: row.hmrc_bucket,
-        debit: 0,
-        credit: 0,
-        balance: 0,
-      };
+    if (!clientId) {
+      return res.status(200).json(emptyOverview());
     }
 
-    grouped[code].debit! += Number(row.debit ?? 0);
-    grouped[code].credit! += Number(row.credit ?? 0);
+    // ------------------------------------------------------------
+    // 1) UNIFIED JOURNAL ENGINE
+    // ------------------------------------------------------------
+    const [
+      unifiedBS,
+      unifiedTB,
+      unifiedPL,
+      unifiedDL,
+      unifiedCF,
+    ] = await Promise.all([
+      getUnifiedBalanceSheet(clientId),
+      getUnifiedTrialBalance(clientId),
+      getUnifiedProfitAndLoss(clientId),
+      getUnifiedDirectorLoan(clientId),
+      getUnifiedCashFlow(clientId),
+    ]);
+
+    // ------------------------------------------------------------
+    // 2) COA SUMMARY
+    // ------------------------------------------------------------
+    const { data: coa, error: coaError } = await supabaseAdmin
+      .from("chart_of_accounts")
+      .select("id")
+      .eq("client_id", clientId)
+      .single();
+
+    let totalAccounts = 0;
+    let activeAccounts = 0;
+    let systemAccounts = 0;
+    let uncategorisedAccounts = 0;
+    let suspenseAccounts = 0;
+
+    if (!coaError && coa) {
+      const { data: coaEntries } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("account_code, account_type, is_system, has_activity")
+        .eq("coa_id", coa.id);
+
+      if (coaEntries) {
+        totalAccounts = coaEntries.length;
+        activeAccounts = coaEntries.filter((a) => a.has_activity).length;
+        systemAccounts = coaEntries.filter((a) => a.is_system).length;
+        uncategorisedAccounts = coaEntries.filter((a) => a.account_code === "9020").length;
+        suspenseAccounts = coaEntries.filter((a) => a.account_code === "9999").length;
+      }
+    }
+
+    // ------------------------------------------------------------
+    // 3) BUILD RESPONSE
+    // ------------------------------------------------------------
+    const pl = unifiedPL.summary;
+    const tb = unifiedTB.summary;
+    const bs = unifiedBS.totals;
+
+    return res.status(200).json({
+      financial_health: {
+        assets: bs.total_assets,
+        liabilities: bs.total_liabilities,
+        equity: bs.total_equity,
+        revenue_mtd: pl.revenue,
+        revenue_ytd: pl.revenue,
+        expenses_mtd: pl.operating_expenses,
+        expenses_ytd: pl.operating_expenses,
+        net_profit_mtd: pl.net_profit,
+        net_profit_ytd: pl.net_profit,
+      },
+
+      trial_balance_summary: {
+        assets: tb.assets,
+        liabilities: tb.liabilities,
+        equity: tb.equity,
+        income: tb.income,
+        expenses: tb.expenses,
+      },
+
+      profit_and_loss_summary: {
+        revenue: pl.revenue,
+        cost_of_sales: pl.cost_of_sales,
+        gross_profit: pl.gross_profit,
+        operating_expenses: pl.operating_expenses,
+        net_profit: pl.net_profit,
+      },
+
+      balance_sheet_summary: {
+        total_assets: bs.total_assets,
+        total_liabilities: bs.total_liabilities,
+        net_assets: bs.total_assets - bs.total_liabilities,
+        equity: bs.total_equity,
+      },
+
+      trial_balance_full: unifiedTB.lines,
+      balance_sheet_full: unifiedBS,
+      profit_and_loss_full: unifiedPL.lines,
+      director_loan_ledger: unifiedDL.lines,
+
+      bank_accounts: [],
+      vat_control: [],
+      paye_control: [],
+      corporation_tax: [],
+      fixed_assets: [],
+      suspense_and_uncategorised: [],
+      cash_flow: unifiedCF.summary,
+
+     coa_summary: {
+  total_accounts: totalAccounts,
+  active_accounts: activeAccounts,
+  system_accounts: systemAccounts,
+  uncategorised_accounts: uncategorisedAccounts,
+  suspense_accounts: suspenseAccounts,
+},
+
+      alerts: [],
+      quick_actions: [
+        { label: "Add Account", link: "/setting/chart-of-accounts" },
+        { label: "Post Journal", link: "/journal/new" },
+        { label: "View Transactions", link: "/transactions" },
+        { label: "Reconcile Bank", link: "/bank-reconciliation" },
+        { label: "Create Invoice", link: "/invoices/new" },
+        { label: "Upload Statement", link: "/upload" },
+        { label: "Run VAT Return", link: "/vat" },
+      ],
+    });
+
+  } catch (err) {
+    console.error("Accounting overview handler error:", err);
+    return res.status(200).json(emptyOverview());
   }
-
-  return Object.values(grouped).map((acc) => ({
-    ...acc,
-    balance: Number(acc.debit) - Number(acc.credit),
-  }));
 }
 
-// ------------------------------------------------------------
-// BALANCE SHEET (journal-driven)
-// ------------------------------------------------------------
-export async function getUnifiedBalanceSheet(clientId: string): Promise<BSStructure> {
-  const lines = await getJournalLines(clientId);
-  if (!lines.length) return emptyStructure();
-
-  const accounts = groupByAccount(lines);
-  const structure = mapToStructure(accounts);
-  const totals = computeTotals(structure);
-
-  return { ...structure, totals };
-}
-
-function emptyStructure(): BSStructure {
+function emptyOverview() {
   return {
-    assets: { non_current: [], current: [] },
-    liabilities: { non_current: [], current: [] },
-    equity: [],
-    totals: {
+    financial_health: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      revenue_mtd: 0,
+      revenue_ytd: 0,
+      expenses_mtd: 0,
+      expenses_ytd: 0,
+      net_profit_mtd: 0,
+      net_profit_ytd: 0,
+    },
+    trial_balance_summary: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      income: 0,
+      expenses: 0,
+    },
+    profit_and_loss_summary: {
+      revenue: 0,
+      cost_of_sales: 0,
+      gross_profit: 0,
+      operating_expenses: 0,
+      net_profit: 0,
+    },
+    balance_sheet_summary: {
       total_assets: 0,
       total_liabilities: 0,
-      total_equity: 0,
-      total_liabilities_and_equity: 0,
+      net_assets: 0,
+      equity: 0,
     },
-  };
-}
-
-function mapToStructure(rows: BSLine[]) {
-  const structure: Omit<BSStructure, "totals"> = {
-    assets: { non_current: [], current: [] },
-    liabilities: { non_current: [], current: [] },
-    equity: [],
-  };
-
-  let totalDebits = 0;
-  let totalCredits = 0;
-
-  for (const row of rows) {
-    const type = row.account_type ?? "";
-    const bucket = row.hmrc_bucket ?? "";
-
-    const isSystem = type === "SYSTEM" || bucket === "ignore";
-    const isControl = type === "CONTROL" || bucket === "control";
-    if (isSystem || isControl) {
-      continue;
-    }
-
-    // ---- ASSETS ----
-    const isAssetBucket =
-      bucket === "fixed_asset" ||
-      bucket === "current_asset" ||
-      bucket === "balance_sheet" ||
-      bucket === "assets" ||
-      bucket === "bank";
-
-    if (type === "ASSET" || type === "BANK" || isAssetBucket) {
-      if (bucket === "fixed_asset") {
-        structure.assets.non_current.push(row);
-      } else {
-        structure.assets.current.push(row);
-      }
-      continue;
-    }
-
-    // ---- LIABILITIES ----
-    const isLiabilityBucket =
-      bucket === "liabilities" || bucket === "vat" || type === "VAT_CONTROL";
-
-    if (type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || isLiabilityBucket) {
-      structure.liabilities.current.push(row);
-      continue;
-    }
-
-    // ---- EQUITY ----
-    if (type === "EQUITY") {
-      structure.equity.push(row);
-      continue;
-    }
-
-    // ---- P&L: ALL INCOME + EXPENSE (TRADING + NON-TRADING), EXCLUDING SYSTEM/IGNORE ----
-    if (type === "INCOME" || type === "EXPENSE") {
-      totalDebits += row.debit ?? 0;
-      totalCredits += row.credit ?? 0;
-      continue;
-    }
-  }
-
-  // ---- CURRENT YEAR PROFIT (FULL P&L) ----
-  const profit = totalCredits - totalDebits;
-
-  structure.equity.push({
-    account_code: "PROFIT",
-    account_name: "Current Year Profit",
-    balance: profit,
-  });
-
-  return structure;
-}
-
-function computeTotals(structure: Omit<BSStructure, "totals">) {
-  const sum = (rows: BSLine[]) =>
-    rows.reduce((a, r) => a + Number(r.balance || 0), 0);
-
-  const totalAssets =
-    sum(structure.assets.current) + sum(structure.assets.non_current);
-
-  const totalLiabilities =
-    sum(structure.liabilities.current) + sum(structure.liabilities.non_current);
-
-  const totalEquity = sum(structure.equity);
-
-  return {
-    total_assets: totalAssets,
-    total_liabilities: totalLiabilities,
-    total_equity: totalEquity,
-    total_liabilities_and_equity: totalLiabilities + totalEquity,
-  };
-}
-
-// ------------------------------------------------------------
-// TRIAL BALANCE (journal-driven)
-// ------------------------------------------------------------
-export async function getUnifiedTrialBalance(clientId: string): Promise<TrialBalanceResult> {
-  const lines = await getJournalLines(clientId);
-  const accounts = groupByAccount(lines);
-
-  const summary = {
-    assets: 0,
-    liabilities: 0,
-    equity: 0,
-    income: 0,
-    expenses: 0,
-  };
-
-  for (const acc of accounts) {
-    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet") {
-      summary.assets += acc.balance;
-    }
-    if (acc.account_type === "LIABILITY") {
-      summary.liabilities += acc.balance;
-    }
-    if (acc.account_type === "EQUITY") {
-      summary.equity += acc.balance;
-    }
-    if (acc.account_type === "INCOME") {
-      summary.income += acc.credit ?? 0;
-    }
-    if (acc.account_type === "EXPENSE") {
-      summary.expenses += acc.debit ?? 0;
-    }
-  }
-
-  return {
-    lines: accounts,
-    summary,
-  };
-}
-
-// ------------------------------------------------------------
-// PROFIT & LOSS (journal-driven)
-// ------------------------------------------------------------
-export async function getUnifiedProfitAndLoss(
-  clientId: string
-): Promise<ProfitAndLossResult> {
-  const lines = await getJournalLines(clientId);
-  const accounts = groupByAccount(lines);
-
-  const revenue = accounts
-    .filter((a) => a.account_type === "INCOME")
-    .reduce((sum, a) => sum + (a.credit ?? 0), 0);
-
-  const expenses = accounts
-    .filter((a) => a.account_type === "EXPENSE")
-    .reduce((sum, a) => sum + (a.debit ?? 0), 0);
-
-  return {
-    summary: {
-      revenue,
-      cost_of_sales: 0,
-      gross_profit: revenue,
-      operating_expenses: expenses,
-      net_profit: revenue - expenses,
+    trial_balance_full: [],
+    balance_sheet_full: [],
+    profit_and_loss_full: [],
+    director_loan_ledger: [],
+    bank_accounts: [],
+    vat_control: [],
+    paye_control: [],
+    corporation_tax: [],
+    fixed_assets: [],
+    suspense_and_uncategorised: [],
+    cash_flow: [],
+    coa_summary: {
+      total_accounts: 0,
+      active_accounts: 0,
+      system_accounts: 0,
+      uncategorised_accounts: 0,
+      suspense_accounts: 0,
     },
-    lines: accounts.filter(
-      (a) => a.account_type === "INCOME" || a.account_type === "EXPENSE"
-    ),
-  };
-}
-
-// ------------------------------------------------------------
-// DIRECTOR LOAN (journal-driven)
-// ------------------------------------------------------------
-export async function getUnifiedDirectorLoan(
-  clientId: string
-): Promise<DirectorLoanResult> {
-  const lines = await getJournalLines(clientId);
-  const accounts = groupByAccount(lines);
-
-  // 5041 = Director Loan – Drawings (per your COA)
-  const dl = accounts.find((a) => a.account_code === "5041");
-
-  return {
-    lines: dl ? [dl] : [],
-    balance: dl?.balance ?? 0,
-  };
-}
-
-// ------------------------------------------------------------
-// CASH FLOW (journal-driven, simple version)
-// ------------------------------------------------------------
-export async function getUnifiedCashFlow(clientId: string): Promise<CashFlowResult> {
-  const lines = await getJournalLines(clientId);
-
-  const operating = lines
-    .filter((l) => l.account_type === "EXPENSE" || l.account_type === "INCOME")
-    .reduce((sum, l) => sum + Number(l.debit ?? 0) - Number(l.credit ?? 0), 0);
-
-  return {
-    lines,
-    summary: {
-      operating,
-      investing: 0,
-      financing: 0,
-    },
+    alerts: [],
+    quick_actions: [],
   };
 }
