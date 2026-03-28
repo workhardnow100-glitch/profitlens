@@ -136,7 +136,7 @@ export default async function handler(
       balance_sheet_summary: {
         total_assets: Number(bs.total_assets || 0),
         total_liabilities: Number(bs.total_liabilities || 0),
-        net_assets: Number(bs.total_assets - bs.total_liabilities || 0),
+        net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
         equity: Number(bs.total_equity || 0),
       },
 
