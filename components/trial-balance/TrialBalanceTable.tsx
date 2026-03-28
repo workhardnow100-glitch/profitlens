@@ -54,8 +54,11 @@ export function TrialBalanceTable({ clientId }: { clientId: string }) {
         </thead>
 
         <tbody>
-          {filteredRows.map((r) => (
-            <tr key={r.account_code} className="border-b">
+          {filteredRows.map((r, index) => (
+            <tr 
+              key={`${r.account_code}-${r.account_name}-${index}`} 
+              className="border-b"
+            >
               <td className="py-2 px-3">{r.account_code}</td>
               <td className="py-2 px-3">{r.account_name}</td>
               <td className="py-2 px-3">{r.account_type}</td>
