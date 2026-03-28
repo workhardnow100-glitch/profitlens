@@ -113,25 +113,26 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- EQUITY (REAL EQUITY ONLY) ----
+    // ---- EQUITY ----
     if (type === "EQUITY" || (code >= 3000 && code <= 3999)) {
       structure.equity.push(row);
       continue;
     }
 
-    // ---- P&L ACCOUNTS (COLLECT DEBITS/CREDITS ONLY) ----
-    if (
-      type === "INCOME" ||
-      type === "EXPENSE" ||
-      (code >= 4000 && code <= 9999)
-    ) {
+    // ---- P&L ACCOUNTS (INCOME + EXPENSE ONLY) ----
+    if (type === "INCOME" || type === "EXPENSE") {
       totalDebits += row.debit ?? 0;
       totalCredits += row.credit ?? 0;
       continue;
     }
+
+    // ---- IGNORE SYSTEM ACCOUNTS (9000–9999) ----
+    if (type === "SYSTEM") {
+      continue;
+    }
   }
 
-  // ---- COMPUTE CURRENT YEAR PROFIT (CORRECT FORMULA) ----
+  // ---- COMPUTE CURRENT YEAR PROFIT ----
   const profit = totalCredits - totalDebits;
 
   structure.equity.push({
