@@ -89,16 +89,101 @@ export default async function handler(
     }
 
     // ------------------------------------------------------------
-    // 3) BUILD RESPONSE (ALL NUMBERS SAFE)
+    // 3) VAT + CT FROM TRANSACTION TOGGLES
+    // ------------------------------------------------------------
+    const { data: tx } = await supabaseAdmin
+      .from("transactions")
+      .select("amount, debit, credit, vat_toggle, ct_toggle")
+      .eq("client_id", clientId);
+
+   // ----------------------------
+// TYPES
+// ----------------------------
+type ControlLine = {
+  account_code: string;
+  account_name: string;
+  debit: number;
+  credit: number;
+  balance: number;
+};
+
+// ----------------------------
+// VAT + CT FROM TRANSACTION TOGGLES
+// ----------------------------
+const vat_control: ControlLine[] = [];
+const corporation_tax: ControlLine[] = [];
+
+if (tx && tx.length > 0) {
+  const vatDebit = tx
+    .filter((t) => t.vat_toggle === true)
+    .reduce((sum, t) => sum + Number(t.debit || 0), 0);
+
+  const vatCredit = tx
+    .filter((t) => t.vat_toggle === true)
+    .reduce((sum, t) => sum + Number(t.credit || 0), 0);
+
+  vat_control.push({
+    account_code: "VAT",
+    account_name: "VAT Control",
+    debit: vatDebit,
+    credit: vatCredit,
+    balance: vatDebit - vatCredit,
+  });
+
+  const ctDebit = tx
+    .filter((t) => t.ct_toggle === true)
+    .reduce((sum, t) => sum + Number(t.debit || 0), 0);
+
+  const ctCredit = tx
+    .filter((t) => t.ct_toggle === true)
+    .reduce((sum, t) => sum + Number(t.credit || 0), 0);
+
+  corporation_tax.push({
+    account_code: "CT",
+    account_name: "Corporation Tax",
+    debit: ctDebit,
+    credit: ctCredit,
+    balance: ctDebit - ctCredit,
+  });
+}
+
+// ----------------------------
+// BANK ACCOUNTS FROM UNIFIED BS
+// ----------------------------
+const bank_accounts = unifiedBS.assets.current
+  .filter((line) => {
+    const type = (line.account_type || "").toUpperCase();
+    return type === "BANK"; // removed is_bank_account
+  })
+  .map((line) => ({
+    account_code: line.account_code,
+    account_name: line.account_name,
+    closing_balance: Number(line.balance || 0),
+    money_in: Number(line.debit || 0),
+    money_out: Number(line.credit || 0),
+  }));
+
+
+    // ------------------------------------------------------------
+    // 5) FIXED ASSETS
+    // ------------------------------------------------------------
+    const fixed_assets = unifiedBS.assets.non_current.map(normalizeLine);
+
+    // ------------------------------------------------------------
+    // 6) SUSPENSE + UNCATEGORISED
+    // ------------------------------------------------------------
+    const suspense_and_uncategorised = unifiedTB.lines
+      .filter((l) => l.account_code === "9020" || l.account_code === "9999")
+      .map(normalizeLine);
+
+    // ------------------------------------------------------------
+    // 7) BUILD RESPONSE
     // ------------------------------------------------------------
     const pl = unifiedPL.summary;
     const tb = unifiedTB.summary;
     const bs = unifiedBS.totals;
 
     return res.status(200).json({
-      // -------------------------
-      // FINANCIAL HEALTH SUMMARY
-      // -------------------------
       financial_health: {
         assets: Number(bs.total_assets || 0),
         liabilities: Number(bs.total_liabilities || 0),
@@ -114,9 +199,6 @@ export default async function handler(
         net_profit_ytd: Number(pl.net_profit || 0),
       },
 
-      // -------------------------
-      // SUMMARY PANELS
-      // -------------------------
       trial_balance_summary: {
         assets: Number(tb.assets || 0),
         liabilities: Number(tb.liabilities || 0),
@@ -140,9 +222,6 @@ export default async function handler(
         equity: Number(bs.total_equity || 0),
       },
 
-      // -------------------------
-      // FULL REPORTING ENGINE (ARRAYS ONLY + NORMALIZED)
-      // -------------------------
       trial_balance_full: unifiedTB.lines.map(normalizeLine),
 
       balance_sheet_full: [
@@ -156,12 +235,12 @@ export default async function handler(
       profit_and_loss_full: unifiedPL.lines.map(normalizeLine),
       director_loan_ledger: unifiedDL.lines.map(normalizeLine),
 
-      bank_accounts: [],
-      vat_control: [],
-      paye_control: [],
-      corporation_tax: [],
-      fixed_assets: [],
-      suspense_and_uncategorised: [],
+      bank_accounts,
+      vat_control,
+      paye_control: [], // not implemented yet
+      corporation_tax,
+      fixed_assets,
+      suspense_and_uncategorised,
 
       cash_flow: unifiedCF.lines.map((l) => ({
         ...l,
@@ -169,9 +248,6 @@ export default async function handler(
         credit: Number(l.credit || 0),
       })),
 
-      // -------------------------
-      // COA SUMMARY
-      // -------------------------
       coa_summary: {
         total_accounts: totalAccounts,
         active_accounts: activeAccounts,
