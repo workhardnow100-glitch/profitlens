@@ -6,7 +6,7 @@ export async function getServerSideProps() {
 }
 
 import React, { useEffect, useState, useMemo } from "react";
-import useSWR, { mutate } from "swr";
+import useSWR from "swr";
 import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 
@@ -49,7 +49,6 @@ const CT_CATEGORY_OPTIONS = Array.from(
     "Uncategorised",
   ])
 ).sort();
-
 
 const SA_TAG_HELP_TEXT =
   "Mark transactions that should feed into Self Assessment (SA100 / SA103 / SA105 / SA110).";
@@ -114,8 +113,8 @@ export default function Transactions() {
     };
   }, []);
 
-  // API – now period-aware, but table still uses client-side filtered
-  const { data, error } = useSWR(
+  // API – period-aware
+  const { data, error, mutate: refresh } = useSWR(
     () => {
       let url = `/api/transactions?period=${period}`;
       if (period === "custom") {
@@ -127,7 +126,7 @@ export default function Transactions() {
     fetcher
   );
 
-  // Period filtering (client-side window) – unchanged, used by table
+  // Period filtering (client-side window) – used by table
   const filtered = useMemo(() => {
     if (!data?.transactions) return [];
     const now = new Date();
@@ -203,7 +202,7 @@ export default function Transactions() {
     });
   }, [data, period, customFrom, customTo]);
 
-  // Auto VAT – unchanged
+  // Auto VAT – unchanged (background, no refresh spam)
   useEffect(() => {
     if (!filtered || filtered.length === 0) return;
 
@@ -250,7 +249,7 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // ⭐ NEW: Trading-only aggregation from API summary (CT_MAP + COA)
+  // Trading-only aggregation from API summary (CT_MAP + COA)
   const {
     totalIncome,
     totalExpenses,
@@ -273,20 +272,17 @@ export default function Transactions() {
     const summary = data.summary;
     const categories = summary.categories || {};
 
-    // Convert categories → array
     const entries = Object.entries(categories).map(([category, amount]) => ({
       category,
       amount,
     }));
 
-    // Top income categories (CT_MAP.income only)
     const topIncome = entries
       .filter((e) => CT_MAP.income.includes(e.category))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 5)
       .map((e) => ({ name: e.category, amount: e.amount }));
 
-    // Top expense categories (allowable + disallowable)
     const topExpenses = entries
       .filter(
         (e) =>
@@ -297,7 +293,6 @@ export default function Transactions() {
       .slice(0, 5)
       .map((e) => ({ name: e.category, amount: e.amount }));
 
-    // Drilldown series – CT_MAP category buckets
     const drilldowns = entries.map((e) => ({
       id: e.category,
       name: e.category,
@@ -314,7 +309,7 @@ export default function Transactions() {
     };
   }, [data]);
 
-  // Chart options – now using trading-only totals + CT_MAP category breakdown
+  // Chart options
   const chartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
 
@@ -403,7 +398,7 @@ export default function Transactions() {
         return false;
       }
 
-      await mutate("/api/transactions");
+      await refresh();
       return true;
     } catch (err) {
       console.error("Transaction update error", err);
@@ -411,7 +406,7 @@ export default function Transactions() {
     }
   }
 
-  // Category change → updates business_category + auto_ct
+  // Category change → engine + CT_MAP + auto CT + auto journal
   async function updateBusinessCategory(id, newCategory) {
     const key = (newCategory || "Uncategorised").toLowerCase();
 
@@ -426,11 +421,30 @@ export default function Transactions() {
     else if (allowableSet.has(key)) includeCT = true;
     else if (disallowableSet.has(key)) includeCT = true;
 
-    await updateTransaction(id, {
+    // 1) Run the engine logic (preserved)
+    const ok = await updateTransaction(id, {
       business_category: newCategory,
       includedinct: includeCT,
       manualctoverride: false,
     });
+
+    if (!ok) return;
+
+    // 2) Auto-create journal via categorise API (only on category change)
+    try {
+      await fetch("/api/transactions/categorise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transaction_id: id,
+          category_name: newCategory,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to auto-create journal on category change", err);
+    }
+
+    await refresh();
   }
 
   // VAT update → via upsert
@@ -761,11 +775,11 @@ export default function Transactions() {
                           <input
                             type="checkbox"
                             checked={tx.includedinvat === true}
-                            onChange={(e) =>
-                              updateTransaction(tx.id, {
+                            onChange={async (e) => {
+                              await updateTransaction(tx.id, {
                                 includedinvat: e.target.checked,
-                              })
-                            }
+                              });
+                            }}
                           />
                         </div>
 
@@ -793,11 +807,11 @@ export default function Transactions() {
                           <input
                             type="checkbox"
                             checked={tx.includedincis === true}
-                            onChange={(e) =>
-                              updateTransaction(tx.id, {
+                            onChange={async (e) => {
+                              await updateTransaction(tx.id, {
                                 includedincis: e.target.checked,
-                              })
-                            }
+                              });
+                            }}
                           />
                         </div>
 

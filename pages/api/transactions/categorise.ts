@@ -1,4 +1,9 @@
 // pages/api/transactions/categorise.ts
+
+// automatic journal entries from categories when a user categorizes the 
+// transactions journal are made all these journal are used but can be changed 
+// or altered or deleted if needed.
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
