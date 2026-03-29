@@ -6,15 +6,21 @@ import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { CT_MAP } from "../../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../../lib/constants/systemCategories";
 
-// Allowed HMRC categories
+
 const ALLOWED_CATEGORIES = new Set([
   ...CT_MAP.income,
+  ...CT_MAP.other_income,     // ⭐ REQUIRED
   ...CT_MAP.allowable,
   ...CT_MAP.disallowable,
+  ...CT_MAP.fixed_assets,     // ⭐ REQUIRED
+  ...CT_MAP.current_assets,   // ⭐ REQUIRED
+  ...CT_MAP.liabilities,      // ⭐ REQUIRED
+  ...CT_MAP.equity,           // ⭐ REQUIRED
   ...CT_MAP.ignore,
   ...SYSTEM_CATEGORIES,
   "Uncategorised",
 ]);
+
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
