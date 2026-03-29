@@ -66,6 +66,9 @@ export default function Transactions() {
   const [assetModalOpen, setAssetModalOpen] = useState(false);
   const [assetModalTx, setAssetModalTx] = useState(null);
 
+  // ⭐ NEW — intrusive warning banner state (added safely)
+  const [warningBanner, setWarningBanner] = useState(null);
+
   // Subscription / access guard
   useEffect(() => {
     if (isLoading) return;
@@ -249,203 +252,229 @@ export default function Transactions() {
     });
   }, [filtered]);
 
-  // Trading-only aggregation from API summary (CT_MAP + COA)
-  const {
-    totalIncome,
-    totalExpenses,
-    categoryExpensesEntries,
-    drilldownSeries,
-    topIncomePayers,
-    topExpenseMerchants,
-  } = useMemo(() => {
-    if (!data?.summary) {
-      return {
-        totalIncome: 0,
-        totalExpenses: 0,
-        categoryExpensesEntries: [],
-        drilldownSeries: [],
-        topIncomePayers: [],
-        topExpenseMerchants: [],
-      };
-    }
 
-    const summary = data.summary;
-    const categories = summary.categories || {};
-
-    const entries = Object.entries(categories).map(([category, amount]) => ({
-      category,
-      amount,
-    }));
-
-    const topIncome = entries
-      .filter((e) => CT_MAP.income.includes(e.category))
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5)
-      .map((e) => ({ name: e.category, amount: e.amount }));
-
-    const topExpenses = entries
-      .filter(
-        (e) =>
-          CT_MAP.allowable.includes(e.category) ||
-          CT_MAP.disallowable.includes(e.category)
-      )
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5)
-      .map((e) => ({ name: e.category, amount: e.amount }));
-
-    const drilldowns = entries.map((e) => ({
-      id: e.category,
-      name: e.category,
-      data: [[e.category, e.amount]],
-    }));
-
+ // Trading-only aggregation from API summary (CT_MAP + COA)
+const {
+  totalIncome,
+  totalExpenses,
+  categoryExpensesEntries,
+  drilldownSeries,
+  topIncomePayers,
+  topExpenseMerchants,
+} = useMemo(() => {
+  if (!data?.summary) {
     return {
-      totalIncome: summary.income,
-      totalExpenses: summary.expenses,
-      categoryExpensesEntries: entries.map((e) => [e.category, e.amount]),
-      drilldownSeries: drilldowns,
-      topIncomePayers: topIncome,
-      topExpenseMerchants: topExpenses,
+      totalIncome: 0,
+      totalExpenses: 0,
+      categoryExpensesEntries: [],
+      drilldownSeries: [],
+      topIncomePayers: [],
+      topExpenseMerchants: [],
     };
-  }, [data]);
-
-  // Chart options
-  const chartOptions = useMemo(() => {
-    if (!hcReady || !Highcharts) return null;
-
-    const hasData =
-      (categoryExpensesEntries && categoryExpensesEntries.length > 0) ||
-      totalIncome !== 0 ||
-      totalExpenses !== 0;
-
-    if (!hasData) return "NO_DATA";
-
-    const innerSeries = {
-      name: "Profit vs Loss",
-      size: "45%",
-      dataLabels: { enabled: true },
-      data: [
-        { name: "Income", y: totalIncome, color: "#10b981" },
-        { name: "Expenses", y: totalExpenses, color: "#ef4444" },
-      ],
-    };
-
-    const outerSeries = {
-      name: "Expense categories",
-      size: "85%",
-      innerSize: "65%",
-      dataLabels: { enabled: true },
-      data: categoryExpensesEntries.map(([cat, amount]) => ({
-        name: cat,
-        y: amount,
-        drilldown: cat,
-      })),
-    };
-
-    return {
-      chart: {
-        type: "pie",
-        options3d: { enabled: true, alpha: 45, beta: 0 },
-      },
-      title: { text: `Transactions Master View (${period})` },
-      series: [innerSeries, outerSeries],
-      drilldown: { series: drilldownSeries },
-      credits: { enabled: false },
-    };
-  }, [
-    hcReady,
-    Highcharts,
-    totalIncome,
-    totalExpenses,
-    categoryExpensesEntries,
-    drilldownSeries,
-    period,
-  ]);
-
-  const periodButtons = [
-    { key: "week", label: "Week" },
-    { key: "month", label: "Month" },
-    { key: "quarter", label: "Quarter" },
-    { key: "year", label: "Year" },
-    { key: "last7", label: "Last 7" },
-    { key: "last30", label: "Last 30" },
-    { key: "last90", label: "Last 90" },
-    { key: "thisTimeLastYear", label: "This Time Last Year" },
-    { key: "custom", label: "Custom" },
-  ];
-
-  // Generic upsert helper → /api/transactions/upsert
-  async function updateTransaction(id, payload) {
-    try {
-      const res = await fetch("/api/transactions/upsert", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...payload }),
-      });
-
-      let data = null;
-      try {
-        data = await res.json();
-      } catch {
-        // ignore non-JSON
-      }
-
-      if (!res.ok || (data && data.success === false)) {
-        console.error("Transaction update failed", {
-          status: res.status,
-          data,
-        });
-        return false;
-      }
-
-      await refresh();
-      return true;
-    } catch (err) {
-      console.error("Transaction update error", err);
-      return false;
-    }
   }
 
-  // Category change → engine + CT_MAP + auto CT + auto journal
-  async function updateBusinessCategory(id, newCategory) {
-    const key = (newCategory || "Uncategorised").toLowerCase();
+  const summary = data.summary;
+  const categories = summary.categories || {};
 
-    const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
-    const allowableSet = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
-    const disallowableSet = new Set(
-      CT_MAP.disallowable.map((c) => c.toLowerCase())
-    );
+  const entries = Object.entries(categories).map(([category, amount]) => ({
+    category,
+    amount,
+  }));
 
-    let includeCT = false;
-    if (incomeSet.has(key)) includeCT = true;
-    else if (allowableSet.has(key)) includeCT = true;
-    else if (disallowableSet.has(key)) includeCT = true;
+  const topIncome = entries
+    .filter((e) => CT_MAP.income.includes(e.category))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+    .map((e) => ({ name: e.category, amount: e.amount }));
 
-    // 1) Run the engine logic (preserved)
-    const ok = await updateTransaction(id, {
-      business_category: newCategory,
-      includedinct: includeCT,
-      manualctoverride: false,
+  const topExpenses = entries
+    .filter(
+      (e) =>
+        CT_MAP.allowable.includes(e.category) ||
+        CT_MAP.disallowable.includes(e.category)
+    )
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5)
+    .map((e) => ({ name: e.category, amount: e.amount }));
+
+  const drilldowns = entries.map((e) => ({
+    id: e.category,
+    name: e.category,
+    data: [[e.category, e.amount]],
+  }));
+
+  return {
+    totalIncome: summary.income,
+    totalExpenses: summary.expenses,
+    categoryExpensesEntries: entries.map((e) => [e.category, e.amount]),
+    drilldownSeries: drilldowns,
+    topIncomePayers: topIncome,
+    topExpenseMerchants: topExpenses,
+  };
+}, [data]);
+
+// Chart options
+const chartOptions = useMemo(() => {
+  if (!hcReady || !Highcharts) return null;
+
+  const hasData =
+    (categoryExpensesEntries && categoryExpensesEntries.length > 0) ||
+    totalIncome !== 0 ||
+    totalExpenses !== 0;
+
+  if (!hasData) return "NO_DATA";
+
+  const innerSeries = {
+    name: "Profit vs Loss",
+    size: "45%",
+    dataLabels: { enabled: true },
+    data: [
+      { name: "Income", y: totalIncome, color: "#10b981" },
+      { name: "Expenses", y: totalExpenses, color: "#ef4444" },
+    ],
+  };
+
+  const outerSeries = {
+    name: "Expense categories",
+    size: "85%",
+    innerSize: "65%",
+    dataLabels: { enabled: true },
+    data: categoryExpensesEntries.map(([cat, amount]) => ({
+      name: cat,
+      y: amount,
+      drilldown: cat,
+    })),
+  };
+
+  return {
+    chart: {
+      type: "pie",
+      options3d: { enabled: true, alpha: 45, beta: 0 },
+    },
+    title: { text: `Transactions Master View (${period})` },
+    series: [innerSeries, outerSeries],
+    drilldown: { series: drilldownSeries },
+    credits: { enabled: false },
+  };
+}, [
+  hcReady,
+  Highcharts,
+  totalIncome,
+  totalExpenses,
+  categoryExpensesEntries,
+  drilldownSeries,
+  period,
+]);
+
+const periodButtons = [
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "quarter", label: "Quarter" },
+  { key: "year", label: "Year" },
+  { key: "last7", label: "Last 7" },
+  { key: "last30", label: "Last 30" },
+  { key: "last90", label: "Last 90" },
+  { key: "thisTimeLastYear", label: "This Time Last Year" },
+  { key: "custom", label: "Custom" },
+];
+
+// Generic upsert helper → /api/transactions/upsert
+async function updateTransaction(id, payload) {
+  try {
+    const res = await fetch("/api/transactions/upsert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...payload }),
     });
 
-    if (!ok) return;
-
-    // 2) Auto-create journal via categorise API (only on category change)
+    let data = null;
     try {
-      await fetch("/api/transactions/categorise", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          transaction_id: id,
-          category_name: newCategory,
-        }),
+      data = await res.json();
+    } catch {
+      // ignore non-JSON
+    }
+
+    if (!res.ok || (data && data.success === false)) {
+      console.error("Transaction update failed", {
+        status: res.status,
+        data,
       });
-    } catch (err) {
-      console.error("Failed to auto-create journal on category change", err);
+      return false;
     }
 
     await refresh();
+    return true;
+  } catch (err) {
+    console.error("Transaction update error", err);
+    return false;
   }
+}
+
+// Category change → engine + CT_MAP + auto CT + auto journal
+async function updateBusinessCategory(id, newCategory) {
+  const key = (newCategory || "Uncategorised").toLowerCase();
+
+  // ⭐ 1) If user selects UNBURDENED → reset transaction safely
+  if (newCategory === "Uncategorised") {
+    await updateTransaction(id, {
+      business_category: "Uncategorised",
+      coa_id: null, // ⭐ unlocks the transaction
+      assetdisposaltype: null,
+      assetpurchaseprice: null,
+      assetcapitalclaimed: null,
+      assettwdv: null,
+      assetbalancingcharge: null,
+      assetbalancingallowance: null,
+    });
+
+    // ⭐ intrusive warning banner
+    setWarningBanner(
+      "⚠️ Category reset. Please check and remove any old journals before selecting a new category."
+    );
+
+    await refresh();
+    return; // ⭐ STOP — do NOT create journal
+  }
+
+  // ⭐ 2) Normal category logic (unchanged)
+  const incomeSet = new Set(CT_MAP.income.map((c) => c.toLowerCase()));
+  const allowableSet = new Set(CT_MAP.allowable.map((c) => c.toLowerCase()));
+  const disallowableSet = new Set(
+    CT_MAP.disallowable.map((c) => c.toLowerCase())
+  );
+
+  let includeCT = false;
+  if (incomeSet.has(key)) includeCT = true;
+  else if (allowableSet.has(key)) includeCT = true;
+  else if (disallowableSet.has(key)) includeCT = true;
+
+  // ⭐ 3) Apply engine logic
+  const ok = await updateTransaction(id, {
+    business_category: newCategory,
+    includedinct: includeCT,
+    manualctoverride: false,
+  });
+
+  if (!ok) return;
+
+  // ⭐ 4) Auto-create journal via categorise API
+  try {
+    await fetch("/api/transactions/categorise", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transaction_id: id,
+        category_name: newCategory,
+      }),
+    });
+  } catch (err) {
+    console.error("Failed to auto-create journal on category change", err);
+  }
+
+  await refresh();
+}
+
+
 
   // VAT update → via upsert
   async function updateVATForTx(tx, newRate) {
@@ -610,141 +639,156 @@ export default function Transactions() {
           </ResponsiveCard>
         </div>
 
-        {/* Transactions table */}
-        <ResponsiveCard title="Transactions Table">
-          <div className="mb-3 text-xs text-slate-500 flex flex-wrap gap-3">
-            <span>
-              <span className="font-semibold">VAT</span> = feeds VAT returns
-              (MTD).
-            </span>
-            <span>
-              <span className="font-semibold">CIS</span> = feeds CIS300 and
-              CIS Statements.
-            </span>
-            <span title={SA_TAG_HELP_TEXT} className="cursor-help">
-              <span className="font-semibold">SA</span> = feeds SA100 / SA103 /
-              SA105 / SA110 working papers.
-            </span>
-            <span>
-              <span className="font-semibold">CT</span> = feeds CT600 working
-              papers.
-            </span>
-          </div>
+       {/* Transactions table */}
+<ResponsiveCard title="Transactions Table">
+  <div className="mb-3 text-xs text-slate-500 flex flex-wrap gap-3">
+    <span>
+      <span className="font-semibold">VAT</span> = feeds VAT returns
+      (MTD).
+    </span>
+    <span>
+      <span className="font-semibold">CIS</span> = feeds CIS300 and
+      CIS Statements.
+    </span>
+    <span title={SA_TAG_HELP_TEXT} className="cursor-help">
+      <span className="font-semibold">SA</span> = feeds SA100 / SA103 /
+      SA105 / SA110 working papers.
+    </span>
+    <span>
+      <span className="font-semibold">CT</span> = feeds CT600 working
+      papers.
+    </span>
+  </div>
 
-          <ResponsiveTable
-            headers={[
-              "Date",
-              "Description",
-              "Amount",
-              "Category",
-              "VAT / CIS / SA",
-              "VAT Amount",
-              "Asset Disposal",
-              "CT",
-            ]}
-          >
-            {error && (
-              <tr>
-                <td colSpan={8} className="px-4 py-2 text-red-500">
-                  Failed to load transactions
-                </td>
-              </tr>
-            )}
+  {/* ⭐ INTRUSIVE WARNING BANNER (added safely) */}
+{warningBanner && (
+  <div className="bg-yellow-200 border border-yellow-500 text-yellow-900 px-4 py-3 rounded mb-4 flex justify-between items-center">
+    <span>{warningBanner}</span>
 
-            {!data && !error && (
-              <tr>
-                <td colSpan={8} className="px-4 py-2 text-slate-500">
-                  Loading transactions...
-                </td>
-              </tr>
-            )}
+    <button
+      onClick={() => setWarningBanner(null)}
+      className="ml-4 px-3 py-1 text-xs font-semibold bg-yellow-300 border border-yellow-600 rounded hover:bg-yellow-400"
+    >
+      Dismiss
+    </button>
+  </div>
+)}
 
-            {data && filtered.length === 0 && !error && (
-              <tr>
-                <td colSpan={8} className="px-4 py-2 text-slate-500">
-                  No transactions in this period.
-                </td>
-              </tr>
-            )}
 
-            {data &&
-              filtered.length > 0 &&
-              filtered.map((tx) => {
-                const businessCategory =
-                  (tx.business_category && tx.business_category.trim()) ||
-                  "Uncategorised";
+  <ResponsiveTable
+    headers={[
+      "Date",
+      "Description",
+      "Amount",
+      "Category",
+      "VAT / CIS / SA",
+      "VAT Amount",
+      "Asset Disposal",
+      "CT",
+    ]}
+  >
+    {error && (
+      <tr>
+        <td colSpan={8} className="px-4 py-2 text-red-500">
+          Failed to load transactions
+        </td>
+      </tr>
+    )}
 
-                const defaultVatRate = (() => {
-                  if (
-                    [
-                      "Rent",
-                      "Loan Repayments",
-                      "Insurance",
-                      "Professional Fees",
-                      "Council Tax",
-                    ].includes(businessCategory)
-                  )
-                    return 0;
-                  if (
-                    ["Groceries", "Books", "Education", "Childcare"].includes(
-                      businessCategory
-                    )
-                  )
-                    return 0;
-                  return 20;
-                })();
+    {!data && !error && (
+      <tr>
+        <td colSpan={8} className="px-4 py-2 text-slate-500">
+          Loading transactions...
+        </td>
+      </tr>
+    )}
 
-                const vatRate =
-                  tx.vat_rate != null ? tx.vat_rate : defaultVatRate;
+    {data && filtered.length === 0 && !error && (
+      <tr>
+        <td colSpan={8} className="px-4 py-2 text-slate-500">
+          No transactions in this period.
+        </td>
+      </tr>
+    )}
 
-                const cisSelection =
-                  tx.cis_type === "deducted"
-                    ? "deducted"
-                    : tx.cis_type === "suffered"
-                    ? "suffered"
-                    : "none";
+    {data &&
+      filtered.length > 0 &&
+      filtered.map((tx) => {
+        const businessCategory =
+          (tx.business_category && tx.business_category.trim()) ||
+          "Uncategorised";
 
-                const saSelection = tx.includedinsa ? "included" : "excluded";
+        const defaultVatRate = (() => {
+          if (
+            [
+              "Rent",
+              "Loan Repayments",
+              "Insurance",
+              "Professional Fees",
+              "Council Tax",
+            ].includes(businessCategory)
+          )
+            return 0;
+          if (
+            ["Groceries", "Books", "Education", "Childcare"].includes(
+              businessCategory
+            )
+          )
+            return 0;
+          return 20;
+        })();
 
-                const effectiveVatAmount =
-                  tx.vat_amount != null
-                    ? Number(tx.vat_amount)
-                    : Number(tx.amount) * (vatRate / 100);
+        const vatRate =
+          tx.vat_rate != null ? tx.vat_rate : defaultVatRate;
 
-                return (
-                  <tr key={tx.id} className="border-t">
-                    <td>{safeDate(tx.date)?.toLocaleDateString() ?? "—"}</td>
+        const cisSelection =
+          tx.cis_type === "deducted"
+            ? "deducted"
+            : tx.cis_type === "suffered"
+            ? "suffered"
+            : "none";
 
-                    <td>{tx.description}</td>
+        const saSelection = tx.includedinsa ? "included" : "excluded";
 
-                    <td
-                      className={
-                        tx.amount >= 0
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }
-                    >
-                      {tx.amount >= 0
-                        ? `+£${tx.amount.toFixed(2)}`
-                        : `−£${Math.abs(tx.amount).toFixed(2)}`}
-                    </td>
+        const effectiveVatAmount =
+          tx.vat_amount != null
+            ? Number(tx.vat_amount)
+            : Number(tx.amount) * (vatRate / 100);
 
-                    {/* Category */}
-                    <td>
-                      <select
-                        className="border p-1 rounded text-sm"
-                        value={businessCategory}
-                        onChange={(e) =>
-                          updateBusinessCategory(tx.id, e.target.value)
-                        }
-                      >
-                        {CT_CATEGORY_OPTIONS.map((cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
+        return (
+          <tr key={tx.id} className="border-t">
+            <td>{safeDate(tx.date)?.toLocaleDateString() ?? "—"}</td>
+
+            <td>{tx.description}</td>
+
+            <td
+              className={
+                tx.amount >= 0
+                  ? "text-green-600"
+                  : "text-red-600"
+              }
+            >
+              {tx.amount >= 0
+                ? `+£${tx.amount.toFixed(2)}`
+                : `−£${Math.abs(tx.amount).toFixed(2)}`}
+            </td>
+
+            {/* Category */}
+            <td>
+              <select
+                className="border p-1 rounded text-sm"
+                value={businessCategory}
+                onChange={(e) =>
+                  updateBusinessCategory(tx.id, e.target.value)
+                }
+              >
+                {CT_CATEGORY_OPTIONS.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </td>
 
                     {/* VAT + CIS + SA + Include VAT + Include CIS */}
                     <td>
