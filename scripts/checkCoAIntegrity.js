@@ -3,6 +3,7 @@
 
 import { CT_MAP } from "../lib/constants/ctMap.js";
 import { CATEGORIES } from "../lib/constants/categories.js";
+import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories.js";
 import { UK_COA } from "../lib/constants/ukCoa.js";
 
 function normalise(str) {
@@ -53,10 +54,27 @@ if (missingUi.length) {
 console.log("\n");
 
 // -----------------------------
-// 3. UK_COA → CT_MAP/CATEGORIES/system check
+// 3. SYSTEM_CATEGORIES → UK_COA check
+// -----------------------------
+const systemNames = SYSTEM_CATEGORIES.map(normalise);
+
+const missingSystem = systemNames.filter((name) => !ukNames.includes(name));
+
+if (missingSystem.length) {
+  console.log("❌ SYSTEM_CATEGORIES missing in UK_COA:");
+  missingSystem.forEach((n) => console.log("   - " + n));
+} else {
+  console.log("✅ All SYSTEM_CATEGORIES exist in UK_COA.");
+}
+
+console.log("\n");
+
+// -----------------------------
+// 4. UK_COA → CT_MAP/CATEGORIES/SYSTEM_CATEGORIES check
 // -----------------------------
 const ctmapSet = new Set(ctmapNames);
 const uiSet = new Set(uiNames);
+const systemSet = new Set(systemNames);
 
 const orphanAccounts = UK_COA.filter((acc) => {
   const name = normalise(acc.account_name);
@@ -78,11 +96,15 @@ const orphanAccounts = UK_COA.filter((acc) => {
 
   if (isSystem || isBalanceSheet) return false;
 
-  return !ctmapSet.has(name) && !uiSet.has(name);
+  return (
+    !ctmapSet.has(name) &&
+    !uiSet.has(name) &&
+    !systemSet.has(name)
+  );
 });
 
 if (orphanAccounts.length) {
-  console.log("❌ UK_COA accounts not referenced by CT_MAP or CATEGORIES:");
+  console.log("❌ UK_COA accounts not referenced by CT_MAP, CATEGORIES, or SYSTEM_CATEGORIES:");
   orphanAccounts.forEach((acc) =>
     console.log(`   - ${acc.account_code} ${acc.account_name}`)
   );

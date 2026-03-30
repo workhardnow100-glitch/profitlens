@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 import { UK_COA } from "../lib/constants/ukCoa.js";
 import { CT_MAP } from "../lib/constants/ctMap.js";
 import { CATEGORIES } from "../lib/constants/categories.js";
+import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories.js";
 
 function normalise(str) {
   return (str || "").trim().toLowerCase();
@@ -57,6 +58,7 @@ async function main() {
 
   const ctmapNames = new Set(flatten(CT_MAP));
   const uiNames = new Set(flatten(CATEGORIES));
+  const systemNames = new Set(SYSTEM_CATEGORIES.map(normalise));
 
   // 1) UK_COA codes missing in DB
   const missingInDb = UK_COA.filter(
@@ -166,11 +168,15 @@ async function main() {
 
     if (isSystem || isBalanceSheet) return false;
 
-    return !ctmapNames.has(name) && !uiNames.has(name);
+    return (
+      !ctmapNames.has(name) &&
+      !uiNames.has(name) &&
+      !systemNames.has(name)
+    );
   });
 
   if (orphanDb.length) {
-    console.log("❌ DB accounts not referenced by CT_MAP or CATEGORIES:");
+    console.log("❌ DB accounts not referenced by CT_MAP, CATEGORIES, or SYSTEM_CATEGORIES:");
     orphanDb.forEach((acc) =>
       console.log(`   - ${acc.account_code} ${acc.account_name}`)
     );
