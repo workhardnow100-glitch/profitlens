@@ -64,6 +64,9 @@ export default function FormsPage() {
   const [specialPoolBF, setSpecialPoolBF] = useState("");
   const [carsPoolBF, setCarsPoolBF] = useState("");
 
+  const [ctAdjustmentsLoaded, setCtAdjustmentsLoaded] = useState(false);
+  const [ctValidationError, setCtValidationError] = useState("");
+
   const CT_FORMS = [
     { code: "CT600", label: "CT600 — Main Corporation Tax return" },
     { code: "CT600A", label: "CT600A — Loans to participators" },
@@ -86,10 +89,94 @@ export default function FormsPage() {
     { code: "CIS_STATEMENT", label: "CIS Subcontractor Statement" },
   ];
 
-  // ⭐ Save CT Adjustments (API added in next step)
+  // ⭐ Helper: non‑negative numeric input
+  const handleNonNegativeChange = (setter) => (e) => {
+    const raw = e.target.value;
+    if (raw === "") {
+      setter("");
+      setCtValidationError("");
+      return;
+    }
+    const num = Number(raw);
+    if (Number.isNaN(num)) {
+      setter("");
+      setCtValidationError("Values must be numeric.");
+      return;
+    }
+    if (num < 0) {
+      setter("0");
+      setCtValidationError("Values cannot be negative.");
+      return;
+    }
+    setter(raw);
+    setCtValidationError("");
+  };
+
+  // ⭐ AUTO‑LOAD CT ADJUSTMENTS
+  useEffect(() => {
+    if (!selectedCTForm || !clientId || !periodStart || !periodEnd) {
+      setCtAdjustmentsLoaded(false);
+      return;
+    }
+
+    const loadAdjustments = async () => {
+      try {
+        const res = await fetch(
+          `/api/forms/ct600/load?clientId=${clientId}&periodStart=${periodStart}&periodEnd=${periodEnd}`
+        );
+
+        const data = await res.json();
+        if (!data.success || !data.adjustments) {
+          setCtAdjustmentsLoaded(false);
+          return;
+        }
+
+        const a = data.adjustments;
+
+        const lc = a.loss_carryback ?? "";
+        const gr = a.group_relief ?? "";
+        const aia = a.ca_aia_claimed ?? "";
+        const rd = a.r_and_d_multiplier ?? "";
+        const mp = a.ca_main_pool_bf ?? "";
+        const sp = a.ca_special_pool_bf ?? "";
+        const cp = a.ca_cars_pool_bf ?? "";
+
+        setLossCarryback(lc === null ? "" : String(lc));
+        setGroupRelief(gr === null ? "" : String(gr));
+        setAiaClaimed(aia === null ? "" : String(aia));
+        setRAndDMultiplier(rd === null ? "" : String(rd));
+        setMainPoolBF(mp === null ? "" : String(mp));
+        setSpecialPoolBF(sp === null ? "" : String(sp));
+        setCarsPoolBF(cp === null ? "" : String(cp));
+
+        const anyLoaded =
+          lc !== "" ||
+          gr !== "" ||
+          aia !== "" ||
+          rd !== "" ||
+          mp !== "" ||
+          sp !== "" ||
+          cp !== "";
+
+        setCtAdjustmentsLoaded(anyLoaded);
+      } catch (err) {
+        console.error("Failed to load CT adjustments", err);
+        setCtAdjustmentsLoaded(false);
+      }
+    };
+
+    loadAdjustments();
+  }, [selectedCTForm, clientId, periodStart, periodEnd]);
+
+  // ⭐ Save CT Adjustments
   const handleSaveCTAdjustments = async () => {
     setErrorMessage(null);
     setResultMessage(null);
+
+    if (ctValidationError) {
+      setErrorMessage("Please fix CT adjustment validation errors before saving.");
+      return;
+    }
 
     try {
       setIsLoading(true);
@@ -118,6 +205,7 @@ export default function FormsPage() {
       }
 
       setResultMessage("CT adjustments saved successfully.");
+      setCtAdjustmentsLoaded(true);
     } catch (err) {
       setErrorMessage(err.message || "Failed to save CT adjustments.");
     } finally {
@@ -263,76 +351,143 @@ export default function FormsPage() {
           {/* ⭐ CT Adjustments Panel */}
           {selectedCTForm && (
             <div className="border rounded-md p-4 space-y-3 bg-gray-50 md:col-span-2">
-              <h3 className="font-semibold text-sm">CT Adjustments (Optional)</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sm">CT Adjustments (Optional)</h3>
+                {ctAdjustmentsLoaded && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                    Loaded from previous period
+                  </span>
+                )}
+              </div>
+
+              {ctValidationError && (
+                <p className="text-xs text-red-600">{ctValidationError}</p>
+              )}
 
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Loss Carryback</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Loss Carryback{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Losses carried back to offset previous year’s profits."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={lossCarryback}
-                    onChange={(e) => setLossCarryback(e.target.value)}
+                    onChange={handleNonNegativeChange(setLossCarryback)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Group Relief</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Group Relief{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Losses surrendered to or claimed from group companies."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={groupRelief}
-                    onChange={(e) => setGroupRelief(e.target.value)}
+                    onChange={handleNonNegativeChange(setGroupRelief)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">AIA Claimed</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    AIA Claimed{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Annual Investment Allowance claimed in this period."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={aiaClaimed}
-                    onChange={(e) => setAiaClaimed(e.target.value)}
+                    onChange={handleNonNegativeChange(setAiaClaimed)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">R&D Multiplier</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    R&amp;D Multiplier{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Enhancement factor applied to qualifying R&amp;D expenditure."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     step="0.01"
                     value={rAndDMultiplier}
-                    onChange={(e) => setRAndDMultiplier(e.target.value)}
+                    onChange={handleNonNegativeChange(setRAndDMultiplier)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Main Pool B/F</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Main Pool B/F{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Unrelieved main pool balance brought forward."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={mainPoolBF}
-                    onChange={(e) => setMainPoolBF(e.target.value)}
+                    onChange={handleNonNegativeChange(setMainPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Special Pool B/F</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Special Pool B/F{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Unrelieved special rate pool balance brought forward."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={specialPoolBF}
-                    onChange={(e) => setSpecialPoolBF(e.target.value)}
+                    onChange={handleNonNegativeChange(setSpecialPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Cars Pool B/F</label>
+                  <label className="block text-xs text-gray-600 mb-1">
+                    Cars Pool B/F{" "}
+                    <span
+                      className="text-gray-400 cursor-help"
+                      title="Unrelieved car pool balance brought forward."
+                    >
+                      ⓘ
+                    </span>
+                  </label>
                   <input
                     type="number"
                     value={carsPoolBF}
-                    onChange={(e) => setCarsPoolBF(e.target.value)}
+                    onChange={handleNonNegativeChange(setCarsPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
                 </div>
@@ -341,9 +496,10 @@ export default function FormsPage() {
               <button
                 type="button"
                 onClick={handleSaveCTAdjustments}
-                className="w-full bg-gray-700 text-white text-sm font-medium py-2 rounded"
+                disabled={isLoading}
+                className="w-full bg-gray-700 text-white text-sm font-medium py-2 rounded disabled:opacity-50"
               >
-                Save CT Adjustments
+                {isLoading ? "Saving…" : "Save CT Adjustments"}
               </button>
             </div>
           )}
