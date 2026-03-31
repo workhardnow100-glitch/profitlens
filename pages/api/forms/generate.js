@@ -6,35 +6,11 @@
  *     - CT600 family (Corporation Tax)
  *     - SA100 / SA103 / SA105 / SA110 (Self Assessment)
  *     - CIS300 / CIS_STATEMENT (CIS)
- *
- * Security / RBAC / SOC2 Notes:
- *   - Method: POST only.
- *   - Authentication:
- *       • Uses NextAuth session.
- *   - RBAC:
- *       • ACCOUNTANT:
- *           – May generate forms for actingAsClientId.
- *       • USER:
- *           – May generate forms for their own clientId.
- *       • FOUNDER:
- *           – May generate forms for any client.
- *   - Subscription gating:
- *       • USER must be subscribed/trialing.
- *       • ACCOUNTANT + FOUNDER bypass subscription gating.
- *   - Anti‑spoofing:
- *       • Ignores clientId from body; uses session‑resolved clientId only.
- *   - Data handling:
- *       • All reads are client‑scoped via client_id.
- *       • Period range is validated.
- *   - Audit logging:
- *       • Logs GENERATE_FORM / ACCOUNTANT_GENERATE_FORM.
- *
- * Change Control:
- *   - Any change to:
- *       • CT/SA/CIS submission schemas
- *       • PDF templates
- *       • transaction CT/SA/CIS flags
- *     MUST be reflected here and in the Forms UI.
+ * Architecture:
+ *   - Journals = accounting truth
+ *   - Toggles on transactions = which tax engines a transaction feeds
+ *   - COA buckets + CT_MAP + sa_bucket = classification
+ *   - CIS amounts = from transactions.cis_amount (hybrid)
  * ============================================================
  */
 
@@ -52,6 +28,9 @@ import { generateSa110Pdf } from "../../../lib/pdf/templates/sa110";
 import { generateCis300Pdf } from "../../../lib/pdf/templates/cis300";
 import { generateCisStatementPdf } from "../../../lib/pdf/templates/cis_statement";
 
+// CT category map
+import { CT_MAP } from "../../../lib/tax/ct-map";
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res
@@ -60,9 +39,8 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ⭐ Session + RBAC
     const session = await getServerSession(req, res, authOptions);
-    if (!session?.user) {
+    if (!session || !session.user) {
       return res
         .status(401)
         .json({ success: false, message: "Unauthorized" });
@@ -75,14 +53,12 @@ export default async function handler(req, res) {
       session.user.subscriptionStatus
     );
 
-    // ⭐ Subscription gating (accountants + founders bypass)
     if (!isFounder && !isAccountant && !isSubscribedOrTrial) {
       return res
         .status(403)
         .json({ success: false, message: "Upgrade required" });
     }
 
-    // ⭐ Accountant-aware client ID — ignore clientId from body for security
     const resolvedClientId = isAccountant
       ? session.user.actingAsClientId
       : session.user.clientId || session.user.defaultClientId;
@@ -109,7 +85,6 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Invalid period start or end date." });
     }
 
-    // ⭐ Audit log — form generation
     await supabaseAdmin.from("audit").insert([
       {
         client_id: resolvedClientId,
@@ -120,7 +95,6 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Load client
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -133,7 +107,7 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Client not found." });
     }
 
-    // 2. Load transactions (still used for CT & CIS only)
+    // Still load transactions once (used for CIS amounts and any other metadata)
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -148,16 +122,15 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Error loading transactions." });
     }
 
-    // 3. Build form data
-    let formData = {};
     const year = periodEndDate.getFullYear();
     const taxYear = deriveTaxYear(periodEndDate);
+
+    let formData = {};
 
     if (formCode.startsWith("CT")) {
       formData = await buildCTFormData(
         formCode,
         client,
-        transactions || [],
         resolvedClientId,
         periodStart,
         periodEnd
@@ -166,7 +139,6 @@ export default async function handler(req, res) {
       formData = await buildSAFormData(
         formCode,
         client,
-        transactions || [],
         resolvedClientId,
         periodStart,
         periodEnd,
@@ -176,7 +148,6 @@ export default async function handler(req, res) {
       formData = await buildCISFormData(
         formCode,
         client,
-        transactions || [],
         resolvedClientId,
         periodStart,
         periodEnd
@@ -187,7 +158,6 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Unsupported form code." });
     }
 
-    // 4. Generate PDF via template
     const submissionId = uuidv4();
     const filename = `${submissionId}.pdf`;
 
@@ -214,13 +184,13 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       pdfUrl: record.url,
-      submissionId: record.id ?? submissionId,
+      submissionId: record.id || submissionId,
     });
   } catch (err) {
     console.error("Unexpected error in /api/forms/generate:", err);
     return res.status(500).json({
       success: false,
-      message: err?.message || "Internal server error.",
+      message: err && err.message ? err.message : "Internal server error.",
     });
   }
 }
@@ -232,7 +202,6 @@ export default async function handler(req, res) {
 async function buildCTFormData(
   formCode,
   client,
-  transactions,
   clientId,
   periodStart,
   periodEnd
@@ -252,25 +221,75 @@ async function buildCTFormData(
     .gte("payment_date", periodStart)
     .lte("payment_date", periodEnd);
 
-  const ctTx = (transactions || []).filter((t) => t.includedinct);
+  // CT is journal‑driven, filtered by CT toggle on transactions
+  const ctJournals = await loadCTJournals(clientId, periodStart, periodEnd);
 
-  const incomeTx = ctTx.filter((t) => Number(t.amount) > 0);
-  const expenseTx = ctTx.filter((t) => Number(t.amount) < 0);
+  let turnover = 0;
+  let allowableExpenses = 0;
+  let disallowableExpenses = 0;
 
-  const turnover = sumBy(incomeTx, "amount");
-  const rawExpenses = sumBy(expenseTx, "amount") * -1;
+  (ctJournals || []).forEach((j) => {
+    (j.journal_lines || []).forEach((line) => {
+      const accountName =
+        (line.chart_of_account_entries &&
+          line.chart_of_account_entries.account_name) ||
+        "";
+      const accountType =
+        (line.chart_of_account_entries &&
+          line.chart_of_account_entries.account_type) ||
+        null;
+      const amt = amountFromLine(line);
 
-  const allowableExpenses = rawExpenses;
-  const disallowableExpenses = 0;
+      if (CT_MAP.ignore.includes(accountName)) {
+        return;
+      }
 
-  const computedProfit = turnover - allowableExpenses + disallowableExpenses;
-  const profitBeforeTax = corpSubmission?.profit_before_tax ?? computedProfit;
+      if (CT_MAP.revenue.includes(accountName)) {
+        turnover += amt;
+        return;
+      }
+
+      if (CT_MAP.allowable.includes(accountName)) {
+        allowableExpenses += Math.max(amt, 0);
+        return;
+      }
+
+      if (CT_MAP.disallowable.includes(accountName)) {
+        disallowableExpenses += Math.max(amt, 0);
+        return;
+      }
+
+      if (CT_MAP.other_income.includes(accountName)) {
+        turnover += amt;
+        return;
+      }
+
+      if (accountType === "EXPENSE") {
+        allowableExpenses += Math.max(amt, 0);
+      }
+    });
+  });
+
+  const computedProfit =
+    turnover - allowableExpenses + disallowableExpenses;
+
+  const profitBeforeTax =
+    (corpSubmission && corpSubmission.profit_before_tax) != null
+      ? corpSubmission.profit_before_tax
+      : computedProfit;
 
   const currentPeriodLoss =
     profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
 
-  const taxRate = corpSubmission?.corp_tax_rate ?? 0.19;
-  const corpTaxDue = corpSubmission?.corp_tax_due ?? profitBeforeTax * taxRate;
+  const taxRate =
+    (corpSubmission && corpSubmission.corp_tax_rate) != null
+      ? corpSubmission.corp_tax_rate
+      : 0.19;
+
+  const corpTaxDue =
+    (corpSubmission && corpSubmission.corp_tax_due) != null
+      ? corpSubmission.corp_tax_due
+      : profitBeforeTax * taxRate;
 
   const paymentsMade = sumBy(ctPayments || [], "amount");
   const balanceDue = corpTaxDue - paymentsMade;
@@ -299,28 +318,32 @@ async function buildCTFormData(
       taxDue: corpTaxDue,
     },
     capitalAllowances: {
-      totalCapitalAllowances: corpSubmission?.capital_allowances ?? 0,
+      totalCapitalAllowances:
+        (corpSubmission && corpSubmission.capital_allowances) || 0,
     },
     losses: {
       currentPeriodLoss,
-      broughtForward: corpSubmission?.loss_bf ?? 0,
-      carriedForward: corpSubmission?.loss_cf ?? currentPeriodLoss,
+      broughtForward: (corpSubmission && corpSubmission.loss_bf) || 0,
+      carriedForward:
+        (corpSubmission && corpSubmission.loss_cf) || currentPeriodLoss,
     },
     adjustments: {
-      manualAdjustments: corpSubmission?.adjustments_total ?? 0,
+      manualAdjustments:
+        (corpSubmission && corpSubmission.adjustments_total) || 0,
     },
     rAndD: {
-      totalRAndD: corpSubmission?.r_and_d_spend ?? 0,
+      totalRAndD: (corpSubmission && corpSubmission.r_and_d_spend) || 0,
     },
     loansToParticipators: {
-      totalLoans: corpSubmission?.loans_to_participators ?? 0,
+      totalLoans:
+        (corpSubmission && corpSubmission.loans_to_participators) || 0,
     },
     payments: {
       paymentsMade,
       balanceDue,
     },
     disclosures: {
-      notes: corpSubmission?.notes ?? null,
+      notes: (corpSubmission && corpSubmission.notes) || null,
     },
   };
 }
@@ -332,13 +355,11 @@ async function buildCTFormData(
 async function buildSAFormData(
   formCode,
   client,
-  _transactions, // SA now ignores transaction flags; journals are the engine
   clientId,
   periodStart,
   periodEnd,
   taxYear
 ) {
-  // Snapshot / overrides only (NOT the engine)
   const { data: saSubmission } = await supabaseAdmin
     .from("sa_submissions")
     .select("*")
@@ -354,13 +375,13 @@ async function buildSAFormData(
     .gte("payment_date", periodStart)
     .lte("payment_date", periodEnd);
 
-  // 🔹 Core engine: journals + SA buckets
+  // SA: journal‑driven + SA toggle
   const journals = await loadSAJournals(clientId, periodStart, periodEnd);
 
   const sa103 = buildSA103FromJournals(saSubmission, client, journals);
   const sa105 = buildSA105FromJournals(saSubmission, journals);
-  const income = buildSAOtherIncome(saSubmission); // employment, dividends, etc.
-  const capitalGains = buildSACapitalGains(saSubmission); // still manual for now
+  const income = buildSAOtherIncome(saSubmission);
+  const capitalGains = buildSACapitalGains(saSubmission);
 
   const paymentsMade = sumBy(saPayments || [], "amount");
 
@@ -372,13 +393,20 @@ async function buildSAFormData(
     capitalGains,
   });
 
-  const class2NIC = saSubmission?.class2_nic ?? 0;
-  const class4NIC = saSubmission?.class4_nic ?? 0;
+  const class2NIC =
+    (saSubmission && saSubmission.class2_nic) != null
+      ? saSubmission.class2_nic
+      : 0;
+  const class4NIC =
+    (saSubmission && saSubmission.class4_nic) != null
+      ? saSubmission.class4_nic
+      : 0;
 
   const totalLiability =
-    (taxCalculation.estimatedTax ?? 0) + class2NIC + class4NIC;
+    (taxCalculation.estimatedTax || 0) + class2NIC + class4NIC;
 
-  const paymentsOnAccount = saSubmission?.payments_on_account ?? 0;
+  const paymentsOnAccount =
+    (saSubmission && saSubmission.payments_on_account) || 0;
   const balanceDue = totalLiability - paymentsMade;
 
   const summary = {
@@ -421,12 +449,46 @@ async function buildSAFormData(
       balanceDue,
     },
     disclosures: {
-      notes: saSubmission?.notes ?? null,
+      notes: (saSubmission && saSubmission.notes) || null,
     },
   };
 }
 
-/* --------------------------- Journals Loader ------------------------------ */
+/* --------------------------- Journals Loaders ----------------------------- */
+
+async function loadCTJournals(clientId, periodStart, periodEnd) {
+  const { data, error } = await supabaseAdmin
+    .from("journal_entries")
+    .select(
+      `
+      id,
+      date,
+      transaction_id,
+      journal_lines (
+        debit,
+        credit,
+        chart_of_account_entries (
+          account_name,
+          account_type
+        )
+      ),
+      transactions!journal_entries_transaction_fk (
+        includedinct
+      )
+    `
+    )
+    .eq("client_id", clientId)
+    .gte("date", periodStart)
+    .lte("date", periodEnd)
+    .eq("transactions.includedinct", true);
+
+  if (error) {
+    console.error("Error loading CT journals:", error);
+    return [];
+  }
+
+  return data || [];
+}
 
 async function loadSAJournals(clientId, periodStart, periodEnd) {
   const { data, error } = await supabaseAdmin
@@ -435,6 +497,7 @@ async function loadSAJournals(clientId, periodStart, periodEnd) {
       `
       id,
       date,
+      transaction_id,
       journal_lines (
         debit,
         credit,
@@ -442,12 +505,16 @@ async function loadSAJournals(clientId, periodStart, periodEnd) {
           sa_bucket,
           account_type
         )
+      ),
+      transactions!journal_entries_transaction_fk (
+        includedinsa
       )
     `
     )
     .eq("client_id", clientId)
     .gte("date", periodStart)
-    .lte("date", periodEnd);
+    .lte("date", periodEnd)
+    .eq("transactions.includedinsa", true);
 
   if (error) {
     console.error("Error loading SA journals:", error);
@@ -457,23 +524,55 @@ async function loadSAJournals(clientId, periodStart, periodEnd) {
   return data || [];
 }
 
-function amountFromLine(line) {
-  const bucket = line.chart_of_account_entries?.sa_bucket || null;
-  const type = line.chart_of_account_entries?.account_type || null;
-  const debit = Number(line.debit ?? 0);
-  const credit = Number(line.credit ?? 0);
+async function loadCISJournals(clientId, periodStart, periodEnd) {
+  const { data, error } = await supabaseAdmin
+    .from("journal_entries")
+    .select(
+      `
+      id,
+      date,
+      transaction_id,
+      journal_lines (
+        debit,
+        credit
+      ),
+      transactions!journal_entries_transaction_fk (
+        includedincis,
+        cis_amount
+      )
+    `
+    )
+    .eq("client_id", clientId)
+    .gte("date", periodStart)
+    .lte("date", periodEnd)
+    .eq("transactions.includedincis", true);
 
-  // Income accounts: credits increase income
+  if (error) {
+    console.error("Error loading CIS journals:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+/* --------------------------- Shared helpers ------------------------------- */
+
+function amountFromLine(line) {
+  const type =
+    (line.chart_of_account_entries &&
+      line.chart_of_account_entries.account_type) ||
+    null;
+  const debit = Number(line.debit || 0);
+  const credit = Number(line.credit || 0);
+
   if (type === "INCOME") {
     return credit - debit;
   }
 
-  // Expense accounts: debits increase expense
   if (type === "EXPENSE") {
     return debit - credit;
   }
 
-  // Default: debit - credit
   return debit - credit;
 }
 
@@ -486,10 +585,13 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   let capitalAllowances = 0;
   let adjustments = 0;
 
-  for (const j of journals || []) {
-    for (const line of j.journal_lines || []) {
-      const bucket = line.chart_of_account_entries?.sa_bucket || null;
-      if (!bucket) continue;
+  (journals || []).forEach((j) => {
+    (j.journal_lines || []).forEach((line) => {
+      const bucket =
+        (line.chart_of_account_entries &&
+          line.chart_of_account_entries.sa_bucket) ||
+        null;
+      if (!bucket) return;
 
       const amt = amountFromLine(line);
 
@@ -512,10 +614,9 @@ function buildSA103FromJournals(saSubmission, client, journals) {
         default:
           break;
       }
-    }
-  }
+    });
+  });
 
-  // Ensure expenses are positive in the UI
   const allowableExpenses = Math.max(allowable, 0);
   const disallowableExpenses = Math.max(disallowable, 0);
 
@@ -527,15 +628,22 @@ function buildSA103FromJournals(saSubmission, client, journals) {
     adjustments;
 
   const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
-  const lossBF = saSubmission?.loss_bf ?? 0;
+  const lossBF = (saSubmission && saSubmission.loss_bf) || 0;
   const lossCF =
-    saSubmission?.loss_cf ?? (rawProfit < 0 ? Math.abs(rawProfit) : 0);
+    (saSubmission && saSubmission.loss_cf) ||
+    (rawProfit < 0 ? Math.abs(rawProfit) : 0);
 
   const usingSimplifiedExpenses =
-    saSubmission?.using_simplified_expenses ?? false;
+    (saSubmission && saSubmission.using_simplified_expenses) || false;
 
-  const class2NIC = saSubmission?.class2_nic ?? 0;
-  const class4NIC = saSubmission?.class4_nic ?? 0;
+  const class2NIC =
+    (saSubmission && saSubmission.class2_nic) != null
+      ? saSubmission.class2_nic
+      : 0;
+  const class4NIC =
+    (saSubmission && saSubmission.class4_nic) != null
+      ? saSubmission.class4_nic
+      : 0;
 
   return {
     summary: {
@@ -581,10 +689,13 @@ function buildSA105FromJournals(saSubmission, journals) {
   let propertyCapitalAllowances = 0;
   let propertyLosses = 0;
 
-  for (const j of journals || []) {
-    for (const line of j.journal_lines || []) {
-      const bucket = line.chart_of_account_entries?.sa_bucket || null;
-      if (!bucket) continue;
+  (journals || []).forEach((j) => {
+    (j.journal_lines || []).forEach((line) => {
+      const bucket =
+        (line.chart_of_account_entries &&
+          line.chart_of_account_entries.sa_bucket) ||
+        null;
+      if (!bucket) return;
 
       const amt = amountFromLine(line);
 
@@ -620,8 +731,8 @@ function buildSA105FromJournals(saSubmission, journals) {
         default:
           break;
       }
-    }
-  }
+    });
+  });
 
   const propertyExpenses =
     Math.max(propertyAllowable, 0) + Math.max(mortgageInterest, 0);
@@ -650,36 +761,38 @@ function buildSA105FromJournals(saSubmission, journals) {
 
 function buildSAOtherIncome(saSubmission) {
   return {
-    employmentIncome: saSubmission?.employment_income ?? 0,
-    pensions: saSubmission?.pensions ?? 0,
-    dividends: saSubmission?.dividends ?? 0,
-    interest: saSubmission?.interest ?? 0,
-    otherIncome: saSubmission?.other_income ?? 0,
+    employmentIncome:
+      (saSubmission && saSubmission.employment_income) || 0,
+    pensions: (saSubmission && saSubmission.pensions) || 0,
+    dividends: (saSubmission && saSubmission.dividends) || 0,
+    interest: (saSubmission && saSubmission.interest) || 0,
+    otherIncome: (saSubmission && saSubmission.other_income) || 0,
   };
 }
 
 function buildSACapitalGains(saSubmission) {
   return {
-    totalGains: saSubmission?.capital_gains ?? 0,
+    totalGains: (saSubmission && saSubmission.capital_gains) || 0,
   };
 }
 
 /* --------------------------- Tax Calculation (SA) ------------------------- */
 
-function buildSATaxCalculation({
-  saSubmission,
-  sa103,
-  sa105,
-  income,
-  capitalGains,
-}) {
-  const employmentIncome = income.employmentIncome ?? 0;
-  const pensions = income.pensions ?? 0;
-  const dividends = income.dividends ?? 0;
-  const interest = income.interest ?? 0;
-  const otherIncome = income.otherIncome ?? 0;
+function buildSATaxCalculation(params) {
+  const saSubmission = params.saSubmission;
+  const sa103 = params.sa103;
+  const sa105 = params.sa105;
+  const income = params.income;
+  const capitalGains = params.capitalGains;
 
-  const propertyRentalIncome = sa105.property?.rentalIncome ?? 0;
+  const employmentIncome = income.employmentIncome || 0;
+  const pensions = income.pensions || 0;
+  const dividends = income.dividends || 0;
+  const interest = income.interest || 0;
+  const otherIncome = income.otherIncome || 0;
+
+  const propertyRentalIncome =
+    (sa105.property && sa105.property.rentalIncome) || 0;
   const selfEmploymentProfit =
     sa103.summary.netProfit > 0 ? sa103.summary.netProfit : 0;
 
@@ -693,20 +806,26 @@ function buildSATaxCalculation({
     selfEmploymentProfit;
 
   const allowances =
-    saSubmission?.allowances ?? 12570; // default personal allowance if not set
+    (saSubmission && saSubmission.allowances) != null
+      ? saSubmission.allowances
+      : 12570;
 
   const taxableIncome =
-    saSubmission?.taxable_income ?? Math.max(totalIncome - allowances, 0);
+    (saSubmission && saSubmission.taxable_income) != null
+      ? saSubmission.taxable_income
+      : Math.max(totalIncome - allowances, 0);
 
-  // Placeholder flat rate until full band logic is wired
-  const estimatedTax = saSubmission?.tax_due ?? taxableIncome * 0.2;
+  const estimatedTax =
+    (saSubmission && saSubmission.tax_due) != null
+      ? saSubmission.tax_due
+      : taxableIncome * 0.2;
 
   return {
     totalIncome,
     allowances,
     taxableIncome,
     estimatedTax,
-    capitalGains: capitalGains.totalGains ?? 0,
+    capitalGains: capitalGains.totalGains || 0,
   };
 }
 
@@ -717,7 +836,6 @@ function buildSATaxCalculation({
 async function buildCISFormData(
   formCode,
   client,
-  transactions,
   clientId,
   periodStart,
   periodEnd
@@ -742,14 +860,28 @@ async function buildCISFormData(
     .select("*")
     .eq("client_id", clientId);
 
-  const cisTx = (transactions || []).filter((t) => t.includedincis);
+  // CIS: journals + toggle for inclusion, but amounts from transaction.cis_amount
+  const cisJournals = await loadCISJournals(clientId, periodStart, periodEnd);
 
-  const cisSufferedFromTx = sumBy(cisTx || [], "cis_amount");
+  let cisSufferedFromTx = 0;
+  (cisJournals || []).forEach((j) => {
+    const tx = j.transactions;
+    if (!tx) return;
+    const amt = Number(tx.cis_amount || 0);
+    if (!Number.isNaN(amt)) {
+      cisSufferedFromTx += amt;
+    }
+  });
+
   const paymentsMade = sumBy(cisPayments || [], "amount");
   const adjustmentsTotal = sumBy(cisAdjustments || [], "amount");
 
-  const netCisComputed = cisSufferedFromTx + adjustmentsTotal - paymentsMade;
-  const netCis = cisSubmission?.net_cis ?? netCisComputed;
+  const netCisComputed =
+    cisSufferedFromTx + adjustmentsTotal - paymentsMade;
+  const netCis =
+    (cisSubmission && cisSubmission.net_cis) != null
+      ? cisSubmission.net_cis
+      : netCisComputed;
 
   return {
     summary: {
@@ -766,12 +898,13 @@ async function buildCISFormData(
 
     payments: {
       totalPaymentsToSubcontractors:
-        cisSubmission?.total_payments ?? paymentsMade,
+        (cisSubmission && cisSubmission.total_payments) || paymentsMade,
     },
 
     deductions: {
       totalCisDeducted:
-        cisSubmission?.total_cis_deducted ?? cisSufferedFromTx,
+        (cisSubmission && cisSubmission.total_cis_deducted) ||
+        cisSufferedFromTx,
     },
 
     cisSuffered: {
@@ -787,7 +920,7 @@ async function buildCISFormData(
     },
 
     disclosures: {
-      notes: cisSubmission?.notes ?? null,
+      notes: (cisSubmission && cisSubmission.notes) || null,
     },
   };
 }
@@ -796,18 +929,18 @@ async function buildCISFormData(
 /*                        PDF TEMPLATE DISPATCHER                             */
 /* -------------------------------------------------------------------------- */
 
-async function generatePdfForForm({
-  formCode,
-  client,
-  clientId,
-  periodStart,
-  periodEnd,
-  year,
-  taxYear,
-  filename,
-  createdBy,
-  formData,
-}) {
+async function generatePdfForForm(params) {
+  const formCode = params.formCode;
+  const client = params.client;
+  const clientId = params.clientId;
+  const periodStart = params.periodStart;
+  const periodEnd = params.periodEnd;
+  const year = params.year;
+  const taxYear = params.taxYear;
+  const filename = params.filename;
+  const createdBy = params.createdBy;
+  const formData = params.formData;
+
   const clientDetails = {
     name: client.name,
     trading_name: client.trading_name,
@@ -835,7 +968,6 @@ async function generatePdfForForm({
     contact_email: client.contact_email,
   };
 
-  // CT600 family
   if (formCode.startsWith("CT")) {
     return await generateCt600Pdf({
       clientId,
@@ -857,7 +989,6 @@ async function generatePdfForForm({
     });
   }
 
-  // SA100
   if (formCode === "SA100") {
     return await generateSa100Pdf({
       clientId,
@@ -871,19 +1002,18 @@ async function generatePdfForForm({
       income: formData.income,
       employment: {},
       pensions: {},
-      selfEmployment: formData.sa103?.summary || {},
-      property: formData.sa105?.property || {},
-      dividends: { dividends: formData.income?.dividends ?? 0 },
-      interest: { interest: formData.income?.interest ?? 0 },
+      selfEmployment: (formData.sa103 && formData.sa103.summary) || {},
+      property: (formData.sa105 && formData.sa105.property) || {},
+      dividends: { dividends: (formData.income && formData.income.dividends) || 0 },
+      interest: { interest: (formData.income && formData.income.interest) || 0 },
       capitalGains: formData.capitalGains,
-      adjustments: formData.sa103?.adjustments || {},
+      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
       taxCalculation: formData.taxCalculation,
       payments: formData.payments,
       disclosures: formData.disclosures,
     });
   }
 
-  // SA103
   if (formCode === "SA103") {
     return await generateSa103Pdf({
       clientId,
@@ -893,25 +1023,29 @@ async function generatePdfForForm({
       filename,
       createdBy,
       clientDetails,
-      sa103Summary: formData.sa103?.summary,
-      turnover: formData.sa103?.turnover,
-      allowableExpenses: formData.sa103?.allowableExpenses,
-      disallowableExpenses: formData.sa103?.disallowableExpenses,
-      capitalAllowances: formData.sa103?.capitalAllowances,
-      simplifiedExpenses: formData.sa103?.simplifiedExpenses,
-      adjustments: formData.sa103?.adjustments,
-      losses: formData.sa103?.losses,
-      class2NIC: formData.sa103?.class2NIC,
-      class4NIC: formData.sa103?.class4NIC,
+      sa103Summary: formData.sa103 && formData.sa103.summary,
+      turnover: formData.sa103 && formData.sa103.turnover,
+      allowableExpenses:
+        formData.sa103 && formData.sa103.allowableExpenses,
+      disallowableExpenses:
+        formData.sa103 && formData.sa103.disallowableExpenses,
+      capitalAllowances:
+        formData.sa103 && formData.sa103.capitalAllowances,
+      simplifiedExpenses:
+        formData.sa103 && formData.sa103.simplifiedExpenses,
+      adjustments: formData.sa103 && formData.sa103.adjustments,
+      losses: formData.sa103 && formData.sa103.losses,
+      class2NIC: formData.sa103 && formData.sa103.class2NIC,
+      class4NIC: formData.sa103 && formData.sa103.class4NIC,
       payments: formData.payments,
       disclosures: formData.disclosures,
     });
   }
 
-  // SA105
   if (formCode === "SA105") {
-    const property = formData.sa105?.property || {};
-    const propertyProfit = property.propertyProfit ?? 0;
+    const property = (formData.sa105 && formData.sa105.property) || {};
+    const propertyProfit =
+      property.propertyProfit != null ? property.propertyProfit : 0;
 
     return await generateSa105Pdf({
       clientId,
@@ -922,29 +1056,29 @@ async function generatePdfForForm({
       createdBy,
       clientDetails,
       sa105Summary: {
-        ...formData.summary,
+        ...(formData.summary || {}),
         propertyProfit,
       },
-      rentalIncome: { totalRentalIncome: property.rentalIncome ?? 0 },
+      rentalIncome: { totalRentalIncome: property.rentalIncome || 0 },
       furnishedHolidayLettings: {},
       rentARoom: {},
       allowableExpenses: {
-        totalAllowableExpenses: property.propertyExpenses ?? 0,
+        totalAllowableExpenses: property.propertyExpenses || 0,
       },
       disallowableExpenses: {},
       mortgageInterest: {},
       capitalAllowances: {},
       propertyLosses: {
-        totalPropertyLosses: propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
+        totalPropertyLosses:
+          propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
       },
       jointOwnership: {},
-      adjustments: formData.sa103?.adjustments || {},
+      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
       payments: formData.payments,
       disclosures: formData.disclosures,
     });
   }
 
-  // SA110
   if (formCode === "SA110") {
     const tc = formData.taxCalculation || {};
     const pay = formData.payments || {};
@@ -958,25 +1092,24 @@ async function generatePdfForForm({
       createdBy,
       clientDetails,
       sa110Summary: formData.summary,
-      totalIncome: { totalIncome: tc.totalIncome ?? 0 },
-      adjustments: formData.sa103?.adjustments || {},
-      allowances: { allowances: tc.allowances ?? 0 },
-      taxableIncome: { taxableIncome: tc.taxableIncome ?? 0 },
+      totalIncome: { totalIncome: tc.totalIncome || 0 },
+      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
+      allowances: { allowances: tc.allowances || 0 },
+      taxableIncome: { taxableIncome: tc.taxableIncome || 0 },
       taxBands: formData.taxBands || {},
-      taxDue: { taxDue: tc.estimatedTax ?? 0 },
-      nicClass2: { class2NIC: tc.class2NIC ?? 0 },
-      nicClass4: { class4NIC: tc.class4NIC ?? 0 },
+      taxDue: { taxDue: tc.estimatedTax || 0 },
+      nicClass2: { class2NIC: tc.class2NIC || 0 },
+      nicClass4: { class4NIC: tc.class4NIC || 0 },
       paymentsOnAccount: {
-        paymentsOnAccount: pay.paymentsOnAccount ?? 0,
+        paymentsOnAccount: pay.paymentsOnAccount || 0,
       },
-      balancingPayments: { balancingPayments: pay.balanceDue ?? 0 },
+      balancingPayments: { balancingPayments: pay.balanceDue || 0 },
       refunds: {},
-      finalLiability: { totalLiability: tc.totalLiability ?? 0 },
+      finalLiability: { totalLiability: tc.totalLiability || 0 },
       disclosures: formData.disclosures,
     });
   }
 
-  // CIS300
   if (formCode === "CIS300") {
     return await generateCis300Pdf({
       clientId,
@@ -996,7 +1129,6 @@ async function generatePdfForForm({
     });
   }
 
-  // CIS Subcontractor Monthly Statement
   if (formCode === "CIS_STATEMENT") {
     return await generateCisStatementPdf({
       clientId,
@@ -1016,7 +1148,7 @@ async function generatePdfForForm({
     });
   }
 
-  throw new Error(`No PDF template configured for formCode: ${formCode}`);
+  throw new Error("No PDF template configured for formCode: " + formCode);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1025,15 +1157,29 @@ async function generatePdfForForm({
 
 function sumBy(items, field) {
   return (items || []).reduce((sum, item) => {
-    const val = Number(item[field] ?? 0);
-    return Number.isNaN(val) ? sum : sum + val;
+    const val = Number(item[field] || 0);
+    if (Number.isNaN(val)) return sum;
+    return sum + val;
   }, 0);
 }
 
 function deriveTaxYear(date) {
   const year = date.getFullYear();
   const month = date.getMonth() + 1;
-  return month >= 4
-    ? `${year}/${String((year + 1) % 100).padStart(2, "0")}`
-    : `${year - 1}/${String(year % 100).padStart(2, "0")}`;
+  if (month >= 4) {
+    return (
+      year +
+      "/" +
+      String((year + 1) % 100)
+        .toString()
+        .padStart(2, "0")
+    );
+  }
+  return (
+    year - 1 +
+    "/" +
+    String(year % 100)
+      .toString()
+      .padStart(2, "0")
+  );
 }
