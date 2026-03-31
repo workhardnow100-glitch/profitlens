@@ -193,6 +193,79 @@ export default async function handler(req, res) {
       message: err && err.message ? err.message : "Internal server error.",
     });
   }
+}/* -------------------------------------------------------------------------- */
+/*                               CT600 CONFIG                                 */
+/* -------------------------------------------------------------------------- */
+
+const CAPITAL_ALLOWANCE_ACCOUNTS = [
+  // Main Pool (AIA eligible)
+  "Plant & Machinery",
+  "Machinery",
+  "Equipment",
+  "Tools & Equipment",
+  "Office Equipment",
+  "Fixtures & Fittings",
+  "Furniture",
+  "Computer Equipment",
+  "IT Equipment",
+  "Servers",
+  "Laptops",
+  "Desktops",
+  "Printers",
+  "CCTV Systems",
+  "Security Systems",
+  "Air Conditioning Units",
+  "Heating Systems",
+  "Lighting Systems",
+  "Warehouse Equipment",
+  "Construction Equipment",
+  "Power Tools",
+  "Hand Tools",
+  "Workshop Equipment",
+
+  // Vehicles (AIA eligible except cars)
+  "Vans",
+  "Lorries",
+  "Trucks",
+  "Commercial Vehicles",
+  "Pickups",
+  "Forklifts",
+
+  // Cars (NOT AIA eligible — but still capital allowances)
+  "Cars",
+  "Motor Vehicles",
+  "Company Car",
+
+  // Special Rate Pool (reduced rate)
+  "Integral Features",
+  "Electrical Systems",
+  "Cold Water Systems",
+  "Hot Water Systems",
+  "Thermal Insulation",
+  "Solar Panels",
+  "Lift Systems",
+  "Escalators",
+  "Moving Walkways",
+
+  // Short‑Life Assets (optional election)
+  "Short Life Asset",
+
+  // Land & Buildings (NOT CA eligible — but included for future logic)
+  // These will be ignored in CA logic but listed for completeness
+  "Land",
+  "Buildings",
+  "Property Improvements",
+  "Extensions",
+  "Structural Works",
+];
+
+/* -------------------------------------------------------------------------- */
+/*                         CT600 RATE / ASSOCIATED COS                        */
+/* -------------------------------------------------------------------------- */
+
+function computeCorpTaxRate(profitBeforeTax, associatedCompanies) {
+  // v1: still flat 19% – structure ready for marginal relief later
+  return 0.19;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -228,6 +301,7 @@ async function buildCTFormData(
   let nonTradingIncome = 0;      // Asset sales, grants, refunds, etc.
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
+  let capitalAllowances = 0;     // v1: 100% AIA on qualifying assets
 
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
@@ -250,29 +324,37 @@ async function buildCTFormData(
         return;
       }
 
-      // 4. Allowable expenses
+      // 4. Capital allowances (qualifying asset purchases)
+      if (CAPITAL_ALLOWANCE_ACCOUNTS.includes(accountName)) {
+        // v1: treat full debit as 100% AIA
+        capitalAllowances += Math.max(amt, 0);
+        return;
+      }
+
+      // 5. Allowable expenses
       if (CT_MAP.allowable.includes(accountName)) {
         allowableExpenses += Math.max(amt, 0);
         return;
       }
 
-      // 5. Disallowable expenses
+      // 6. Disallowable expenses
       if (CT_MAP.disallowable.includes(accountName)) {
         disallowableExpenses += Math.max(amt, 0);
         return;
       }
 
-      // 6. Everything else is ignored for CT
+      // 7. Everything else is ignored for CT
       return;
     });
   });
 
-  // Final CT profit (aligned with unified engine)
+  // Final CT profit (aligned with unified engine + CA adjustment)
   const computedProfit =
     turnover +
     nonTradingIncome -
     allowableExpenses -
-    disallowableExpenses;
+    disallowableExpenses -
+    capitalAllowances;
 
   const profitBeforeTax =
     corpSubmission?.profit_before_tax != null
@@ -282,10 +364,13 @@ async function buildCTFormData(
   const currentPeriodLoss =
     profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
 
+  const associatedCompanies =
+    corpSubmission?.associated_companies_count || 0;
+
   const taxRate =
     corpSubmission?.corp_tax_rate != null
       ? corpSubmission.corp_tax_rate
-      : 0.19;
+      : computeCorpTaxRate(profitBeforeTax, associatedCompanies);
 
   const corpTaxDue =
     corpSubmission?.corp_tax_due != null
@@ -305,6 +390,7 @@ async function buildCTFormData(
       turnover,
       nonTradingIncome,
       expenses: allowableExpenses + disallowableExpenses,
+      capitalAllowances,
       profitBeforeTax,
       corpTaxDue,
       paymentsMade,
@@ -315,14 +401,14 @@ async function buildCTFormData(
       nonTradingIncome,
       allowableExpenses,
       disallowableExpenses,
+      capitalAllowances,
       adjustedProfit: profitBeforeTax,
       taxableProfit: profitBeforeTax,
       taxRate,
       taxDue: corpTaxDue,
     },
     capitalAllowances: {
-      totalCapitalAllowances:
-        corpSubmission?.capital_allowances || 0,
+      totalCapitalAllowances: capitalAllowances,
     },
     losses: {
       currentPeriodLoss,
@@ -350,6 +436,8 @@ async function buildCTFormData(
     },
   };
 }
+
+
 
 
 /* -------------------------------------------------------------------------- */
