@@ -133,7 +133,7 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Client not found." });
     }
 
-    // 2. Load transactions
+    // 2. Load transactions (still used for CT & CIS only)
     const { data: transactions, error: txError } = await supabaseAdmin
       .from("transactions")
       .select("*")
@@ -332,12 +332,13 @@ async function buildCTFormData(
 async function buildSAFormData(
   formCode,
   client,
-  transactions,
+  _transactions, // SA now ignores transaction flags; journals are the engine
   clientId,
   periodStart,
   periodEnd,
   taxYear
 ) {
+  // Snapshot / overrides only (NOT the engine)
   const { data: saSubmission } = await supabaseAdmin
     .from("sa_submissions")
     .select("*")
@@ -353,12 +354,13 @@ async function buildSAFormData(
     .gte("payment_date", periodStart)
     .lte("payment_date", periodEnd);
 
-  const saTx = (transactions || []).filter((t) => t.includedinsa);
+  // 🔹 Core engine: journals + SA buckets
+  const journals = await loadSAJournals(clientId, periodStart, periodEnd);
 
-  const sa103 = buildSA103FromTransactions(saSubmission, client, saTx);
-  const sa105 = buildSA105FromSubmission(saSubmission);
-  const income = buildSAOtherIncome(saSubmission);
-  const capitalGains = buildSACapitalGains(saSubmission);
+  const sa103 = buildSA103FromJournals(saSubmission, client, journals);
+  const sa105 = buildSA105FromJournals(saSubmission, journals);
+  const income = buildSAOtherIncome(saSubmission); // employment, dividends, etc.
+  const capitalGains = buildSACapitalGains(saSubmission); // still manual for now
 
   const paymentsMade = sumBy(saPayments || [], "amount");
 
@@ -387,7 +389,9 @@ async function buildSAFormData(
     periodStart,
     periodEnd,
     turnover: sa103.summary.turnover,
-    expenses: sa103.summary.allowableExpenses + sa103.summary.disallowableExpenses,
+    expenses:
+      sa103.summary.allowableExpenses +
+      sa103.summary.disallowableExpenses,
     profit: sa103.summary.netProfit,
     estimatedTax: taxCalculation.estimatedTax,
     class2NIC,
@@ -422,26 +426,113 @@ async function buildSAFormData(
   };
 }
 
+/* --------------------------- Journals Loader ------------------------------ */
+
+async function loadSAJournals(clientId, periodStart, periodEnd) {
+  const { data, error } = await supabaseAdmin
+    .from("journal_entries")
+    .select(
+      `
+      id,
+      date,
+      journal_lines (
+        debit,
+        credit,
+        chart_of_account_entries (
+          sa_bucket,
+          account_type
+        )
+      )
+    `
+    )
+    .eq("client_id", clientId)
+    .gte("date", periodStart)
+    .lte("date", periodEnd);
+
+  if (error) {
+    console.error("Error loading SA journals:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+function amountFromLine(line) {
+  const bucket = line.chart_of_account_entries?.sa_bucket || null;
+  const type = line.chart_of_account_entries?.account_type || null;
+  const debit = Number(line.debit ?? 0);
+  const credit = Number(line.credit ?? 0);
+
+  // Income accounts: credits increase income
+  if (type === "INCOME") {
+    return credit - debit;
+  }
+
+  // Expense accounts: debits increase expense
+  if (type === "EXPENSE") {
+    return debit - credit;
+  }
+
+  // Default: debit - credit
+  return debit - credit;
+}
+
 /* -------------------------- SA103 (Self-Employment) ----------------------- */
 
-function buildSA103FromTransactions(saSubmission, client, saTx) {
-  const incomeTx = saTx.filter((t) => Number(t.amount) > 0);
-  const expenseTx = saTx.filter((t) => Number(t.amount) < 0);
+function buildSA103FromJournals(saSubmission, client, journals) {
+  let turnover = 0;
+  let allowable = 0;
+  let disallowable = 0;
+  let capitalAllowances = 0;
+  let adjustments = 0;
 
-  const turnover = sumBy(incomeTx, "amount");
-  const expenses = sumBy(expenseTx, "amount") * -1;
+  for (const j of journals || []) {
+    for (const line of j.journal_lines || []) {
+      const bucket = line.chart_of_account_entries?.sa_bucket || null;
+      if (!bucket) continue;
 
-  const netProfit = turnover - expenses;
+      const amt = amountFromLine(line);
 
-  const capitalAllowances = saSubmission?.capital_allowances ?? 0;
-  const usingSimplifiedExpenses =
-    saSubmission?.using_simplified_expenses ?? false;
-  const adjustmentsTotal = saSubmission?.adjustments_total ?? 0;
+      switch (bucket) {
+        case "sa_se_turnover":
+          turnover += amt;
+          break;
+        case "sa_se_allowable_expense":
+          allowable += amt;
+          break;
+        case "sa_se_disallowable_expense":
+          disallowable += amt;
+          break;
+        case "sa_se_capital_allowance":
+          capitalAllowances += amt;
+          break;
+        case "sa_se_adjustment":
+          adjustments += amt;
+          break;
+        default:
+          break;
+      }
+    }
+  }
 
-  const currentPeriodLoss = netProfit < 0 ? Math.abs(netProfit) : 0;
+  // Ensure expenses are positive in the UI
+  const allowableExpenses = Math.max(allowable, 0);
+  const disallowableExpenses = Math.max(disallowable, 0);
+
+  const rawProfit =
+    turnover -
+    allowableExpenses -
+    disallowableExpenses +
+    capitalAllowances +
+    adjustments;
+
+  const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
   const lossBF = saSubmission?.loss_bf ?? 0;
   const lossCF =
-    saSubmission?.loss_cf ?? (netProfit < 0 ? Math.abs(netProfit) : 0);
+    saSubmission?.loss_cf ?? (rawProfit < 0 ? Math.abs(rawProfit) : 0);
+
+  const usingSimplifiedExpenses =
+    saSubmission?.using_simplified_expenses ?? false;
 
   const class2NIC = saSubmission?.class2_nic ?? 0;
   const class4NIC = saSubmission?.class4_nic ?? 0;
@@ -450,13 +541,13 @@ function buildSA103FromTransactions(saSubmission, client, saTx) {
     summary: {
       businessName: client.trading_name || client.name,
       turnover,
-      allowableExpenses: expenses,
-      disallowableExpenses: 0,
-      netProfit,
+      allowableExpenses,
+      disallowableExpenses,
+      netProfit: rawProfit,
     },
     turnover: { totalTurnover: turnover },
-    allowableExpenses: { totalAllowableExpenses: expenses },
-    disallowableExpenses: { totalDisallowableExpenses: 0 },
+    allowableExpenses: { totalAllowableExpenses: allowableExpenses },
+    disallowableExpenses: { totalDisallowableExpenses: disallowableExpenses },
     capitalAllowances: {
       totalCapitalAllowances: capitalAllowances,
     },
@@ -464,7 +555,7 @@ function buildSA103FromTransactions(saSubmission, client, saTx) {
       usingSimplifiedExpenses,
     },
     adjustments: {
-      adjustmentsTotal,
+      adjustmentsTotal: adjustments,
     },
     losses: {
       currentPeriodLoss,
@@ -478,10 +569,63 @@ function buildSA103FromTransactions(saSubmission, client, saTx) {
 
 /* ----------------------------- SA105 (Property) --------------------------- */
 
-function buildSA105FromSubmission(saSubmission) {
-  const rentalIncome = saSubmission?.property_rental_income ?? 0;
-  const propertyExpenses = saSubmission?.property_expenses ?? 0;
-  const propertyProfit = saSubmission?.property_profit ?? rentalIncome - propertyExpenses;
+function buildSA105FromJournals(saSubmission, journals) {
+  let rentalIncome = 0;
+  let fhlIncome = 0;
+  let rentARoomIncome = 0;
+
+  let propertyAllowable = 0;
+  let mortgageInterest = 0;
+  let fhlExpenses = 0;
+  let rentARoomExpenses = 0;
+  let propertyCapitalAllowances = 0;
+  let propertyLosses = 0;
+
+  for (const j of journals || []) {
+    for (const line of j.journal_lines || []) {
+      const bucket = line.chart_of_account_entries?.sa_bucket || null;
+      if (!bucket) continue;
+
+      const amt = amountFromLine(line);
+
+      switch (bucket) {
+        case "sa_property_rental_income":
+          rentalIncome += amt;
+          break;
+        case "sa_property_fhl_income":
+          fhlIncome += amt;
+          break;
+        case "sa_property_rent_a_room_income":
+          rentARoomIncome += amt;
+          break;
+
+        case "sa_property_allowable_expense":
+          propertyAllowable += amt;
+          break;
+        case "sa_property_mortgage_interest":
+          mortgageInterest += amt;
+          break;
+        case "sa_property_fhl_expense":
+          fhlExpenses += amt;
+          break;
+        case "sa_property_rent_a_room_expense":
+          rentARoomExpenses += amt;
+          break;
+        case "sa_property_capital_allowance":
+          propertyCapitalAllowances += amt;
+          break;
+        case "sa_property_loss":
+          propertyLosses += amt;
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  const propertyExpenses =
+    Math.max(propertyAllowable, 0) + Math.max(mortgageInterest, 0);
+  const propertyProfit = rentalIncome - propertyExpenses;
 
   return {
     property: {
@@ -489,6 +633,16 @@ function buildSA105FromSubmission(saSubmission) {
       propertyExpenses,
       propertyProfit,
     },
+    fhl: {
+      income: fhlIncome,
+      expenses: Math.max(fhlExpenses, 0),
+    },
+    rentARoom: {
+      income: rentARoomIncome,
+      expenses: Math.max(rentARoomExpenses, 0),
+    },
+    capitalAllowances: propertyCapitalAllowances,
+    propertyLosses: propertyLosses,
   };
 }
 
@@ -538,10 +692,13 @@ function buildSATaxCalculation({
     propertyRentalIncome +
     selfEmploymentProfit;
 
-  const allowances = saSubmission?.allowances ?? 0;
+  const allowances =
+    saSubmission?.allowances ?? 12570; // default personal allowance if not set
+
   const taxableIncome =
     saSubmission?.taxable_income ?? Math.max(totalIncome - allowances, 0);
 
+  // Placeholder flat rate until full band logic is wired
   const estimatedTax = saSubmission?.tax_due ?? taxableIncome * 0.2;
 
   return {
