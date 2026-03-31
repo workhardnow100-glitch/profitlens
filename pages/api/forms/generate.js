@@ -193,7 +193,9 @@ export default async function handler(req, res) {
       message: err && err.message ? err.message : "Internal server error.",
     });
   }
-}/* -------------------------------------------------------------------------- */
+}
+
+/* -------------------------------------------------------------------------- */
 /*                               CT600 CONFIG                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -263,9 +265,34 @@ const CAPITAL_ALLOWANCE_ACCOUNTS = [
 /*                         CT600 RATE / ASSOCIATED COS                        */
 /* -------------------------------------------------------------------------- */
 
-function computeCorpTaxRate(profitBeforeTax, associatedCompanies) {
-  // v1: still flat 19% – structure ready for marginal relief later
-  return 0.19;
+function computeCorpTaxRate(profit, associatedCompanies) {
+  // Ensure at least 1 company for threshold scaling
+  const n = Math.max(1, (associatedCompanies || 0) + 1);
+
+  const lowerLimit = 50000 / n;
+  const upperLimit = 250000 / n;
+
+  const smallRate = 0.19;
+  const mainRate = 0.25;
+
+  // 1. Small profits rate
+  if (profit <= lowerLimit) {
+    return smallRate;
+  }
+
+  // 2. Main rate
+  if (profit >= upperLimit) {
+    return mainRate;
+  }
+
+  // 3. Marginal relief band
+  // MR = (UpperLimit - Profit) * (MainRate - SmallRate) / UpperLimit
+  const marginalRelief =
+    ((upperLimit - profit) * (mainRate - smallRate)) / upperLimit;
+
+  const effectiveRate = mainRate - marginalRelief;
+
+  return effectiveRate;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -348,7 +375,7 @@ async function buildCTFormData(
     });
   });
 
-  // Final CT profit (aligned with unified engine + CA adjustment)
+  // Engine profit (before manual tax adjustments)
   const computedProfit =
     turnover +
     nonTradingIncome -
@@ -356,13 +383,30 @@ async function buildCTFormData(
     disallowableExpenses -
     capitalAllowances;
 
-  const profitBeforeTax =
+  // Base profit (can be overridden by corpSubmission)
+  const baseProfit =
     corpSubmission?.profit_before_tax != null
       ? corpSubmission.profit_before_tax
       : computedProfit;
 
   const currentPeriodLoss =
-    profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
+    baseProfit < 0 ? Math.abs(baseProfit) : 0;
+
+  // Manual tax adjustments
+  const lossCarryback = corpSubmission?.loss_carryback || 0;
+  const groupRelief = corpSubmission?.group_relief || 0;
+
+  // R&D enhanced relief (CT600L)
+  const rAndDSpend = corpSubmission?.r_and_d_spend || 0;
+  const rAndDMultiplier = corpSubmission?.r_and_d_multiplier || 0;
+  const rAndDEnhancedRelief = rAndDSpend * rAndDMultiplier;
+
+  // Taxable profit after adjustments
+  const taxableProfit =
+    baseProfit -
+    lossCarryback -
+    groupRelief -
+    rAndDEnhancedRelief;
 
   const associatedCompanies =
     corpSubmission?.associated_companies_count || 0;
@@ -370,12 +414,12 @@ async function buildCTFormData(
   const taxRate =
     corpSubmission?.corp_tax_rate != null
       ? corpSubmission.corp_tax_rate
-      : computeCorpTaxRate(profitBeforeTax, associatedCompanies);
+      : computeCorpTaxRate(taxableProfit, associatedCompanies);
 
   const corpTaxDue =
     corpSubmission?.corp_tax_due != null
       ? corpSubmission.corp_tax_due
-      : profitBeforeTax * taxRate;
+      : taxableProfit * taxRate;
 
   const paymentsMade = sumBy(ctPayments || [], "amount");
   const balanceDue = corpTaxDue - paymentsMade;
@@ -391,7 +435,7 @@ async function buildCTFormData(
       nonTradingIncome,
       expenses: allowableExpenses + disallowableExpenses,
       capitalAllowances,
-      profitBeforeTax,
+      profitBeforeTax: baseProfit,
       corpTaxDue,
       paymentsMade,
       balanceDue,
@@ -402,8 +446,13 @@ async function buildCTFormData(
       allowableExpenses,
       disallowableExpenses,
       capitalAllowances,
-      adjustedProfit: profitBeforeTax,
-      taxableProfit: profitBeforeTax,
+      adjustedProfit: baseProfit,
+      taxableProfit,
+      lossCarryback,
+      groupRelief,
+      rAndDSpend,
+      rAndDMultiplier,
+      rAndDEnhancedRelief,
       taxRate,
       taxDue: corpTaxDue,
     },
@@ -415,13 +464,17 @@ async function buildCTFormData(
       broughtForward: corpSubmission?.loss_bf || 0,
       carriedForward:
         corpSubmission?.loss_cf || currentPeriodLoss,
+      carryback: lossCarryback,
+      groupRelief,
     },
     adjustments: {
       manualAdjustments:
         corpSubmission?.adjustments_total || 0,
     },
     rAndD: {
-      totalRAndD: corpSubmission?.r_and_d_spend || 0,
+      totalRAndD: rAndDSpend,
+      enhancedRelief: rAndDEnhancedRelief,
+      multiplier: rAndDMultiplier,
     },
     loansToParticipators: {
       totalLoans:
