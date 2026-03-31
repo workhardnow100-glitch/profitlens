@@ -29,7 +29,7 @@ import { generateCis300Pdf } from "../../../lib/pdf/templates/cis300";
 import { generateCisStatementPdf } from "../../../lib/pdf/templates/cis_statement";
 
 // CT category map
-import { CT_MAP } from "../../../lib/tax/ct-map";
+import { CT_MAP } from "../../../lib/ct-map";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
