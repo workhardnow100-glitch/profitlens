@@ -26,7 +26,6 @@ import { useRouteGuard } from "../hooks/useRouteGuard";
 // ✅ CT_MAP + system categories: single source of truth for ALL dropdowns
 import { CT_MAP } from "../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
-
 // ✅ Unified category options (CT_MAP + system + Uncategorised)
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
@@ -34,15 +33,12 @@ const CT_CATEGORY_OPTIONS = Array.from(
     ...CT_MAP.other_income,
     ...CT_MAP.allowable,
     ...CT_MAP.disallowable,
-    ...CT_MAP.fixed_assets,
-    ...CT_MAP.current_assets,
-    ...CT_MAP.liabilities,
-    ...CT_MAP.equity,
     ...CT_MAP.ignore,
     ...SYSTEM_CATEGORIES,
     "Uncategorised",
   ])
 ).sort();
+
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
