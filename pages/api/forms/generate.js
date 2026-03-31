@@ -169,7 +169,8 @@ export default async function handler(req, res) {
         transactions || [],
         resolvedClientId,
         periodStart,
-        periodEnd
+        periodEnd,
+        taxYear
       );
     } else if (formCode.startsWith("CIS")) {
       formData = await buildCISFormData(
@@ -325,7 +326,7 @@ async function buildCTFormData(
 }
 
 /* -------------------------------------------------------------------------- */
-/*                                SA BUILDER                                  */
+/*                                SA ENGINE                                   */
 /* -------------------------------------------------------------------------- */
 
 async function buildSAFormData(
@@ -334,7 +335,8 @@ async function buildSAFormData(
   transactions,
   clientId,
   periodStart,
-  periodEnd
+  periodEnd,
+  taxYear
 ) {
   const { data: saSubmission } = await supabaseAdmin
     .from("sa_submissions")
@@ -353,116 +355,201 @@ async function buildSAFormData(
 
   const saTx = (transactions || []).filter((t) => t.includedinsa);
 
+  const sa103 = buildSA103FromTransactions(saSubmission, client, saTx);
+  const sa105 = buildSA105FromSubmission(saSubmission);
+  const income = buildSAOtherIncome(saSubmission);
+  const capitalGains = buildSACapitalGains(saSubmission);
+
+  const paymentsMade = sumBy(saPayments || [], "amount");
+
+  const taxCalculation = buildSATaxCalculation({
+    saSubmission,
+    sa103,
+    sa105,
+    income,
+    capitalGains,
+  });
+
+  const class2NIC = saSubmission?.class2_nic ?? 0;
+  const class4NIC = saSubmission?.class4_nic ?? 0;
+
+  const totalLiability =
+    (taxCalculation.estimatedTax ?? 0) + class2NIC + class4NIC;
+
+  const paymentsOnAccount = saSubmission?.payments_on_account ?? 0;
+  const balanceDue = totalLiability - paymentsMade;
+
+  const summary = {
+    formCode,
+    taxpayerName: client.name,
+    utr: client.utr_number,
+    address: client.address,
+    periodStart,
+    periodEnd,
+    turnover: sa103.summary.turnover,
+    expenses: sa103.summary.allowableExpenses + sa103.summary.disallowableExpenses,
+    profit: sa103.summary.netProfit,
+    estimatedTax: taxCalculation.estimatedTax,
+    class2NIC,
+    class4NIC,
+    paymentsMade,
+    balanceDue,
+  };
+
+  return {
+    summary,
+    sa103,
+    sa105,
+    income,
+    capitalGains,
+    taxCalculation: {
+      totalIncome: taxCalculation.totalIncome,
+      allowances: taxCalculation.allowances,
+      taxableIncome: taxCalculation.taxableIncome,
+      estimatedTax: taxCalculation.estimatedTax,
+      class2NIC,
+      class4NIC,
+      totalLiability,
+    },
+    payments: {
+      paymentsOnAccount,
+      paymentsMade,
+      balanceDue,
+    },
+    disclosures: {
+      notes: saSubmission?.notes ?? null,
+    },
+  };
+}
+
+/* -------------------------- SA103 (Self-Employment) ----------------------- */
+
+function buildSA103FromTransactions(saSubmission, client, saTx) {
   const incomeTx = saTx.filter((t) => Number(t.amount) > 0);
   const expenseTx = saTx.filter((t) => Number(t.amount) < 0);
 
   const turnover = sumBy(incomeTx, "amount");
   const expenses = sumBy(expenseTx, "amount") * -1;
 
-  const profit = turnover - expenses;
+  const netProfit = turnover - expenses;
 
-  const estimatedTax = saSubmission?.tax_due ?? profit * 0.2;
+  const capitalAllowances = saSubmission?.capital_allowances ?? 0;
+  const usingSimplifiedExpenses =
+    saSubmission?.using_simplified_expenses ?? false;
+  const adjustmentsTotal = saSubmission?.adjustments_total ?? 0;
+
+  const currentPeriodLoss = netProfit < 0 ? Math.abs(netProfit) : 0;
+  const lossBF = saSubmission?.loss_bf ?? 0;
+  const lossCF =
+    saSubmission?.loss_cf ?? (netProfit < 0 ? Math.abs(netProfit) : 0);
+
   const class2NIC = saSubmission?.class2_nic ?? 0;
   const class4NIC = saSubmission?.class4_nic ?? 0;
 
-  const paymentsMade = sumBy(saPayments || [], "amount");
-  const balanceDue = estimatedTax + class2NIC + class4NIC - paymentsMade;
-
   return {
     summary: {
-      formCode,
-      taxpayerName: client.name,
-      utr: client.utr_number,
-      address: client.address,
-      periodStart,
-      periodEnd,
+      businessName: client.trading_name || client.name,
       turnover,
-      expenses,
-      profit,
-      estimatedTax,
-      class2NIC,
-      class4NIC,
-      paymentsMade,
-      balanceDue,
+      allowableExpenses: expenses,
+      disallowableExpenses: 0,
+      netProfit,
     },
+    turnover: { totalTurnover: turnover },
+    allowableExpenses: { totalAllowableExpenses: expenses },
+    disallowableExpenses: { totalDisallowableExpenses: 0 },
+    capitalAllowances: {
+      totalCapitalAllowances: capitalAllowances,
+    },
+    simplifiedExpenses: {
+      usingSimplifiedExpenses,
+    },
+    adjustments: {
+      adjustmentsTotal,
+    },
+    losses: {
+      currentPeriodLoss,
+      broughtForward: lossBF,
+      carriedForward: lossCF,
+    },
+    class2NIC: { class2NIC },
+    class4NIC: { class4NIC },
+  };
+}
 
-    sa103: {
-      summary: {
-        businessName: client.trading_name || client.name,
-        turnover,
-        allowableExpenses: expenses,
-        disallowableExpenses: 0,
-        netProfit: profit,
-      },
-      turnover: { totalTurnover: turnover },
-      allowableExpenses: { totalAllowableExpenses: expenses },
-      disallowableExpenses: { totalDisallowableExpenses: 0 },
-      capitalAllowances: {
-        totalCapitalAllowances: saSubmission?.capital_allowances ?? 0,
-      },
-      simplifiedExpenses: {
-        usingSimplifiedExpenses:
-          saSubmission?.using_simplified_expenses ?? false,
-      },
-      adjustments: {
-        adjustmentsTotal: saSubmission?.adjustments_total ?? 0,
-      },
-      losses: {
-        currentPeriodLoss: profit < 0 ? Math.abs(profit) : 0,
-        broughtForward: saSubmission?.loss_bf ?? 0,
-        carriedForward:
-          saSubmission?.loss_cf ?? (profit < 0 ? Math.abs(profit) : 0),
-      },
-      class2NIC: { class2NIC },
-      class4NIC: { class4NIC },
-    },
+/* ----------------------------- SA105 (Property) --------------------------- */
 
-    sa105: {
-      property: {
-        rentalIncome: saSubmission?.property_rental_income ?? 0,
-        propertyExpenses: saSubmission?.property_expenses ?? 0,
-        propertyProfit: saSubmission?.property_profit ?? 0,
-      },
-    },
+function buildSA105FromSubmission(saSubmission) {
+  const rentalIncome = saSubmission?.property_rental_income ?? 0;
+  const propertyExpenses = saSubmission?.property_expenses ?? 0;
+  const propertyProfit = saSubmission?.property_profit ?? rentalIncome - propertyExpenses;
 
-    income: {
-      employmentIncome: saSubmission?.employment_income ?? 0,
-      pensions: saSubmission?.pensions ?? 0,
-      dividends: saSubmission?.dividends ?? 0,
-      interest: saSubmission?.interest ?? 0,
-      otherIncome: saSubmission?.other_income ?? 0,
+  return {
+    property: {
+      rentalIncome,
+      propertyExpenses,
+      propertyProfit,
     },
+  };
+}
 
-    capitalGains: {
-      totalGains: saSubmission?.capital_gains ?? 0,
-    },
+/* --------------------------- Other Income / Gains ------------------------- */
 
-    taxCalculation: {
-      totalIncome:
-        (saSubmission?.employment_income ?? 0) +
-        (saSubmission?.pensions ?? 0) +
-        (saSubmission?.dividends ?? 0) +
-        (saSubmission?.interest ?? 0) +
-        (saSubmission?.other_income ?? 0) +
-        (saSubmission?.property_rental_income ?? 0) +
-        (profit > 0 ? profit : 0),
-      allowances: saSubmission?.allowances ?? 0,
-      taxableIncome: saSubmission?.taxable_income ?? 0,
-      estimatedTax,
-      class2NIC,
-      class4NIC,
-      totalLiability: estimatedTax + class2NIC + class4NIC,
-    },
+function buildSAOtherIncome(saSubmission) {
+  return {
+    employmentIncome: saSubmission?.employment_income ?? 0,
+    pensions: saSubmission?.pensions ?? 0,
+    dividends: saSubmission?.dividends ?? 0,
+    interest: saSubmission?.interest ?? 0,
+    otherIncome: saSubmission?.other_income ?? 0,
+  };
+}
 
-    payments: {
-      paymentsOnAccount: saSubmission?.payments_on_account ?? 0,
-      paymentsMade,
-      balanceDue,
-    },
+function buildSACapitalGains(saSubmission) {
+  return {
+    totalGains: saSubmission?.capital_gains ?? 0,
+  };
+}
 
-    disclosures: {
-      notes: saSubmission?.notes ?? null,
-    },
+/* --------------------------- Tax Calculation (SA) ------------------------- */
+
+function buildSATaxCalculation({
+  saSubmission,
+  sa103,
+  sa105,
+  income,
+  capitalGains,
+}) {
+  const employmentIncome = income.employmentIncome ?? 0;
+  const pensions = income.pensions ?? 0;
+  const dividends = income.dividends ?? 0;
+  const interest = income.interest ?? 0;
+  const otherIncome = income.otherIncome ?? 0;
+
+  const propertyRentalIncome = sa105.property?.rentalIncome ?? 0;
+  const selfEmploymentProfit =
+    sa103.summary.netProfit > 0 ? sa103.summary.netProfit : 0;
+
+  const totalIncome =
+    employmentIncome +
+    pensions +
+    dividends +
+    interest +
+    otherIncome +
+    propertyRentalIncome +
+    selfEmploymentProfit;
+
+  const allowances = saSubmission?.allowances ?? 0;
+  const taxableIncome =
+    saSubmission?.taxable_income ?? Math.max(totalIncome - allowances, 0);
+
+  const estimatedTax = saSubmission?.tax_due ?? taxableIncome * 0.2;
+
+  return {
+    totalIncome,
+    allowances,
+    taxableIncome,
+    estimatedTax,
+    capitalGains: capitalGains.totalGains ?? 0,
   };
 }
 
