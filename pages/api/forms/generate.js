@@ -308,6 +308,20 @@ const CAPITAL_ALLOWANCE_RATES = {
 };
 
 /* -------------------------------------------------------------------------- */
+/*                         CT600A / DLA CONFIG                                */
+/* -------------------------------------------------------------------------- */
+
+const DLA_MOVEMENT_ACCOUNTS = [
+  "Cash Withdrawals",
+  "Director Payments (Disallowable)",
+  "Director Personal Expenses",
+  "Director Loan – Drawings",
+];
+
+const DLA_INTEREST_INCOME_ACCOUNT = "Director Loan – Interest Charged";
+const DLA_INTEREST_EXPENSE_ACCOUNT = "Director Loan – Interest Paid";
+
+/* -------------------------------------------------------------------------- */
 /*                         CT600 RATE / ASSOCIATED COS                        */
 /* -------------------------------------------------------------------------- */
 
@@ -381,13 +395,45 @@ async function buildCTFormData(
   let specialPoolAdditions = 0;
   let carsPoolAdditions = 0;
 
+  // Loans to participators (CT600A) tracking
+  let dlaLoansAdvanced = 0;
+  let dlaLoansRepaid = 0;
+  let dlaInterestCharged = 0;
+  let dlaInterestPaid = 0;
+
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
       const accountName =
         line.chart_of_account_entries?.account_name || "";
       const amt = amountFromLine(line);
 
-      // 1. Ignore system accounts
+      // --- CT600A / DLA movements & interest (always tracked, even if ignored for CT P&L) ---
+
+      if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
+        if (amt > 0) {
+          // Debit to DLA-related asset account → loan advanced / overdrawn
+          dlaLoansAdvanced += amt;
+        } else if (amt < 0) {
+          // Credit to DLA-related asset account → repayment / reduction
+          dlaLoansRepaid += Math.abs(amt);
+        }
+      }
+
+      if (accountName === DLA_INTEREST_INCOME_ACCOUNT) {
+        // Interest charged to director (income)
+        if (amt > 0) {
+          dlaInterestCharged += amt;
+        }
+      }
+
+      if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT) {
+        // Interest paid on director loan (expense)
+        if (amt > 0) {
+          dlaInterestPaid += amt;
+        }
+      }
+
+      // 1. Ignore system accounts for CT profit computation
       if (CT_MAP.ignore.includes(accountName)) return;
 
       // 2. Trading revenue (Sales + Other Income)
@@ -507,6 +553,10 @@ async function buildCTFormData(
   const paymentsMade = sumBy(ctPayments || [], "amount");
   const balanceDue = corpTaxDue - paymentsMade;
 
+  // Derived total loans to participators from journals if not explicitly stored
+  const derivedTotalLoans =
+    dlaLoansAdvanced - dlaLoansRepaid;
+
   return {
     summary: {
       formCode,
@@ -580,7 +630,13 @@ async function buildCTFormData(
     },
     loansToParticipators: {
       totalLoans:
-        corpSubmission?.loans_to_participators || 0,
+        corpSubmission?.loans_to_participators != null
+          ? corpSubmission.loans_to_participators
+          : derivedTotalLoans,
+      loansAdvanced: dlaLoansAdvanced,
+      loansRepaid: dlaLoansRepaid,
+      interestCharged: dlaInterestCharged,
+      interestPaid: dlaInterestPaid,
     },
     payments: {
       paymentsMade,
@@ -591,6 +647,7 @@ async function buildCTFormData(
     },
   };
 }
+
 
 
 
