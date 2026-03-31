@@ -261,6 +261,52 @@ const CAPITAL_ALLOWANCE_ACCOUNTS = [
   "Structural Works",
 ];
 
+const CAPITAL_ALLOWANCE_POOLS = {
+  // Main pool
+  "Plant & Machinery": "main",
+  "Machinery": "main",
+  "Equipment": "main",
+  "Tools & Equipment": "main",
+  "Office Equipment": "main",
+  "Fixtures & Fittings": "main",
+  "Furniture": "main",
+  "Computer Equipment": "main",
+  "IT Equipment": "main",
+  "Servers": "main",
+  "Laptops": "main",
+  "Desktops": "main",
+  "Printers": "main",
+  "CCTV Systems": "main",
+  "Security Systems": "main",
+  "Warehouse Equipment": "main",
+  "Construction Equipment": "main",
+  "Power Tools": "main",
+  "Hand Tools": "main",
+  "Workshop Equipment": "main",
+
+  // Special rate pool
+  "Integral Features": "special",
+  "Electrical Systems": "special",
+  "Cold Water Systems": "special",
+  "Hot Water Systems": "special",
+  "Thermal Insulation": "special",
+  "Solar Panels": "special",
+  "Lift Systems": "special",
+  "Escalators": "special",
+  "Moving Walkways": "special",
+
+  // Cars pool
+  "Cars": "cars",
+  "Motor Vehicles": "cars",
+  "Company Car": "cars",
+};
+
+const CAPITAL_ALLOWANCE_RATES = {
+  main: 0.18,
+  special: 0.06,
+  cars: 0.18, // refine by CO₂ later if needed
+};
+
 /* -------------------------------------------------------------------------- */
 /*                         CT600 RATE / ASSOCIATED COS                        */
 /* -------------------------------------------------------------------------- */
@@ -328,7 +374,12 @@ async function buildCTFormData(
   let nonTradingIncome = 0;      // Asset sales, grants, refunds, etc.
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
-  let capitalAllowances = 0;     // v1: 100% AIA on qualifying assets
+
+  // Capital allowance tracking
+  let capitalAllowances = 0;
+  let mainPoolAdditions = 0;
+  let specialPoolAdditions = 0;
+  let carsPoolAdditions = 0;
 
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
@@ -351,10 +402,13 @@ async function buildCTFormData(
         return;
       }
 
-      // 4. Capital allowances (qualifying asset purchases)
-      if (CAPITAL_ALLOWANCE_ACCOUNTS.includes(accountName)) {
-        // v1: treat full debit as 100% AIA
-        capitalAllowances += Math.max(amt, 0);
+      // 4. Capital allowances (qualifying asset purchases → pools)
+      const pool = CAPITAL_ALLOWANCE_POOLS[accountName];
+      if (pool) {
+        const debit = Math.max(amt, 0);
+        if (pool === "main") mainPoolAdditions += debit;
+        if (pool === "special") specialPoolAdditions += debit;
+        if (pool === "cars") carsPoolAdditions += debit;
         return;
       }
 
@@ -375,13 +429,42 @@ async function buildCTFormData(
     });
   });
 
-  // Engine profit (before manual tax adjustments)
-  const computedProfit =
+  // Capital allowance pools from DB
+  const mainPoolBF = corpSubmission?.ca_main_pool_bf || 0;
+  const specialPoolBF = corpSubmission?.ca_special_pool_bf || 0;
+  const carsPoolBF = corpSubmission?.ca_cars_pool_bf || 0;
+  const aiaClaimed = corpSubmission?.ca_aia_claimed || 0;
+
+  const mainPoolBeforeWDA = mainPoolBF + mainPoolAdditions;
+  const specialPoolBeforeWDA = specialPoolBF + specialPoolAdditions;
+  const carsPoolBeforeWDA = carsPoolBF + carsPoolAdditions;
+
+  const mainWDA =
+    mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
+  const specialWDA =
+    specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
+  const carsWDA =
+    carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
+
+  const totalCapitalAllowances =
+    aiaClaimed + mainWDA + specialWDA + carsWDA;
+
+  const mainPoolCF = mainPoolBeforeWDA - mainWDA;
+  const specialPoolCF = specialPoolBeforeWDA - specialWDA;
+  const carsPoolCF = carsPoolBeforeWDA - carsWDA;
+
+  capitalAllowances = totalCapitalAllowances;
+
+  // Engine profit BEFORE tax capital allowances
+  const computedProfitBeforeCA =
     turnover +
     nonTradingIncome -
     allowableExpenses -
-    disallowableExpenses -
-    capitalAllowances;
+    disallowableExpenses;
+
+  // Apply tax capital allowances
+  const computedProfit =
+    computedProfitBeforeCA - capitalAllowances;
 
   // Base profit (can be overridden by corpSubmission)
   const baseProfit =
@@ -434,7 +517,7 @@ async function buildCTFormData(
       turnover,
       nonTradingIncome,
       expenses: allowableExpenses + disallowableExpenses,
-      capitalAllowances,
+      capitalAllowances: totalCapitalAllowances,
       profitBeforeTax: baseProfit,
       corpTaxDue,
       paymentsMade,
@@ -445,7 +528,7 @@ async function buildCTFormData(
       nonTradingIncome,
       allowableExpenses,
       disallowableExpenses,
-      capitalAllowances,
+      capitalAllowances: totalCapitalAllowances,
       adjustedProfit: baseProfit,
       taxableProfit,
       lossCarryback,
@@ -457,7 +540,26 @@ async function buildCTFormData(
       taxDue: corpTaxDue,
     },
     capitalAllowances: {
-      totalCapitalAllowances: capitalAllowances,
+      totalCapitalAllowances,
+      aiaClaimed,
+      mainPool: {
+        broughtForward: mainPoolBF,
+        additions: mainPoolAdditions,
+        wda: mainWDA,
+        carriedForward: mainPoolCF,
+      },
+      specialPool: {
+        broughtForward: specialPoolBF,
+        additions: specialPoolAdditions,
+        wda: specialWDA,
+        carriedForward: specialPoolCF,
+      },
+      carsPool: {
+        broughtForward: carsPoolBF,
+        additions: carsPoolAdditions,
+        wda: carsWDA,
+        carriedForward: carsPoolCF,
+      },
     },
     losses: {
       currentPeriodLoss,
@@ -489,6 +591,7 @@ async function buildCTFormData(
     },
   };
 }
+
 
 
 
