@@ -224,57 +224,58 @@ async function buildCTFormData(
   // CT is journal‑driven, filtered by CT toggle on transactions
   const ctJournals = await loadCTJournals(clientId, periodStart, periodEnd);
 
-  let turnover = 0;
+  let turnover = 0;              // Trading income only (Sales + Other Income)
+  let nonTradingIncome = 0;      // Asset sales, grants, refunds, etc.
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
 
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
       const accountName =
-        (line.chart_of_account_entries &&
-          line.chart_of_account_entries.account_name) ||
-        "";
-      const accountType =
-        (line.chart_of_account_entries &&
-          line.chart_of_account_entries.account_type) ||
-        null;
+        line.chart_of_account_entries?.account_name || "";
       const amt = amountFromLine(line);
 
-      if (CT_MAP.ignore.includes(accountName)) {
-        return;
-      }
+      // 1. Ignore system accounts
+      if (CT_MAP.ignore.includes(accountName)) return;
 
+      // 2. Trading revenue (Sales + Other Income)
       if (CT_MAP.revenue.includes(accountName)) {
         turnover += amt;
         return;
       }
 
+      // 3. Non‑trading income (Asset Sale Proceeds, Grants, Refunds)
+      if (CT_MAP.other_income.includes(accountName)) {
+        nonTradingIncome += amt;
+        return;
+      }
+
+      // 4. Allowable expenses
       if (CT_MAP.allowable.includes(accountName)) {
         allowableExpenses += Math.max(amt, 0);
         return;
       }
 
+      // 5. Disallowable expenses
       if (CT_MAP.disallowable.includes(accountName)) {
         disallowableExpenses += Math.max(amt, 0);
         return;
       }
 
-      if (CT_MAP.other_income.includes(accountName)) {
-        turnover += amt;
-        return;
-      }
-
-      if (accountType === "EXPENSE") {
-        allowableExpenses += Math.max(amt, 0);
-      }
+      // 6. Everything else is ignored for CT
+      return;
     });
   });
 
+  // Final CT profit (aligned with unified engine)
   const computedProfit =
-    turnover - allowableExpenses + disallowableExpenses;
+    turnover +
+    nonTradingIncome -
+    allowableExpenses -
+    disallowableExpenses;
 
   const profitBeforeTax =
-    (corpSubmission && corpSubmission.profit_before_tax) != null
+    corpSubmission?.profit_before_tax != null
       ? corpSubmission.profit_before_tax
       : computedProfit;
 
@@ -282,12 +283,12 @@ async function buildCTFormData(
     profitBeforeTax < 0 ? Math.abs(profitBeforeTax) : 0;
 
   const taxRate =
-    (corpSubmission && corpSubmission.corp_tax_rate) != null
+    corpSubmission?.corp_tax_rate != null
       ? corpSubmission.corp_tax_rate
       : 0.19;
 
   const corpTaxDue =
-    (corpSubmission && corpSubmission.corp_tax_due) != null
+    corpSubmission?.corp_tax_due != null
       ? corpSubmission.corp_tax_due
       : profitBeforeTax * taxRate;
 
@@ -302,6 +303,7 @@ async function buildCTFormData(
       periodStart,
       periodEnd,
       turnover,
+      nonTradingIncome,
       expenses: allowableExpenses + disallowableExpenses,
       profitBeforeTax,
       corpTaxDue,
@@ -310,6 +312,7 @@ async function buildCTFormData(
     },
     computations: {
       turnover,
+      nonTradingIncome,
       allowableExpenses,
       disallowableExpenses,
       adjustedProfit: profitBeforeTax,
@@ -319,34 +322,35 @@ async function buildCTFormData(
     },
     capitalAllowances: {
       totalCapitalAllowances:
-        (corpSubmission && corpSubmission.capital_allowances) || 0,
+        corpSubmission?.capital_allowances || 0,
     },
     losses: {
       currentPeriodLoss,
-      broughtForward: (corpSubmission && corpSubmission.loss_bf) || 0,
+      broughtForward: corpSubmission?.loss_bf || 0,
       carriedForward:
-        (corpSubmission && corpSubmission.loss_cf) || currentPeriodLoss,
+        corpSubmission?.loss_cf || currentPeriodLoss,
     },
     adjustments: {
       manualAdjustments:
-        (corpSubmission && corpSubmission.adjustments_total) || 0,
+        corpSubmission?.adjustments_total || 0,
     },
     rAndD: {
-      totalRAndD: (corpSubmission && corpSubmission.r_and_d_spend) || 0,
+      totalRAndD: corpSubmission?.r_and_d_spend || 0,
     },
     loansToParticipators: {
       totalLoans:
-        (corpSubmission && corpSubmission.loans_to_participators) || 0,
+        corpSubmission?.loans_to_participators || 0,
     },
     payments: {
       paymentsMade,
       balanceDue,
     },
     disclosures: {
-      notes: (corpSubmission && corpSubmission.notes) || null,
+      notes: corpSubmission?.notes || null,
     },
   };
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                                SA ENGINE                                   */
