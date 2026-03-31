@@ -322,6 +322,25 @@ const DLA_INTEREST_INCOME_ACCOUNT = "Director Loan – Interest Charged";
 const DLA_INTEREST_EXPENSE_ACCOUNT = "Director Loan – Interest Paid";
 
 /* -------------------------------------------------------------------------- */
+/*                         CT600L / R&D CONFIG                                */
+/* -------------------------------------------------------------------------- */
+
+const R_AND_D_SME_ACCOUNTS = [
+  "R&D Staff Costs",
+  "R&D Subcontractors",
+  "R&D Materials",
+  "R&D Software & Cloud",
+  "R&D Utilities & Overheads",
+  "R&D Prototypes & Testing",
+  "R&D Capitalised Costs",
+];
+
+const R_AND_D_GRANTS_ACCOUNT = "R&D Grants / Subsidies";
+
+const DEFAULT_R_AND_D_SME_MULTIPLIER = 0.86; // 86% uplift (example)
+const DEFAULT_R_AND_D_RDEC_RATE = 0.2; // 20% RDEC rate (example)
+
+/* -------------------------------------------------------------------------- */
 /*                         CT600 RATE / ASSOCIATED COS                        */
 /* -------------------------------------------------------------------------- */
 
@@ -401,6 +420,10 @@ async function buildCTFormData(
   let dlaInterestCharged = 0;
   let dlaInterestPaid = 0;
 
+  // R&D tracking (journal-driven)
+  let rAndDSmeSpend = 0;
+  let rAndDGrants = 0;
+
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
       const accountName =
@@ -431,6 +454,22 @@ async function buildCTFormData(
         if (amt > 0) {
           dlaInterestPaid += amt;
         }
+      }
+
+      // --- CT600L / R&D detection (journal-driven) ---
+
+      if (R_AND_D_SME_ACCOUNTS.includes(accountName)) {
+        if (amt > 0) {
+          rAndDSmeSpend += amt;
+        }
+        // still treated as allowable expense below
+      }
+
+      if (accountName === R_AND_D_GRANTS_ACCOUNT) {
+        if (amt > 0) {
+          rAndDGrants += amt;
+        }
+        // grants are non-trading income for CT, but we also track them for R&D
       }
 
       // 1. Ignore system accounts for CT profit computation
@@ -525,12 +564,79 @@ async function buildCTFormData(
   const lossCarryback = corpSubmission?.loss_carryback || 0;
   const groupRelief = corpSubmission?.group_relief || 0;
 
-  // R&D enhanced relief (CT600L)
-  const rAndDSpend = corpSubmission?.r_and_d_spend || 0;
-  const rAndDMultiplier = corpSubmission?.r_and_d_multiplier || 0;
-  const rAndDEnhancedRelief = rAndDSpend * rAndDMultiplier;
+  /* ---------------------------------------------------------------------- */
+  /*                         CT600L / R&D ENGINE                            */
+  /* ---------------------------------------------------------------------- */
 
-  // Taxable profit after adjustments
+  // Automatic SME multiplier (fallback to default if not set)
+  const autoRAndDMultiplier =
+    corpSubmission?.r_and_d_multiplier != null &&
+    corpSubmission.r_and_d_multiplier > 0
+      ? corpSubmission.r_and_d_multiplier
+      : DEFAULT_R_AND_D_SME_MULTIPLIER;
+
+  // Journal-driven R&D totals
+  const autoTotalRAndDSpend = rAndDSmeSpend;
+  const autoRAndDGrants = rAndDGrants;
+
+  // SME qualifying spend = R&D spend minus grants (cannot go below zero)
+  const autoSmeQualifyingSpend = Math.max(
+    autoTotalRAndDSpend - autoRAndDGrants,
+    0
+  );
+
+  const autoSmeEnhancedDeduction =
+    autoSmeQualifyingSpend * autoRAndDMultiplier;
+
+  // Simple RDEC: treat grants as RDEC-qualifying base
+  const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
+  const autoRdecCredit =
+    autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
+
+  // For now, we keep SME payable credit and surrendered loss at 0
+  // (can be extended later with full waterfall)
+  const autoSmePayableCredit = 0;
+  const autoSurrenderedLoss = 0;
+
+  // Manual override flags and values from corp_submissions
+  const overrideEnabled =
+    corpSubmission?.r_and_d_override_enabled || false;
+
+  const overrideSmeEnhancedDeduction =
+    corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
+
+  const overrideSmePayableCredit =
+    corpSubmission?.r_and_d_override_sme_payable_credit || 0;
+
+  const overrideRdecCredit =
+    corpSubmission?.r_and_d_override_rdec_credit || 0;
+
+  const overrideSurrenderedLoss =
+    corpSubmission?.r_and_d_override_surrendered_loss || 0;
+
+  // Final R&D values after considering overrides
+  const finalSmeEnhancedDeduction = overrideEnabled
+    ? overrideSmeEnhancedDeduction
+    : autoSmeEnhancedDeduction;
+
+  const finalSmePayableCredit = overrideEnabled
+    ? overrideSmePayableCredit
+    : autoSmePayableCredit;
+
+  const finalRdecCredit = overrideEnabled
+    ? overrideRdecCredit
+    : autoRdecCredit;
+
+  const finalSurrenderedLoss = overrideEnabled
+    ? overrideSurrenderedLoss
+    : autoSurrenderedLoss;
+
+  // For backward compatibility with existing fields
+  const rAndDSpend = autoTotalRAndDSpend;
+  const rAndDMultiplier = autoRAndDMultiplier;
+  const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
+
+  // Taxable profit after adjustments (R&D enhanced deduction only)
   const taxableProfit =
     baseProfit -
     lossCarryback -
@@ -627,6 +733,24 @@ async function buildCTFormData(
       totalRAndD: rAndDSpend,
       enhancedRelief: rAndDEnhancedRelief,
       multiplier: rAndDMultiplier,
+      sme: {
+        qualifyingSpend: autoSmeQualifyingSpend,
+        enhancedDeduction: finalSmeEnhancedDeduction,
+        payableCredit: finalSmePayableCredit,
+        surrenderedLoss: finalSurrenderedLoss,
+      },
+      rdec: {
+        qualifyingSpend: autoRdecQualifyingSpend,
+        credit: finalRdecCredit,
+      },
+      override: {
+        enabled: overrideEnabled,
+        smeEnhancedDeduction: overrideSmeEnhancedDeduction,
+        smePayableCredit: overrideSmePayableCredit,
+        rdecCredit: overrideRdecCredit,
+        surrenderedLoss: overrideSurrenderedLoss,
+      },
+      grants: autoRAndDGrants,
     },
     loansToParticipators: {
       totalLoans:
