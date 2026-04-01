@@ -23,6 +23,15 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
     dataType: "monetary",
     balanceType: "credit",
   },
+  {
+    id: "ct-computation-narrative",
+    taxonomyId: "hmrc-ct-2024",
+    internalKey: "ct.computation_narrative",
+    xbrlName: "uk-corp-tax:ComputationNarrative",
+    xbrlNamespace: "http://www.gov.uk/taxonomy/uk-corp-tax",
+    dataType: "textBlock",
+    balanceType: null,
+  },
 
   // ────────────────────────────────────────────────
   // ACCOUNTS — FRS102‑1A (2024)
@@ -165,7 +174,10 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
   },
 ];
 
-export function getConceptByInternalKey(taxonomyId: string, internalKey: string) {
+export function getConceptByInternalKey(
+  taxonomyId: string,
+  internalKey: string
+) {
   const concept = TAXONOMY_CONCEPT_MAP.find(
     (c) => c.taxonomyId === taxonomyId && c.internalKey === internalKey
   );
