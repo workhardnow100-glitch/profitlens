@@ -31,27 +31,50 @@ export default async function handler(req, res) {
       });
     }
 
-    // Path to submission envelope
-    const submissionPath = `hmrc/CT600_SUBMISSION_${clientId}_${periodEnd}.xml`;
+    // Paths to artefacts
+    const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
+    const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
 
-    // Download envelope
-    const submissionFile = await supabaseAdmin.storage
+    // FIX: detect accounts file dynamically
+    const { data: list } = await supabaseAdmin.storage
       .from("pdfs")
-      .download(submissionPath);
+      .list("ixbrl", { search: `ACCOUNTS_` });
 
-    if (!submissionFile.data) {
+    const accountsFileName = list?.find(f =>
+      f.name.includes(`${clientId}_${periodEnd}`)
+    )?.name;
+
+    if (!accountsFileName) {
       return res.status(500).json({
         success: false,
-        message: "Submission envelope not found.",
+        message: "Accounts iXBRL file not found.",
       });
     }
 
-    const envelopeXml = await submissionFile.data.text();
+    const accountsPath = `ixbrl/${accountsFileName}`;
+
+    // Download artefacts
+    const [ct600XmlFile, computationsFile, accountsFile] = await Promise.all([
+      supabaseAdmin.storage.from("pdfs").download(ct600XmlPath),
+      supabaseAdmin.storage.from("pdfs").download(computationsPath),
+      supabaseAdmin.storage.from("pdfs").download(accountsPath),
+    ]);
+
+    if (!ct600XmlFile.data || !computationsFile.data || !accountsFile.data) {
+      return res.status(500).json({
+        success: false,
+        message: "Missing one or more CT artefacts.",
+      });
+    }
+
+    const envelopeXml = await ct600XmlFile.data.text();
+    const computationsIxbrl = await computationsFile.data.text();
+    const accountsIxbrl = await accountsFile.data.text();
 
     // Send to HMRC gateway
     const response = await sendToHmrcGateway({
       xml: envelopeXml,
-      environment, // "test" or "live"
+      environment,
     });
 
     // Store HMRC response
