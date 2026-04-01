@@ -708,120 +708,128 @@ async function buildCTFormData(
   const ct600NRequired = niTradingFlag;
 
   return {
-    summary: {
-      formCode,
-      companyName: client.business_name || client.name,
-      tradingName: client.trading_name,
-      periodStart,
-      periodEnd,
-      turnover,
-      nonTradingIncome,
-      expenses: allowableExpenses + disallowableExpenses,
-      capitalAllowances: totalCapitalAllowances,
-      profitBeforeTax: baseProfit,
-      corpTaxDue,
-      paymentsMade,
-      balanceDue,
+  summary: {
+    formCode,
+    companyName: client?.business_name || client?.name || "",
+    tradingName: client?.trading_name || "",
+    periodStart,
+    periodEnd,
+    turnover,
+    nonTradingIncome,
+    expenses: allowableExpenses + disallowableExpenses,
+    capitalAllowances: totalCapitalAllowances,
+    profitBeforeTax: baseProfit,
+    corpTaxDue,
+    paymentsMade,
+    balanceDue,
+  },
+
+  computations: {
+    turnover,
+    nonTradingIncome,
+    allowableExpenses,
+    disallowableExpenses,
+    capitalAllowances: totalCapitalAllowances,
+    adjustedProfit: baseProfit,
+    taxableProfit,
+    lossCarryback,
+    groupRelief,
+    rAndDSpend,
+    rAndDMultiplier,
+    rAndDEnhancedRelief,
+    taxRate,
+    taxDue: corpTaxDue,
+  },
+
+  capitalAllowances: {
+    totalCapitalAllowances,
+    aiaClaimed,
+    mainPool: {
+      broughtForward: mainPoolBF,
+      additions: mainPoolAdditions,
+      wda: mainWDA,
+      carriedForward: mainPoolCF,
     },
-    computations: {
-      turnover,
-      nonTradingIncome,
-      allowableExpenses,
-      disallowableExpenses,
-      capitalAllowances: totalCapitalAllowances,
-      adjustedProfit: baseProfit,
-      taxableProfit,
-      lossCarryback,
-      groupRelief,
-      rAndDSpend,
-      rAndDMultiplier,
-      rAndDEnhancedRelief,
-      taxRate,
-      taxDue: corpTaxDue,
+    specialPool: {
+      broughtForward: specialPoolBF,
+      additions: specialPoolAdditions,
+      wda: specialWDA,
+      carriedForward: specialPoolCF,
     },
-    capitalAllowances: {
-      totalCapitalAllowances,
-      aiaClaimed,
-      mainPool: {
-        broughtForward: mainPoolBF,
-        additions: mainPoolAdditions,
-        wda: mainWDA,
-        carriedForward: mainPoolCF,
-      },
-      specialPool: {
-        broughtForward: specialPoolBF,
-        additions: specialPoolAdditions,
-        wda: specialWDA,
-        carriedForward: specialPoolCF,
-      },
-      carsPool: {
-        broughtForward: carsPoolBF,
-        additions: carsPoolAdditions,
-        wda: carsWDA,
-        carriedForward: carsPoolCF,
-      },
+    carsPool: {
+      broughtForward: carsPoolBF,
+      additions: carsPoolAdditions,
+      wda: carsWDA,
+      carriedForward: carsPoolCF,
     },
-    losses: {
-      currentPeriodLoss,
-      broughtForward: corpSubmission?.loss_bf || 0,
-      carriedForward:
-        corpSubmission?.loss_cf || currentPeriodLoss,
-      carryback: lossCarryback,
-      groupRelief,
+  },
+
+  losses: {
+    currentPeriodLoss,
+    broughtForward: corpSubmission?.loss_bf || 0,
+    carriedForward: corpSubmission?.loss_cf || currentPeriodLoss,
+    carryback: lossCarryback,
+    groupRelief,
+  },
+
+  adjustments: {
+    manualAdjustments: corpSubmission?.adjustments_total || 0,
+  },
+
+  rAndD: {
+    totalRAndD: rAndDSpend,
+    enhancedRelief: rAndDEnhancedRelief,
+    multiplier: rAndDMultiplier,
+    sme: {
+      qualifyingSpend: autoSmeQualifyingSpend,
+      enhancedDeduction: finalSmeEnhancedDeduction,
+      payableCredit: finalSmePayableCredit,
+      surrenderedLoss: finalSurrenderedLoss,
     },
-    adjustments: {
-      manualAdjustments:
-        corpSubmission?.adjustments_total || 0,
+    rdec: {
+      qualifyingSpend: autoRdecQualifyingSpend,
+      credit: finalRdecCredit,
     },
-    rAndD: {
-      totalRAndD: rAndDSpend,
-      enhancedRelief: rAndDEnhancedRelief,
-      multiplier: rAndDMultiplier,
-      sme: {
-        qualifyingSpend: autoSmeQualifyingSpend,
-        enhancedDeduction: finalSmeEnhancedDeduction,
-        payableCredit: finalSmePayableCredit,
-        surrenderedLoss: finalSurrenderedLoss,
-      },
-      rdec: {
-        qualifyingSpend: autoRdecQualifyingSpend,
-        credit: finalRdecCredit,
-      },
-      override: {
-        enabled: overrideEnabled,
-        smeEnhancedDeduction: overrideSmeEnhancedDeduction,
-        smePayableCredit: overrideSmePayableCredit,
-        rdecCredit: overrideRdecCredit,
-        surrenderedLoss: overrideSurrenderedLoss,
-      },
-      grants: autoRAndDGrants,
+    override: {
+      enabled: overrideEnabled,
+      smeEnhancedDeduction: overrideSmeEnhancedDeduction,
+      smePayableCredit: overrideSmePayableCredit,
+      rdecCredit: overrideRdecCredit,
+      surrenderedLoss: overrideSurrenderedLoss,
     },
-    loansToParticipators: {
-      totalLoans:
-        corpSubmission?.loans_to_participators != null
-          ? corpSubmission.loans_to_participators
-          : derivedTotalLoans,
-      loansAdvanced: dlaLoansAdvanced,
-      loansRepaid: dlaLoansRepaid,
-      interestCharged: dlaInterestCharged,
-      interestPaid: dlaInterestPaid,
-    },
-    payments: {
-      paymentsMade,
-      balanceDue,
-    },
-    disclosures: {
-      notes: corpSubmission?.notes || null,
-    },
-    supplements: {
-      ct600ARequired,
-      ct600JRequired,
-      ct600LRequired,
-      ct600FRequired,
-      ct600MRequired,
-      ct600NRequired,
-    },
-  };
+    grants: autoRAndDGrants,
+  },
+
+  loansToParticipators: {
+    totalLoans:
+      corpSubmission?.loans_to_participators != null
+        ? corpSubmission.loans_to_participators
+        : derivedTotalLoans,
+    loansAdvanced: dlaLoansAdvanced,
+    loansRepaid: dlaLoansRepaid,
+    interestCharged: dlaInterestCharged,
+    interestPaid: dlaInterestPaid,
+  },
+
+  payments: {
+    paymentsMade,
+    balanceDue,
+  },
+
+  disclosures: {
+    notes: corpSubmission?.notes || null,
+  },
+
+  supplements: {
+    ct600ARequired,
+    ct600JRequired,
+    ct600LRequired,
+    ct600FRequired,
+    ct600MRequired,
+    ct600NRequired,
+  },
+};
+
 }
 
 /* -------------------------------------------------------------------------- */
@@ -869,35 +877,28 @@ async function buildSAFormData(
     capitalGains,
   });
 
-  const class2NIC =
-    (saSubmission && saSubmission.class2_nic) != null
-      ? saSubmission.class2_nic
-      : 0;
-  const class4NIC =
-    (saSubmission && saSubmission.class4_nic) != null
-      ? saSubmission.class4_nic
-      : 0;
+  const class2NIC = saSubmission?.class2_nic || 0;
+  const class4NIC = saSubmission?.class4_nic || 0;
 
   const totalLiability =
     (taxCalculation.estimatedTax || 0) + class2NIC + class4NIC;
 
-  const paymentsOnAccount =
-    (saSubmission && saSubmission.payments_on_account) || 0;
+  const paymentsOnAccount = saSubmission?.payments_on_account || 0;
   const balanceDue = totalLiability - paymentsMade;
 
   const summary = {
     formCode,
-    taxpayerName: client.name,
-    utr: client.utr_number,
-    address: client.address,
+    taxpayerName: client?.name || "",
+    utr: client?.utr_number || "",
+    address: client?.address || client?.registered_address || "",
     periodStart,
     periodEnd,
-    turnover: sa103.summary.turnover,
+    turnover: sa103?.summary?.turnover || 0,
     expenses:
-      sa103.summary.allowableExpenses +
-      sa103.summary.disallowableExpenses,
-    profit: sa103.summary.netProfit,
-    estimatedTax: taxCalculation.estimatedTax,
+      (sa103?.summary?.allowableExpenses || 0) +
+      (sa103?.summary?.disallowableExpenses || 0),
+    profit: sa103?.summary?.netProfit || 0,
+    estimatedTax: taxCalculation.estimatedTax || 0,
     class2NIC,
     class4NIC,
     paymentsMade,
@@ -925,7 +926,7 @@ async function buildSAFormData(
       balanceDue,
     },
     disclosures: {
-      notes: (saSubmission && saSubmission.notes) || null,
+      notes: saSubmission?.notes || null,
     },
   };
 }
@@ -1122,33 +1123,33 @@ function buildSA103FromJournals(saSubmission, client, journals) {
       : 0;
 
   return {
-    summary: {
-      businessName: client.trading_name || client.name,
-      turnover,
-      allowableExpenses,
-      disallowableExpenses,
-      netProfit: rawProfit,
-    },
-    turnover: { totalTurnover: turnover },
-    allowableExpenses: { totalAllowableExpenses: allowableExpenses },
-    disallowableExpenses: { totalDisallowableExpenses: disallowableExpenses },
-    capitalAllowances: {
-      totalCapitalAllowances: capitalAllowances,
-    },
-    simplifiedExpenses: {
-      usingSimplifiedExpenses,
-    },
-    adjustments: {
-      adjustmentsTotal: adjustments,
-    },
-    losses: {
-      currentPeriodLoss,
-      broughtForward: lossBF,
-      carriedForward: lossCF,
-    },
-    class2NIC: { class2NIC },
-    class4NIC: { class4NIC },
-  };
+  summary: {
+    businessName: client?.trading_name || client?.name || "",
+    turnover,
+    allowableExpenses,
+    disallowableExpenses,
+    netProfit: rawProfit,
+  },
+  turnover: { totalTurnover: turnover },
+  allowableExpenses: { totalAllowableExpenses: allowableExpenses },
+  disallowableExpenses: { totalDisallowableExpenses: disallowableExpenses },
+  capitalAllowances: {
+    totalCapitalAllowances: capitalAllowances,
+  },
+  simplifiedExpenses: {
+    usingSimplifiedExpenses,
+  },
+  adjustments: {
+    adjustmentsTotal: adjustments,
+  },
+  losses: {
+    currentPeriodLoss,
+    broughtForward: lossBF,
+    carriedForward: lossCF,
+  },
+  class2NIC: { class2NIC },
+  class4NIC: { class4NIC },
+};
 }
 
 /* ----------------------------- SA105 (Property) --------------------------- */
@@ -1255,11 +1256,11 @@ function buildSACapitalGains(saSubmission) {
 /* --------------------------- Tax Calculation (SA) ------------------------- */
 
 function buildSATaxCalculation(params) {
-  const saSubmission = params.saSubmission;
-  const sa103 = params.sa103;
-  const sa105 = params.sa105;
-  const income = params.income;
-  const capitalGains = params.capitalGains;
+  const saSubmission = params.saSubmission || null;
+  const sa103 = params.sa103 || null;
+  const sa105 = params.sa105 || null;
+  const income = params.income || {};
+  const capitalGains = params.capitalGains || {};
 
   const employmentIncome = income.employmentIncome || 0;
   const pensions = income.pensions || 0;
@@ -1268,9 +1269,11 @@ function buildSATaxCalculation(params) {
   const otherIncome = income.otherIncome || 0;
 
   const propertyRentalIncome =
-    (sa105.property && sa105.property.rentalIncome) || 0;
-  const selfEmploymentProfit =
-    sa103.summary.netProfit > 0 ? sa103.summary.netProfit : 0;
+    (sa105 && sa105.property && sa105.property.rentalIncome) || 0;
+
+  const seNetProfit =
+    (sa103 && sa103.summary && sa103.summary.netProfit) || 0;
+  const selfEmploymentProfit = seNetProfit > 0 ? seNetProfit : 0;
 
   const totalIncome =
     employmentIncome +
@@ -1359,46 +1362,46 @@ async function buildCISFormData(
       ? cisSubmission.net_cis
       : netCisComputed;
 
+
   return {
-    summary: {
-      formCode,
-      contractorName: client.business_name || client.name,
-      utr: client.utr_number,
-      periodStart,
-      periodEnd,
-      cisSuffered: cisSufferedFromTx,
-      paymentsMade,
-      adjustmentsTotal,
-      netCis,
-    },
+  summary: {
+    formCode,
+    contractorName: client?.business_name || client?.name || "",
+    utr: client?.utr_number || "",
+    periodStart,
+    periodEnd,
+    cisSuffered: cisSufferedFromTx,
+    paymentsMade,
+    adjustmentsTotal,
+    netCis,
+  },
 
-    payments: {
-      totalPaymentsToSubcontractors:
-        (cisSubmission && cisSubmission.total_payments) || paymentsMade,
-    },
+  payments: {
+    totalPaymentsToSubcontractors:
+      cisSubmission?.total_payments || paymentsMade,
+  },
 
-    deductions: {
-      totalCisDeducted:
-        (cisSubmission && cisSubmission.total_cis_deducted) ||
-        cisSufferedFromTx,
-    },
+  deductions: {
+    totalCisDeducted:
+      cisSubmission?.total_cis_deducted || cisSufferedFromTx,
+  },
 
-    cisSuffered: {
-      cisSufferedFromTransactions: cisSufferedFromTx,
-    },
+  cisSuffered: {
+    cisSufferedFromTransactions: cisSufferedFromTx,
+  },
 
-    adjustments: {
-      totalAdjustments: adjustmentsTotal,
-    },
+  adjustments: {
+    totalAdjustments: adjustmentsTotal,
+  },
 
-    netCis: {
-      netCis,
-    },
+  netCis: {
+    netCis,
+  },
 
-    disclosures: {
-      notes: (cisSubmission && cisSubmission.notes) || null,
-    },
-  };
+  disclosures: {
+    notes: cisSubmission?.notes || null,
+  },
+};
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1406,322 +1409,256 @@ async function buildCISFormData(
 /* -------------------------------------------------------------------------- */
 
 async function generatePdfForForm(params) {
-  const formCode = params.formCode;
-  const client = params.client;
-  const clientId = params.clientId;
-  const periodStart = params.periodStart;
-  const periodEnd = params.periodEnd;
-  const year = params.year;
-  const taxYear = params.taxYear;
-  const filename = params.filename;
-  const createdBy = params.createdBy;
-  const formData = params.formData;
+  const {
+    formCode,
+    client,
+    clientId,
+    periodStart,
+    periodEnd,
+    year,
+    taxYear,
+    filename,
+    createdBy,
+    formData,
+  } = params;
 
   const clientDetails = {
-    name: client.name,
-    trading_name: client.trading_name,
-    business_type: client.business_type,
-    utr_number: client.utr_number,
-    ni_number: client.ni_number,
-    address: client.address || client.registered_address,
-    postcode: client.postcode,
-    phone: client.phone,
-    email: client.email,
+    name: client?.name || "",
+    trading_name: client?.trading_name || "",
+    business_type: client?.business_type || "",
+    utr_number: client?.utr_number || "",
+    ni_number: client?.ni_number || "",
+    address: client?.address || client?.registered_address || "",
+    postcode: client?.postcode || "",
+    phone: client?.phone || "",
+    email: client?.email || "",
   };
 
   const companyDetails = {
-    business_name: client.business_name || client.name,
-    trading_name: client.trading_name,
-    company_number: client.company_number,
-    utr_number: client.utr_number,
-    registered_address: client.registered_address || client.address,
-    postcode: client.postcode,
-    phone: client.phone,
-    email: client.email,
-    website: client.website,
-    contact_person: client.contact_person,
-    contact_phone: client.contact_phone,
-    contact_email: client.contact_email,
+    business_name: client?.business_name || client?.name || "",
+    trading_name: client?.trading_name || "",
+    company_number: client?.company_number || "",
+    utr_number: client?.utr_number || "",
+    registered_address: client?.registered_address || client?.address || "",
+    postcode: client?.postcode || "",
+    phone: client?.phone || "",
+    email: client?.email || "",
+    website: client?.website || "",
+    contact_person: client?.contact_person || "",
+    contact_phone: client?.contact_phone || "",
+    contact_email: client?.contact_email || "",
   };
 
   // ---------------- CT600 FAMILY ----------------
 
-  if (formCode === "CT600") {
-    return await generateCt600Pdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      ctSummary: formData.summary,
-      computations: formData.computations,
-      capitalAllowances: formData.capitalAllowances,
-      losses: formData.losses,
-      adjustments: formData.adjustments,
-      rAndD: formData.rAndD,
-      loansToParticipators: formData.loansToParticipators,
-      payments: formData.payments,
-      disclosures: formData.disclosures,
-      supplements: formData.supplements || {},
-    });
-  }
+ if (formCode === "CT600M") {
+  return await generateCt600mPdf({
+    clientId,
+    year,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    companyDetails,
+    royalties: formData.royalties || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  if (formCode === "CT600A") {
-    return await generateCt600aPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      loansToParticipators: formData.loansToParticipators,
-      ctSummary: formData.summary,
-      disclosures: formData.disclosures,
-    });
-  }
+if (formCode === "CT600N") {
+  return await generateCt600nPdf({
+    clientId,
+    year,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    companyDetails,
+    niRate: formData.niRate || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  if (formCode === "CT600J") {
-    return await generateCt600jPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      ctSummary: formData.summary,
-      computations: formData.computations,
-      disclosures: formData.disclosures,
-    });
-  }
+// ---------------- SA FAMILY ----------------
 
-  if (formCode === "CT600L") {
-    return await generateCt600lPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      rAndD: formData.rAndD,
-      ctSummary: formData.summary,
-      disclosures: formData.disclosures,
-    });
-  }
+if (formCode === "SA100") {
+  return await generateSa100Pdf({
+    clientId,
+    taxYear,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    clientDetails,
+    saSummary: formData.summary || {},
+    income: formData.income || {},
+    employment: {},
+    pensions: {},
+    selfEmployment: (formData.sa103 && formData.sa103.summary) || {},
+    property: (formData.sa105 && formData.sa105.property) || {},
+    dividends: {
+      dividends:
+        (formData.income && formData.income.dividends) || 0,
+    },
+    interest: {
+      interest:
+        (formData.income && formData.income.interest) || 0,
+    },
+    capitalGains: formData.capitalGains || {},
+    adjustments:
+      (formData.sa103 && formData.sa103.adjustments) || {},
+    taxCalculation: formData.taxCalculation || {},
+    payments: formData.payments || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  if (formCode === "CT600F") {
-    return await generateCt600fPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      ctSummary: formData.summary,
-      computations: formData.computations,
-      disclosures: formData.disclosures,
-    });
-  }
+if (formCode === "SA103") {
+  return await generateSa103Pdf({
+    clientId,
+    taxYear,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    clientDetails,
+    sa103Summary: formData.sa103 && formData.sa103.summary,
+    turnover: formData.sa103 && formData.sa103.turnover,
+    allowableExpenses:
+      formData.sa103 && formData.sa103.allowableExpenses,
+    disallowableExpenses:
+      formData.sa103 && formData.sa103.disallowableExpenses,
+    capitalAllowances:
+      formData.sa103 && formData.sa103.capitalAllowances,
+    simplifiedExpenses:
+      formData.sa103 && formData.sa103.simplifiedExpenses,
+    adjustments: formData.sa103 && formData.sa103.adjustments,
+    losses: formData.sa103 && formData.sa103.losses,
+    class2NIC: formData.sa103 && formData.sa103.class2NIC,
+    class4NIC: formData.sa103 && formData.sa103.class4NIC,
+    payments: formData.payments || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  if (formCode === "CT600M") {
-    return await generateCt600mPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      ctSummary: formData.summary,
-      computations: formData.computations,
-      disclosures: formData.disclosures,
-    });
-  }
+if (formCode === "SA105") {
+  const property = (formData.sa105 && formData.sa105.property) || {};
+  const propertyProfit =
+    property.propertyProfit != null ? property.propertyProfit : 0;
 
-  if (formCode === "CT600N") {
-    return await generateCt600nPdf({
-      clientId,
-      year,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      companyDetails,
-      ctSummary: formData.summary,
-      computations: formData.computations,
-      disclosures: formData.disclosures,
-    });
-  }
+  return await generateSa105Pdf({
+    clientId,
+    taxYear,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    clientDetails,
+    sa105Summary: {
+      ...(formData.summary || {}),
+      propertyProfit,
+    },
+    rentalIncome: {
+      totalRentalIncome: property.rentalIncome || 0,
+    },
+    furnishedHolidayLettings: {},
+    rentARoom: {},
+    allowableExpenses: {
+      totalAllowableExpenses: property.propertyExpenses || 0,
+    },
+    disallowableExpenses: {},
+    mortgageInterest: {},
+    capitalAllowances: {},
+    propertyLosses: {
+      totalPropertyLosses:
+        propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
+    },
+    jointOwnership: {},
+    adjustments:
+      (formData.sa103 && formData.sa103.adjustments) || {},
+    payments: formData.payments || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  // ---------------- SA FAMILY ----------------
+if (formCode === "SA110") {
+  const tc = formData.taxCalculation || {};
+  const pay = formData.payments || {};
 
-  if (formCode === "SA100") {
-    return await generateSa100Pdf({
-      clientId,
-      taxYear,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      clientDetails,
-      saSummary: formData.summary,
-      income: formData.income,
-      employment: {},
-      pensions: {},
-      selfEmployment: (formData.sa103 && formData.sa103.summary) || {},
-      property: (formData.sa105 && formData.sa105.property) || {},
-      dividends: { dividends: (formData.income && formData.income.dividends) || 0 },
-      interest: { interest: (formData.income && formData.income.interest) || 0 },
-      capitalGains: formData.capitalGains,
-      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
-      taxCalculation: formData.taxCalculation,
-      payments: formData.payments,
-      disclosures: formData.disclosures,
-    });
-  }
+  return await generateSa110Pdf({
+    clientId,
+    taxYear,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    clientDetails,
+    sa110Summary: formData.summary || {},
+    totalIncome: { totalIncome: tc.totalIncome || 0 },
+    adjustments:
+      (formData.sa103 && formData.sa103.adjustments) || {},
+    allowances: { allowances: tc.allowances || 0 },
+    taxableIncome: { taxableIncome: tc.taxableIncome || 0 },
+    taxBands: formData.taxBands || {},
+    taxDue: { taxDue: tc.estimatedTax || 0 },
+    nicClass2: { class2NIC: tc.class2NIC || 0 },
+    nicClass4: { class4NIC: tc.class4NIC || 0 },
+    paymentsOnAccount: {
+      paymentsOnAccount: pay.paymentsOnAccount || 0,
+    },
+    balancingPayments: {
+      balancingPayments: pay.balanceDue || 0,
+    },
+    refunds: {},
+    finalLiability: {
+      totalLiability: tc.totalLiability || 0,
+    },
+    disclosures: formData.disclosures || {},
+  });
+}
 
-  if (formCode === "SA103") {
-    return await generateSa103Pdf({
-      clientId,
-      taxYear,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      clientDetails,
-      sa103Summary: formData.sa103 && formData.sa103.summary,
-      turnover: formData.sa103 && formData.sa103.turnover,
-      allowableExpenses:
-        formData.sa103 && formData.sa103.allowableExpenses,
-      disallowableExpenses:
-        formData.sa103 && formData.sa103.disallowableExpenses,
-      capitalAllowances:
-        formData.sa103 && formData.sa103.capitalAllowances,
-      simplifiedExpenses:
-        formData.sa103 && formData.sa103.simplifiedExpenses,
-      adjustments: formData.sa103 && formData.sa103.adjustments,
-      losses: formData.sa103 && formData.sa103.losses,
-      class2NIC: formData.sa103 && formData.sa103.class2NIC,
-      class4NIC: formData.sa103 && formData.sa103.class4NIC,
-      payments: formData.payments,
-      disclosures: formData.disclosures,
-    });
-  }
+// ---------------- CIS FAMILY ----------------
 
-  if (formCode === "SA105") {
-    const property = (formData.sa105 && formData.sa105.property) || {};
-    const propertyProfit =
-      property.propertyProfit != null ? property.propertyProfit : 0;
+if (formCode === "CIS300") {
+  return await generateCis300Pdf({
+    clientId,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    clientDetails: companyDetails,
+    cisSummary: formData.summary || {},
+    subcontractors: [],
+    payments: formData.payments || {},
+    deductions: formData.deductions || {},
+    cisSuffered: formData.cisSuffered || {},
+    adjustments: formData.adjustments || {},
+    netCis: formData.netCis || {},
+    disclosures: formData.disclosures || {},
+  });
+}
 
-    return await generateSa105Pdf({
-      clientId,
-      taxYear,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      clientDetails,
-      sa105Summary: {
-        ...(formData.summary || {}),
-        propertyProfit,
-      },
-      rentalIncome: { totalRentalIncome: property.rentalIncome || 0 },
-      furnishedHolidayLettings: {},
-      rentARoom: {},
-      allowableExpenses: {
-        totalAllowableExpenses: property.propertyExpenses || 0,
-      },
-      disallowableExpenses: {},
-      mortgageInterest: {},
-      capitalAllowances: {},
-      propertyLosses: {
-        totalPropertyLosses:
-          propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
-      },
-      jointOwnership: {},
-      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
-      payments: formData.payments,
-      disclosures: formData.disclosures,
-    });
-  }
+if (formCode === "CIS_STATEMENT") {
+  return await generateCisStatementPdf({
+    clientId,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    contractorDetails: companyDetails,
+    subcontractorDetails: {},
+    paymentDetails: {},
+    materials: {},
+    cisDeducted: {},
+    verification: {},
+    adjustments: {},
+    netPayment: {},
+    disclosures: {},
+  });
+}
 
-  if (formCode === "SA110") {
-    const tc = formData.taxCalculation || {};
-    const pay = formData.payments || {};
+throw new Error("No PDF template configured for formCode: " + formCode);
 
-    return await generateSa110Pdf({
-      clientId,
-      taxYear,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      clientDetails,
-      sa110Summary: formData.summary,
-      totalIncome: { totalIncome: tc.totalIncome || 0 },
-      adjustments: (formData.sa103 && formData.sa103.adjustments) || {},
-      allowances: { allowances: tc.allowances || 0 },
-      taxableIncome: { taxableIncome: tc.taxableIncome || 0 },
-      taxBands: formData.taxBands || {},
-      taxDue: { taxDue: tc.estimatedTax || 0 },
-      nicClass2: { class2NIC: tc.class2NIC || 0 },
-      nicClass4: { class4NIC: tc.class4NIC || 0 },
-      paymentsOnAccount: {
-        paymentsOnAccount: pay.paymentsOnAccount || 0,
-      },
-      balancingPayments: { balancingPayments: pay.balanceDue || 0 },
-      refunds: {},
-      finalLiability: { totalLiability: tc.totalLiability || 0 },
-      disclosures: formData.disclosures,
-    });
-  }
-
-  // ---------------- CIS FAMILY ----------------
-
-  if (formCode === "CIS300") {
-    return await generateCis300Pdf({
-      clientId,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      clientDetails: companyDetails,
-      cisSummary: formData.summary,
-      subcontractors: [],
-      payments: formData.payments,
-      deductions: formData.deductions,
-      cisSuffered: formData.cisSuffered,
-      adjustments: formData.adjustments,
-      netCis: formData.netCis,
-      disclosures: formData.disclosures,
-    });
-  }
-
-  if (formCode === "CIS_STATEMENT") {
-    return await generateCisStatementPdf({
-      clientId,
-      periodStart,
-      periodEnd,
-      filename,
-      createdBy,
-      contractorDetails: companyDetails,
-      subcontractorDetails: {},
-      paymentDetails: {},
-      materials: {},
-      cisDeducted: {},
-      verification: {},
-      adjustments: {},
-      netPayment: {},
-      disclosures: {},
-    });
-  }
-
-  throw new Error("No PDF template configured for formCode: " + formCode);
 }
 
 /* -------------------------------------------------------------------------- */
