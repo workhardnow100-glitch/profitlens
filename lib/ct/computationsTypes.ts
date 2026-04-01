@@ -1,5 +1,3 @@
-// lib/ct/computationsTypes.ts
-
 export interface CtComputations {
   periodStart: string;
   periodEnd: string;
@@ -9,41 +7,68 @@ export interface CtComputations {
   corporationTaxDue: number;
 
   // 1. Summary
-  summary?: any;
+  summary?: {
+    turnover?: number;
+    nonTradingIncome?: number;
+    expenses?: number;
+    capitalAllowances?: number;
+    profitBeforeTax?: number;
+    corpTaxDue?: number;
+    paymentsMade?: number;
+    balanceDue?: number;
+  };
 
   // 2. Computations (high‑level)
   computations?: {
     taxableProfit: number;
     taxDue: number;
-    capitalAllowances?: any; // object, not array
-    losses?: any;            // object, not array
-    adjustments?: any;       // object, not array
+    turnover?: number;
+    allowableExpenses?: number;
+    lossCarryback?: number;
+    groupRelief?: number;
   };
 
-  // 3. Capital Allowances (full section object)
-  capitalAllowances?: any;
+  // 3. Capital Allowances
+  capitalAllowances?: {
+    totalCapitalAllowances?: number;
+    aiaClaimed?: number;
+  };
 
-  // 4. Losses (full section object)
-  losses?: any;
+  // 4. Losses
+  losses?: {
+    used?: number;
+    carriedForward?: number;
+    lossCarryback?: number;
+    groupRelief?: number;
+  };
 
-  // 5. Adjustments (full section object)
-  adjustments?: any;
+  // 5. Adjustments
+  adjustments?: {
+    disallowableExpenses?: number;
+  };
 
-  // 6. R&D (CT600L)
-  rAndD?: any;
+  // 6. R&D
+  rAndD?: {
+    rAndDEnhancedRelief?: number;
+  };
 
-  // 7. Loans to Participators (CT600A)
-  loansToParticipators?: any;
+  // 7. Loans to Participators
+  loansToParticipators?: {
+    totalLoans?: number;
+  };
 
-  // 8. Payments & Balances
-  payments?: any;
+  // 8. Payments
+  payments?: {
+    paymentsMade?: number;
+    balanceDue?: number;
+  };
 
-  // 9. Additional Disclosures
+  // 9. Disclosures
   disclosures?: any[];
 
-  // 12. Income Categories
+  // 10. Income Categories
   incomeCategories?: any[];
 
-  // 13. Payments & Balances (Expanded)
+  // 11. Payments Expanded
   paymentsExpanded?: any;
 }

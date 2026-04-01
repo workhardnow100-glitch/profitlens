@@ -1,5 +1,3 @@
-// lib/ixbrl/computationsBuilder.ts
-
 import { CtComputations } from "../ct/computationsTypes";
 import {
   IxbrlContext,
@@ -28,14 +26,12 @@ export async function buildComputationsIxbrl(params: {
 
   const { periodStart, periodEnd } = computations;
 
-  // 1. Resolve taxonomy
   const { computationsTaxonomy } = resolveTaxonomiesForPeriod({
     periodStart,
     periodEnd,
     gaapFramework,
   });
 
-  // 2. Contexts
   const mainContext: IxbrlContext = {
     id: "C_MAIN",
     entityId: companyNumber || clientId,
@@ -46,7 +42,6 @@ export async function buildComputationsIxbrl(params: {
 
   const contexts: IxbrlContext[] = [mainContext];
 
-  // 3. Units
   const gbpUnit: IxbrlUnit = {
     id: "U_GBP",
     measure: "iso4217:GBP",
@@ -54,38 +49,50 @@ export async function buildComputationsIxbrl(params: {
 
   const units: IxbrlUnit[] = [gbpUnit];
 
-  // 4. Facts
   const facts: IxbrlFact[] = [];
 
-  // Taxable profit
-  facts.push({
-    concept: getConceptByInternalKey(
-      computationsTaxonomy.id,
-      "ct.taxable_profit"
-    ),
-    contextId: mainContext.id,
-    unitId: gbpUnit.id,
-    value: computations.taxableProfit ?? 0,
-  });
+  const push = (key: string, value: number | undefined | null) => {
+    if (value == null) return;
+    facts.push({
+      concept: getConceptByInternalKey(computationsTaxonomy.id, key),
+      contextId: mainContext.id,
+      unitId: gbpUnit.id,
+      value,
+    });
+  };
 
-  // Corporation tax due
-  facts.push({
-    concept: getConceptByInternalKey(
-      computationsTaxonomy.id,
-      "ct.corporation_tax_due"
-    ),
-    contextId: mainContext.id,
-    unitId: gbpUnit.id,
-    value: computations.corporationTaxDue ?? 0,
-  });
+  // Core CT figures
+  push("ct.taxable_profit", computations.taxableProfit);
+  push("ct.corporation_tax_due", computations.corporationTaxDue);
 
-  // 5. Optional narrative block – use a valid HMRC CT 2024 concept key
+  // Capital allowances
+  push("ct.capital_allowances_total", computations.capitalAllowances?.totalCapitalAllowances);
+  push("ct.capital_allowances_aia", computations.capitalAllowances?.aiaClaimed);
+
+  // Losses
+  push("ct.losses_carried_forward", computations.losses?.carriedForward);
+  push("ct.losses_used", computations.losses?.used);
+  push("ct.loss_carryback", computations.losses?.lossCarryback);
+  push("ct.group_relief", computations.losses?.groupRelief);
+
+  // R&D
+  push("ct.r_and_d_enhanced_deduction", computations.rAndD?.rAndDEnhancedRelief);
+
+  // Director loan
+  push("ct.loans_to_participators", computations.loansToParticipators?.totalLoans);
+
+  // Payments
+  push("ct.payments_made", computations.payments?.paymentsMade);
+  push("ct.balance_due", computations.payments?.balanceDue);
+
+  // Turnover and expenses
+  push("ct.turnover", computations.computations?.turnover);
+  push("ct.allowable_expenses", computations.computations?.allowableExpenses);
+  push("ct.disallowable_expenses", computations.adjustments?.disallowableExpenses);
+
   const textBlocks: IxbrlTextBlock[] = [
     {
-      concept: getConceptByInternalKey(
-        computationsTaxonomy.id,
-        "ct.computation_narrative" // fixed from ct.computations_narrative
-      ),
+      concept: getConceptByInternalKey(computationsTaxonomy.id, "ct.computation_narrative"),
       contextId: mainContext.id,
       html: `
         <p>Corporation Tax Computations for period ${periodStart} to ${periodEnd}.</p>
@@ -94,8 +101,7 @@ export async function buildComputationsIxbrl(params: {
     },
   ];
 
-  // 6. Build full XHTML iXBRL instance
-  const ixbrl = buildIxbrlInstance({
+  return buildIxbrlInstance({
     taxonomy: computationsTaxonomy,
     entity: {
       companyNumber,
@@ -110,6 +116,4 @@ export async function buildComputationsIxbrl(params: {
     facts,
     textBlocks,
   });
-
-  return ixbrl;
 }
