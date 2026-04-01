@@ -1450,9 +1450,8 @@ async function generatePdfForForm(params) {
   };
 
   // ---------------- CT600 FAMILY ----------------
-
- if (formCode === "CT600M") {
-  return await generateCt600mPdf({
+if (formCode === "CT600") {
+  return await generateCt600Pdf({
     clientId,
     year,
     periodStart,
@@ -1460,10 +1459,21 @@ async function generatePdfForForm(params) {
     filename,
     createdBy,
     companyDetails,
-    royalties: formData.royalties || {},
+
+    ctSummary: formData.summary || {},
+    computations: formData.computations || {},
+    capitalAllowances: formData.capitalAllowances || {},
+    losses: formData.losses || {},
+    adjustments: formData.adjustments || {},
+    rAndD: formData.rAndD || {},
+    loansToParticipators: formData.loansToParticipators || {},
+    payments: formData.payments || {},
     disclosures: formData.disclosures || {},
+
+    supplements: formData.supplements || {},
   });
 }
+
 
 if (formCode === "CT600N") {
   return await generateCt600nPdf({
