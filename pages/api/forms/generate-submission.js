@@ -1,6 +1,6 @@
 // pages/api/forms/generate-submission.js
 
-// FORCE-REBUILD-V4
+// FORCE-REBUILD-V5
 
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { buildHmrcSubmissionEnvelope } from "../../../lib/ct/submissionEnvelope";
@@ -25,7 +25,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 🔥 Load client from Supabase instead of Prisma
+    // Load client from Supabase
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -51,10 +51,30 @@ export default async function handler(req, res) {
 
     console.log("🟩 Derived safePeriodStart:", safePeriodStart);
 
-    // Paths
+    // Paths for CT600 and Computations
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
     const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
-    const accountsPath = `ixbrl/ACCOUNTS_FRS102-1A_${clientId}_${periodEnd}.xhtml`;
+
+    // 🔥 Dynamically detect the correct accounts file
+    const { data: list } = await supabaseAdmin.storage
+      .from("pdfs")
+      .list("ixbrl");
+
+    const accountsFileName = list?.find(f =>
+      f.name.includes(`${clientId}_${periodEnd}`) &&
+      f.name.startsWith("ACCOUNTS_")
+    )?.name;
+
+    if (!accountsFileName) {
+      console.log("🟥 No accounts iXBRL found for this client/period");
+      return res.status(500).json({
+        success: false,
+        message: "Accounts iXBRL file not found.",
+      });
+    }
+
+    const accountsPath = `ixbrl/${accountsFileName}`;
+    console.log("🟩 Using accounts file:", accountsPath);
 
     console.log("🟩 Artefact paths:", {
       ct600XmlPath,
