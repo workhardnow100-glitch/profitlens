@@ -1,19 +1,15 @@
 /**
  * ============================================================
- * File: pages/api/ct/summary.js
+ * File: pages/api/corp/summary.js
  * Purpose:
- *   Compute Corporation Tax summary for a specific client over
- *   a given accounting period using REAL COA ENTRIES:
- *     - Income / allowable / disallowable totals
- *     - Profit and adjusted profit
- *     - Marginal‑relief‑aware Corporation Tax due
- *     - Effective tax rate
- *     - Per‑transaction CT classification breakdown
- *
- * Notes:
- *   - Uses chart_of_account_entries (correct accountant-grade COA)
- *   - No CT_MAP, no business_category hacks
- *   - No FK required — manual COA lookup via .in()
+ *   Compute Corporation Tax summary using the UNIFIED JOURNAL ENGINE:
+ *     - Trading income (journal-driven)
+ *     - Allowable expenses (hmrc_bucket = 'allowable')
+ *     - Disallowable expenses (hmrc_bucket = 'disallowable')
+ *     - Profit (from unified P&L)
+ *     - Adjusted profit (profit + disallowables)
+ *     - Corporation Tax due (marginal relief aware)
+ *     - Breakdown rows (journal lines classified by COA)
  * ============================================================
  */
 
@@ -21,7 +17,13 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
-// Marginal relief calculator
+import {
+  getUnifiedProfitAndLoss,
+  getUnifiedTrialBalance,
+  getUnifiedBalanceSheet,
+} from "../../../lib/accounting/balance-sheet-engine";
+
+// Marginal relief calculator (unchanged)
 function calculateCorporationTax(profit) {
   if (profit <= 0) return { tax: 0, rate: 0 };
 
@@ -91,143 +93,54 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Fetch transactions
-    const { data: txs, error: fetchError } = await supabaseAdmin
-      .from("transactions")
-      .select(`
-        id,
-        date,
-        amount,
-        description,
-        tax_locked,
-        includedinct,
-        assetbalancingcharge,
-        assetbalancingallowance,
-        coa_id
-      `)
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd)
-      .order("date", { ascending: true });
+    // 1. Load unified accounting data
+    const pl = await getUnifiedProfitAndLoss(clientId);
+    const tb = await getUnifiedTrialBalance(clientId);
 
-    if (fetchError) throw new Error(fetchError.message);
-
-    if (!txs || txs.length === 0) {
-      return res.status(400).json({ error: "No Corporation Tax transactions found for this period." });
-    }
-
-    // 2. Filter CT-included transactions
-    const ctTxs = txs.filter((tx) => tx.includedinct === true);
-
-    if (ctTxs.length === 0) {
-      const locked = txs.some((tx) => tx.tax_locked === true);
-      return res.status(200).json({
-        success: true,
-        periodStart,
-        periodEnd,
-        income: 0,
-        allowable: 0,
-        disallowable: 0,
-        profit: 0,
-        adjustedProfit: 0,
-        corpTaxDue: 0,
-        effectiveRate: 0,
-        locked,
-        breakdown: [],
-        transactions: txs,
-      });
-    }
-
-    // 3. Load COA entries for all used coa_ids
-    const distinctCoaIds = Array.from(new Set(ctTxs.map((tx) => tx.coa_id).filter(Boolean)));
-
-    let coaMap = new Map();
-
-    if (distinctCoaIds.length > 0) {
-      const { data: coaRows, error: coaError } = await supabaseAdmin
-        .from("chart_of_account_entries")
-        .select("id, account_type, hmrc_bucket, is_control_account, is_bank_account")
-        .in("id", distinctCoaIds);
-
-      if (coaError) throw new Error(coaError.message);
-
-      (coaRows || []).forEach((row) => {
-        coaMap.set(row.id, row);
-      });
-    }
-
-    // 4. Totals
-    let income = 0;
-    let allowable = 0;
-    let disallowable = 0;
-
-    let totalBalancingCharges = 0;
-    let totalBalancingAllowances = 0;
-
-    const breakdown = [];
-
-    // 5. Classification using COA entries
-    ctTxs.forEach((tx) => {
-      const amount = Number(tx.amount || 0);
-      const coa = coaMap.get(tx.coa_id);
-
+    // 2. Classify journal lines
+    const breakdown = tb.lines.map((line) => {
       let ctType = "ignore";
 
-      if (coa) {
-        const bucket = coa.hmrc_bucket;
-        const type = coa.account_type;
-
-        const isControl =
-          bucket === "control" ||
-          bucket === "system" ||
-          bucket === "balance_sheet" ||
-          bucket === "equity" ||
-          bucket === "liabilities" ||
-          bucket === "assets" ||
-          coa.is_control_account ||
-          coa.is_bank_account;
-
-        if (!isControl) {
-          if (type === "INCOME") {
-            ctType = "income";
-          } else if (type === "EXPENSE") {
-            if (bucket === "allowable") ctType = "allowable";
-            else if (bucket === "disallowable") ctType = "disallowable";
-          }
-        }
+      if (line.account_type === "INCOME") {
+        ctType = "income";
+      } else if (line.account_type === "EXPENSE") {
+        if (line.hmrc_bucket === "allowable") ctType = "allowable";
+        else if (line.hmrc_bucket === "disallowable") ctType = "disallowable";
+        else ctType = "review";
       }
 
-      breakdown.push({
-        id: tx.id,
-        date: tx.date,
-        description: tx.description,
-        amount,
-        coa_id: tx.coa_id,
+      return {
+        account_code: line.account_code,
+        account_name: line.account_name,
+        amount: line.balance,
+        hmrc_bucket: line.hmrc_bucket,
+        account_type: line.account_type,
         ctType,
-      });
-
-      if (ctType === "income" && amount > 0) income += amount;
-      if (ctType === "allowable" && amount < 0) allowable += Math.abs(amount);
-      if (ctType === "disallowable" && amount < 0) disallowable += Math.abs(amount);
-
-      const bc = Number(tx.assetbalancingcharge || 0);
-      const ba = Number(tx.assetbalancingallowance || 0);
-
-      if (!Number.isNaN(bc) && bc !== 0) totalBalancingCharges += bc;
-      if (!Number.isNaN(ba) && ba !== 0) totalBalancingAllowances += ba;
+      };
     });
 
-    // 6. Profit calculations
-    const profit = income - allowable;
-    let adjustedProfit = profit + disallowable;
+    // 3. Totals
+    const income = breakdown
+      .filter((b) => b.ctType === "income")
+      .reduce((sum, b) => sum + b.amount, 0);
 
-    adjustedProfit += totalBalancingCharges;
-    adjustedProfit -= totalBalancingAllowances;
+    const allowable = breakdown
+      .filter((b) => b.ctType === "allowable")
+      .reduce((sum, b) => sum + Math.abs(b.amount), 0);
 
+    const disallowable = breakdown
+      .filter((b) => b.ctType === "disallowable")
+      .reduce((sum, b) => sum + Math.abs(b.amount), 0);
+
+    // 4. Profit from unified P&L
+    const profit = pl.summary.net_profit;
+
+    // 5. Adjusted profit
+    const adjustedProfit = profit + disallowable;
+
+    // 6. Corporation Tax
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
-
-    const locked = txs.some((tx) => tx.tax_locked === true);
 
     // 7. Return summary
     return res.status(200).json({
@@ -241,9 +154,7 @@ export default async function handler(req, res) {
       adjustedProfit,
       corpTaxDue,
       effectiveRate,
-      locked,
       breakdown,
-      transactions: txs,
     });
   } catch (err) {
     console.error("CT summary error:", err);
