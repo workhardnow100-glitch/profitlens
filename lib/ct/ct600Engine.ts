@@ -4,41 +4,31 @@ import { supabaseAdmin } from "../supabase-admin";
 import { CT_MAP } from "../constants/ctMap";
 
 /* -------------------------------------------------------------------------- */
-/*                     INLINE HELPERS (your project needs these)              */
+/*                     INLINE HELPERS                                         */
 /* -------------------------------------------------------------------------- */
 
-// Extract signed amount from a journal line
 function amountFromLine(line: any): number {
   const debit = Number(line.debit || 0);
   const credit = Number(line.credit || 0);
   return debit - credit;
 }
 
-// Sum array by field
 function sumBy(arr: any[], field: string): number {
   if (!Array.isArray(arr)) return 0;
-  return arr.reduce((total, item) => {
-    const value = Number(item?.[field] || 0);
-    return total + value;
-  }, 0);
+  return arr.reduce((total, item) => total + Number(item?.[field] || 0), 0);
 }
 
-// Load CT journals directly from Supabase
-async function loadCTJournals(
-  clientId: string,
-  periodStart: string,
-  periodEnd: string
-) {
+async function loadCTJournals(clientId: string, periodStart: string, periodEnd: string) {
   const { data, error } = await supabaseAdmin
     .from("journal_entries")
     .select(`
       id,
       date,
       client_id,
-      lines:journal_lines (
+      journal_lines (
         debit,
         credit,
-        account:chart_of_account_entries (
+        chart_of_account_entries (
           account_code,
           account_name
         )
@@ -58,76 +48,11 @@ async function loadCTJournals(
 
 export { loadCTJournals, amountFromLine, sumBy };
 
-
-
 /* -------------------------------------------------------------------------- */
 /*                               CT600 CONFIG                                 */
 /* -------------------------------------------------------------------------- */
 
-const CAPITAL_ALLOWANCE_ACCOUNTS = [
-  // Main Pool (AIA eligible)
-  "Plant & Machinery",
-  "Machinery",
-  "Equipment",
-  "Tools & Equipment",
-  "Office Equipment",
-  "Fixtures & Fittings",
-  "Furniture",
-  "Computer Equipment",
-  "IT Equipment",
-  "Servers",
-  "Laptops",
-  "Desktops",
-  "Printers",
-  "CCTV Systems",
-  "Security Systems",
-  "Air Conditioning Units",
-  "Heating Systems",
-  "Lighting Systems",
-  "Warehouse Equipment",
-  "Construction Equipment",
-  "Power Tools",
-  "Hand Tools",
-  "Workshop Equipment",
-
-  // Vehicles (AIA eligible except cars)
-  "Vans",
-  "Lorries",
-  "Trucks",
-  "Commercial Vehicles",
-  "Pickups",
-  "Forklifts",
-
-  // Cars (NOT AIA eligible — but still capital allowances)
-  "Cars",
-  "Motor Vehicles",
-  "Company Car",
-
-  // Special Rate Pool (reduced rate)
-  "Integral Features",
-  "Electrical Systems",
-  "Cold Water Systems",
-  "Hot Water Systems",
-  "Thermal Insulation",
-  "Solar Panels",
-  "Lift Systems",
-  "Escalators",
-  "Moving Walkways",
-
-  // Short‑Life Assets (optional election)
-  "Short Life Asset",
-
-  // Land & Buildings (NOT CA eligible — but included for future logic)
-  // These will be ignored in CA logic but listed for completeness
-  "Land",
-  "Buildings",
-  "Property Improvements",
-  "Extensions",
-  "Structural Works",
-];
-
 const CAPITAL_ALLOWANCE_POOLS: Record<string, "main" | "special" | "cars"> = {
-  // Main pool
   "Plant & Machinery": "main",
   Machinery: "main",
   Equipment: "main",
@@ -149,7 +74,6 @@ const CAPITAL_ALLOWANCE_POOLS: Record<string, "main" | "special" | "cars"> = {
   "Hand Tools": "main",
   "Workshop Equipment": "main",
 
-  // Special rate pool
   "Integral Features": "special",
   "Electrical Systems": "special",
   "Cold Water Systems": "special",
@@ -160,7 +84,6 @@ const CAPITAL_ALLOWANCE_POOLS: Record<string, "main" | "special" | "cars"> = {
   Escalators: "special",
   "Moving Walkways": "special",
 
-  // Cars pool
   Cars: "cars",
   "Motor Vehicles": "cars",
   "Company Car": "cars",
@@ -169,12 +92,8 @@ const CAPITAL_ALLOWANCE_POOLS: Record<string, "main" | "special" | "cars"> = {
 const CAPITAL_ALLOWANCE_RATES = {
   main: 0.18,
   special: 0.06,
-  cars: 0.18, // refine by CO₂ later if needed
+  cars: 0.18,
 };
-
-/* -------------------------------------------------------------------------- */
-/*                         CT600A / DLA CONFIG                                */
-/* -------------------------------------------------------------------------- */
 
 const DLA_MOVEMENT_ACCOUNTS = [
   "Cash Withdrawals",
@@ -185,10 +104,6 @@ const DLA_MOVEMENT_ACCOUNTS = [
 
 const DLA_INTEREST_INCOME_ACCOUNT = "Director Loan – Interest Charged";
 const DLA_INTEREST_EXPENSE_ACCOUNT = "Director Loan – Interest Paid";
-
-/* -------------------------------------------------------------------------- */
-/*                         CT600L / R&D CONFIG                                */
-/* -------------------------------------------------------------------------- */
 
 const R_AND_D_SME_ACCOUNTS = [
   "R&D Staff Costs",
@@ -202,8 +117,8 @@ const R_AND_D_SME_ACCOUNTS = [
 
 const R_AND_D_GRANTS_ACCOUNT = "R&D Grants / Subsidies";
 
-const DEFAULT_R_AND_D_SME_MULTIPLIER = 0.86; // 86% uplift (example)
-const DEFAULT_R_AND_D_RDEC_RATE = 0.2; // 20% RDEC rate (example)
+const DEFAULT_R_AND_D_SME_MULTIPLIER = 0.86;
+const DEFAULT_R_AND_D_RDEC_RATE = 0.2;
 
 /* -------------------------------------------------------------------------- */
 /*                         CT600 RATE / ASSOCIATED COS                        */
@@ -211,7 +126,6 @@ const DEFAULT_R_AND_D_RDEC_RATE = 0.2; // 20% RDEC rate (example)
 
 function computeCorpTaxRate(profit: number, associatedCompanies: number) {
   const n = Math.max(1, (associatedCompanies || 0) + 1);
-
   const lowerLimit = 50000 / n;
   const upperLimit = 250000 / n;
 
@@ -221,9 +135,7 @@ function computeCorpTaxRate(profit: number, associatedCompanies: number) {
   if (profit <= lowerLimit) return smallRate;
   if (profit >= upperLimit) return mainRate;
 
-  const marginalRelief =
-    ((upperLimit - profit) * (mainRate - smallRate)) / upperLimit;
-
+  const marginalRelief = ((upperLimit - profit) * (mainRate - smallRate)) / upperLimit;
   return mainRate - marginalRelief;
 }
 
@@ -255,12 +167,13 @@ async function buildCTFormData(
 
   const ctJournals = await loadCTJournals(clientId, periodStart, periodEnd);
 
+  /* ---------------------------- JOURNAL CLASSIFICATION ---------------------------- */
+
   let turnover = 0;
   let nonTradingIncome = 0;
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
 
-  let capitalAllowances = 0;
   let mainPoolAdditions = 0;
   let specialPoolAdditions = 0;
   let carsPoolAdditions = 0;
@@ -282,52 +195,49 @@ async function buildCTFormData(
     (j.journal_lines || []).forEach((line: any) => {
       const accountName = line.chart_of_account_entries?.account_name || "";
       const amt = amountFromLine(line);
-
-      // DLA movements
-      if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
-        if (amt > 0) {
-          dlaLoansAdvanced += amt;
-        } else if (amt < 0) {
-          dlaLoansRepaid += Math.abs(amt);
-        }
-      }
-
-      if (accountName === DLA_INTEREST_INCOME_ACCOUNT && amt > 0) {
-        dlaInterestCharged += amt;
-      }
-
-      if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT && amt > 0) {
-        dlaInterestPaid += amt;
-      }
-
-      // R&D
-      if (R_AND_D_SME_ACCOUNTS.includes(accountName) && amt > 0) {
-        rAndDSmeSpend += amt;
-      }
-
-      if (accountName === R_AND_D_GRANTS_ACCOUNT && amt > 0) {
-        rAndDGrants += amt;
-      }
-
       const lowerName = accountName.toLowerCase();
 
+      /* ---------------------------- DLA ---------------------------- */
+      if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
+        if (amt > 0) dlaLoansAdvanced += amt;
+        else if (amt < 0) dlaLoansRepaid += Math.abs(amt);
+      }
+
+      if (accountName === DLA_INTEREST_INCOME_ACCOUNT && amt > 0)
+        dlaInterestCharged += amt;
+
+      if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT && amt > 0)
+        dlaInterestPaid += amt;
+
+      /* ---------------------------- R&D ---------------------------- */
+      if (R_AND_D_SME_ACCOUNTS.includes(accountName) && amt > 0)
+        rAndDSmeSpend += amt;
+
+      if (accountName === R_AND_D_GRANTS_ACCOUNT && amt > 0)
+        rAndDGrants += amt;
+
+      /* ---------------------------- FLAGS ---------------------------- */
       if (lowerName.includes("dotas")) dotasFlag = true;
       if (lowerName.includes("charity") && amt > 0) charityIncome += amt;
       if (lowerName.includes("royalty") && amt > 0) royaltyIncome += amt;
       if (lowerName.includes("northern ireland")) niTradingFlag = true;
 
+      /* ---------------------------- IGNORE ---------------------------- */
       if (CT_MAP.ignore.includes(accountName)) return;
 
+      /* ---------------------------- REVENUE ---------------------------- */
       if (CT_MAP.revenue.includes(accountName)) {
         turnover += amt;
         return;
       }
 
+      /* ---------------------------- OTHER INCOME ---------------------------- */
       if (CT_MAP.other_income.includes(accountName)) {
         nonTradingIncome += amt;
         return;
       }
 
+      /* ---------------------------- CAPITAL ALLOWANCES ---------------------------- */
       const pool = CAPITAL_ALLOWANCE_POOLS[accountName];
       if (pool) {
         const debit = Math.max(amt, 0);
@@ -337,6 +247,7 @@ async function buildCTFormData(
         return;
       }
 
+      /* ---------------------------- EXPENSES ---------------------------- */
       if (CT_MAP.allowable.includes(accountName)) {
         allowableExpenses += Math.max(amt, 0);
         return;
@@ -346,10 +257,10 @@ async function buildCTFormData(
         disallowableExpenses += Math.max(amt, 0);
         return;
       }
-
-      return;
     });
   });
+
+  /* ---------------------------- CAPITAL ALLOWANCES ---------------------------- */
 
   const mainPoolBF = corpSubmission?.ca_main_pool_bf || 0;
   const specialPoolBF = corpSubmission?.ca_special_pool_bf || 0;
@@ -360,10 +271,9 @@ async function buildCTFormData(
   const specialPoolBeforeWDA = specialPoolBF + specialPoolAdditions;
   const carsPoolBeforeWDA = carsPoolBF + carsPoolAdditions;
 
-  const mainWDA = mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
-  const specialWDA =
-    specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
-  const carsWDA = carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
+  const mainWDA = mainPoolBeforeWDA * CAPITAL_ALLOWANCE_RATES.main;
+  const specialWDA = specialPoolBeforeWDA * CAPITAL_ALLOWANCE_RATES.special;
+  const carsWDA = carsPoolBeforeWDA * CAPITAL_ALLOWANCE_RATES.cars;
 
   const totalCapitalAllowances = aiaClaimed + mainWDA + specialWDA + carsWDA;
 
@@ -371,12 +281,12 @@ async function buildCTFormData(
   const specialPoolCF = specialPoolBeforeWDA - specialWDA;
   const carsPoolCF = carsPoolBeforeWDA - carsWDA;
 
-  capitalAllowances = totalCapitalAllowances;
+  /* ---------------------------- PROFITS ---------------------------- */
 
   const computedProfitBeforeCA =
     turnover + nonTradingIncome - allowableExpenses - disallowableExpenses;
 
-  const computedProfit = computedProfitBeforeCA - capitalAllowances;
+  const computedProfit = computedProfitBeforeCA - totalCapitalAllowances;
 
   const baseProfit =
     corpSubmission?.profit_before_tax != null
@@ -388,10 +298,10 @@ async function buildCTFormData(
   const lossCarryback = corpSubmission?.loss_carryback || 0;
   const groupRelief = corpSubmission?.group_relief || 0;
 
-  // R&D engine
+  /* ---------------------------- R&D ---------------------------- */
+
   const autoRAndDMultiplier =
-    corpSubmission?.r_and_d_multiplier != null &&
-    corpSubmission.r_and_d_multiplier > 0
+    corpSubmission?.r_and_d_multiplier > 0
       ? corpSubmission.r_and_d_multiplier
       : DEFAULT_R_AND_D_SME_MULTIPLIER;
 
@@ -410,43 +320,29 @@ async function buildCTFormData(
   const autoRdecCredit =
     autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
-  const autoSmePayableCredit = 0;
-  const autoSurrenderedLoss = 0;
-
-  const overrideEnabled =
-    corpSubmission?.r_and_d_override_enabled || false;
-
-  const overrideSmeEnhancedDeduction =
-    corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
-
-  const overrideSmePayableCredit =
-    corpSubmission?.r_and_d_override_sme_payable_credit || 0;
-
-  const overrideRdecCredit =
-    corpSubmission?.r_and_d_override_rdec_credit || 0;
-
-  const overrideSurrenderedLoss =
-    corpSubmission?.r_and_d_override_surrendered_loss || 0;
+  const overrideEnabled = corpSubmission?.r_and_d_override_enabled || false;
 
   const finalSmeEnhancedDeduction = overrideEnabled
-    ? overrideSmeEnhancedDeduction
+    ? corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0
     : autoSmeEnhancedDeduction;
 
   const finalSmePayableCredit = overrideEnabled
-    ? overrideSmePayableCredit
-    : autoSmePayableCredit;
+    ? corpSubmission?.r_and_d_override_sme_payable_credit || 0
+    : 0;
 
   const finalRdecCredit = overrideEnabled
-    ? overrideRdecCredit
+    ? corpSubmission?.r_and_d_override_rdec_credit || 0
     : autoRdecCredit;
 
   const finalSurrenderedLoss = overrideEnabled
-    ? overrideSurrenderedLoss
-    : autoSurrenderedLoss;
+    ? corpSubmission?.r_and_d_override_surrendered_loss || 0
+    : 0;
 
   const rAndDSpend = autoTotalRAndDSpend;
   const rAndDMultiplier = autoRAndDMultiplier;
   const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
+
+  /* ---------------------------- TAX ---------------------------- */
 
   const taxableProfit =
     baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief;
@@ -464,8 +360,12 @@ async function buildCTFormData(
       ? corpSubmission.corp_tax_due
       : taxableProfit * taxRate;
 
+  /* ---------------------------- PAYMENTS ---------------------------- */
+
   const paymentsMade = sumBy(ctPayments || [], "amount");
   const balanceDue = corpTaxDue - paymentsMade;
+
+  /* ---------------------------- SUPPLEMENTS ---------------------------- */
 
   const derivedTotalLoans = dlaLoansAdvanced - dlaLoansRepaid;
 
@@ -480,7 +380,12 @@ async function buildCTFormData(
   const ct600MRequired = royaltyIncome > 0;
   const ct600NRequired = niTradingFlag;
 
+  /* -------------------------------------------------------------------------- */
+  /*                           FINAL RETURN OBJECT                              */
+  /* -------------------------------------------------------------------------- */
+
   return {
+    /* ---------------------------- SUMMARY ---------------------------- */
     summary: {
       formCode,
       companyName: client.business_name || client.name,
@@ -496,13 +401,15 @@ async function buildCTFormData(
       paymentsMade,
       balanceDue,
     },
+
+    /* ---------------------------- COMPUTATIONS ---------------------------- */
     computations: {
       turnover,
       nonTradingIncome,
       allowableExpenses,
       disallowableExpenses,
       capitalAllowances: totalCapitalAllowances,
-      adjustedProfit: baseProfit,
+      adjustedProfit: computedProfitBeforeCA,
       taxableProfit,
       lossCarryback,
       groupRelief,
@@ -511,7 +418,16 @@ async function buildCTFormData(
       rAndDEnhancedRelief,
       taxRate,
       taxDue: corpTaxDue,
+
+      // CT Pack extras
+      propertyIncome: 0,
+      chargeableGains: 0,
+      loanRelationships: 0,
+      intangibles: 0,
+      marginalRelief: null,
     },
+
+    /* ---------------------------- CAPITAL ALLOWANCES ---------------------------- */
     capitalAllowances: {
       totalCapitalAllowances,
       aiaClaimed,
@@ -534,18 +450,22 @@ async function buildCTFormData(
         carriedForward: carsPoolCF,
       },
     },
+
+    /* ---------------------------- LOSSES ---------------------------- */
     losses: {
       currentPeriodLoss,
       broughtForward: corpSubmission?.loss_bf || 0,
-      carriedForward:
-        corpSubmission?.loss_cf || currentPeriodLoss,
+      carriedForward: corpSubmission?.loss_cf || currentPeriodLoss,
       carryback: lossCarryback,
       groupRelief,
     },
+
+    /* ---------------------------- ADJUSTMENTS ---------------------------- */
     adjustments: {
-      manualAdjustments:
-        corpSubmission?.adjustments_total || 0,
+      manualAdjustments: corpSubmission?.adjustments_total || 0,
     },
+
+    /* ---------------------------- R&D ---------------------------- */
     rAndD: {
       totalRAndD: rAndDSpend,
       enhancedRelief: rAndDEnhancedRelief,
@@ -562,13 +482,15 @@ async function buildCTFormData(
       },
       override: {
         enabled: overrideEnabled,
-        smeEnhancedDeduction: overrideSmeEnhancedDeduction,
-        smePayableCredit: overrideSmePayableCredit,
-        rdecCredit: overrideRdecCredit,
-        surrenderedLoss: overrideSurrenderedLoss,
+        smeEnhancedDeduction: corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0,
+        smePayableCredit: corpSubmission?.r_and_d_override_sme_payable_credit || 0,
+        rdecCredit: corpSubmission?.r_and_d_override_rdec_credit || 0,
+        surrenderedLoss: corpSubmission?.r_and_d_override_surrendered_loss || 0,
       },
       grants: autoRAndDGrants,
     },
+
+    /* ---------------------------- LOANS TO PARTICIPATORS ---------------------------- */
     loansToParticipators: {
       totalLoans:
         corpSubmission?.loans_to_participators != null
@@ -579,13 +501,21 @@ async function buildCTFormData(
       interestCharged: dlaInterestCharged,
       interestPaid: dlaInterestPaid,
     },
+
+    /* ---------------------------- PAYMENTS ---------------------------- */
     payments: {
       paymentsMade,
+      overpayments: 0,
+      balanceBroughtForward: 0,
       balanceDue,
     },
+
+    /* ---------------------------- DISCLOSURES ---------------------------- */
     disclosures: {
       notes: corpSubmission?.notes || null,
     },
+
+    /* ---------------------------- SUPPLEMENTS ---------------------------- */
     supplements: {
       ct600ARequired,
       ct600JRequired,
@@ -608,7 +538,13 @@ export async function getCt600Data(params: {
   periodStart: string;
   periodEnd: string;
 }) {
-  const { formCode = "CT600", client, clientId, periodStart, periodEnd } = params;
+  const {
+    formCode = "CT600",
+    client,
+    clientId,
+    periodStart,
+    periodEnd,
+  } = params;
 
   return buildCTFormData(formCode, client, clientId, periodStart, periodEnd);
 }
