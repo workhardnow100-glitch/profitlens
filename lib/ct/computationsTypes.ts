@@ -8,63 +8,42 @@ export interface CtComputations {
   taxableProfit: number;
   corporationTaxDue: number;
 
-  // 1. Summary (normalised)
-  summary: {
-    tradingProfit: number;
-    adjustments: number;
-    capitalAllowances: number;
-    lossesUsed: number;
+  // 1. Summary
+  summary?: any;
+
+  // 2. Computations (high‑level)
+  computations?: {
     taxableProfit: number;
-    corporationTaxDue: number;
+    taxDue: number;
+    capitalAllowances?: any; // object, not array
+    losses?: any;            // object, not array
+    adjustments?: any;       // object, not array
   };
 
-  // 2. Capital Allowances (normalised)
-  capitalAllowances: {
-    total: number;
-    annualInvestmentAllowance: number;
-    firstYearAllowance: number;
-  };
+  // 3. Capital Allowances (full section object)
+  capitalAllowances?: any;
 
-  // 3. Losses (normalised)
-  losses: {
-    broughtForward: number;
-    used: number;
-    carriedForward: number;
-  };
+  // 4. Losses (full section object)
+  losses?: any;
 
-  // 4. Adjustments (normalised)
-  adjustments: {
-    disallowableExpenses: number;
-    other: number;
-  };
-
-  // 5. Payments (normalised)
-  payments: {
-    totalPaid: number;
-    balancingDue: number;
-  };
+  // 5. Adjustments (full section object)
+  adjustments?: any;
 
   // 6. R&D (CT600L)
-  rAndD: {
-    total: number;
-    enhancedDeduction: number;
-  };
+  rAndD?: any;
 
   // 7. Loans to Participators (CT600A)
-  loansToParticipators: {
-    outstanding: number;
-    writtenOff: number;
-  };
+  loansToParticipators?: any;
 
-  // 8. Disclosures (normalised)
-  disclosures: {
-    charitableDonations: number;
-    politicalDonations: number;
-  };
+  // 8. Payments & Balances
+  payments?: any;
 
-  // 9. Income categories (unchanged)
-  incomeCategories: any[];
+  // 9. Additional Disclosures
+  disclosures?: any[];
 
-  // 10. Payments expanded (unchanged)
-  paymentsExpanded: any;
+  // 12. Income Categories
+  incomeCategories?: any[];
+
+  // 13. Payments & Balances (Expanded)
+  paymentsExpanded?: any;
 }
