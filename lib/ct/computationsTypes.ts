@@ -11,7 +11,7 @@ export interface CtComputations {
   // 1. Summary
   summary?: any;
 
-  // 2. Computations
+  // 2. Computations (high‑level)
   computations?: {
     taxableProfit: number;
     taxDue: number;
