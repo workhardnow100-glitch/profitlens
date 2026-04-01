@@ -65,7 +65,7 @@ export async function buildComputationsIxbrl(params: {
     ),
     contextId: mainContext.id,
     unitId: gbpUnit.id,
-    value: computations.taxableProfit,
+    value: computations.taxableProfit ?? 0,
   });
 
   // Corporation tax due
@@ -76,15 +76,15 @@ export async function buildComputationsIxbrl(params: {
     ),
     contextId: mainContext.id,
     unitId: gbpUnit.id,
-    value: computations.corporationTaxDue,
+    value: computations.corporationTaxDue ?? 0,
   });
 
-  // 5. Optional narrative block
+  // 5. Optional narrative block – use a valid HMRC CT 2024 concept key
   const textBlocks: IxbrlTextBlock[] = [
     {
       concept: getConceptByInternalKey(
         computationsTaxonomy.id,
-        "ct.computations_narrative"
+        "ct.computation_narrative" // fixed from ct.computations_narrative
       ),
       contextId: mainContext.id,
       html: `
