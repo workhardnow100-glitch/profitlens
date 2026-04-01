@@ -7,7 +7,9 @@ import prisma from "../../../lib/prisma";
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return res.status(405).json({ success: false, message: "Method not allowed" });
+      return res
+        .status(405)
+        .json({ success: false, message: "Method not allowed" });
     }
 
     const { clientId, periodEnd } = req.body;
@@ -59,6 +61,10 @@ export default async function handler(req, res) {
       correlationId: `corr-${clientId}-${periodEnd}`,
       senderId: "YOUR_SENDER_ID",
       password: "YOUR_PASSWORD",
+
+      // FIX: pass full client object so submissionEnvelope can read client.*
+      client,
+
       companyNumber: client.companyNumber || client.company_number || "",
       companyName: client.business_name || client.name,
       periodStart: client.periodStart,
@@ -90,7 +96,6 @@ export default async function handler(req, res) {
       success: true,
       submissionPath,
     });
-
   } catch (err) {
     console.error("Submission envelope generation failed:", err);
     return res.status(500).json({
