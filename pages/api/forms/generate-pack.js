@@ -41,6 +41,7 @@ export default async function handler(req, res) {
       .maybeSingle();
 
     if (clientError || !client) {
+      console.error("Failed to load client:", clientError);
       return res.status(404).json({
         success: false,
         message: "Client not found.",
@@ -71,15 +72,18 @@ export default async function handler(req, res) {
     // 2. DETECT SUPPLEMENTS (JOURNALS FROM SUPABASE)
     // ────────────────────────────────────────────────
     const { data: journals, error: journalsError } = await supabaseAdmin
-      .from("journals")
+      .from("journal_entries")
       .select(
         `
         id,
         date,
         client_id,
         lines:journal_lines (
-          accountCode,
-          amount
+          debit,
+          credit,
+          account:chart_of_account_entries (
+            account_code
+          )
         )
       `
       )
@@ -98,13 +102,19 @@ export default async function handler(req, res) {
     const sumByPrefix = (prefix) =>
       (journals || [])
         .flatMap((j) => j.lines || [])
-        .filter((l) => l.accountCode?.startsWith(prefix))
-        .reduce((sum, l) => sum + Number(l.amount || 0), 0);
+        .filter((l) => l.account?.account_code?.startsWith(prefix))
+        .reduce(
+          (sum, l) =>
+            sum + Number(l.debit || 0) - Number(l.credit || 0),
+          0
+        );
 
     const supplements = {
       ct600ARequired: Math.abs(sumByPrefix("DLA")) > 0,
       ct600JRequired: (journals || []).some((j) =>
-        (j.lines || []).some((l) => l.accountCode === "DOTAS")
+        (j.lines || []).some(
+          (l) => l.account?.account_code === "DOTAS"
+        )
       ),
       ct600LRequired: sumByPrefix("RD") > 0,
       ct600FRequired: sumByPrefix("CHAR") > 0,
@@ -259,14 +269,15 @@ export default async function handler(req, res) {
     // ────────────────────────────────────────────────
     // 3D. GENERATE ACCOUNTS iXBRL (NEW)
     // ────────────────────────────────────────────────
-    const { ixbrl: accountsIxbrl, framework } = await buildAccountsIxbrl({
-      clientId,
-      companyNumber: client.company_number || "",
-      companyName: client.business_name || client.name,
-      periodStart,
-      periodEnd,
-      defaultFramework: "FRS102-1A",
-    });
+    const { ixbrl: accountsIxbrl, framework } =
+      await buildAccountsIxbrl({
+        clientId,
+        companyNumber: client.company_number || "",
+        companyName: client.business_name || client.name,
+        periodStart,
+        periodEnd,
+        defaultFramework: "FRS102-1A",
+      });
 
     const accountsPath = `ixbrl/ACCOUNTS_${framework}_${clientId}_${periodEnd}.xhtml`;
 
