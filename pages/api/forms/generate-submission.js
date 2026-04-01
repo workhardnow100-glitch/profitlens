@@ -1,11 +1,9 @@
 // pages/api/forms/generate-submission.js
 
-// FORCE-REBUILD-V3
-
+// FORCE-REBUILD-V4
 
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { buildHmrcSubmissionEnvelope } from "../../../lib/ct/submissionEnvelope";
-import prisma from "../../../lib/prisma";
 
 export default async function handler(req, res) {
   try {
@@ -27,13 +25,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // Load client
-    const client = await prisma.client.findUnique({ where: { id: clientId } });
+    // 🔥 Load client from Supabase instead of Prisma
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("id", clientId)
+      .single();
 
     console.log("🟩 Loaded client:", client);
 
-    if (!client) {
-      console.log("🟥 Client not found in DB");
+    if (clientError || !client) {
+      console.log("🟥 Client not found in Supabase:", clientError);
       return res.status(404).json({
         success: false,
         message: "Client not found.",
@@ -91,13 +93,13 @@ export default async function handler(req, res) {
       accountsIxbrl: accountsIxbrl.length,
     });
 
-    // 🔥 LOG THE EXACT OBJECT PASSED INTO THE ENVELOPE BUILDER
+    // Build envelope
     const envelopeInput = {
       correlationId: `corr-${clientId}-${periodEnd}`,
       senderId: "YOUR_SENDER_ID",
       password: "YOUR_PASSWORD",
 
-      client, // <-- THIS IS THE ONE THAT WAS UNDEFINED IN THE OLD BUILD
+      client,
 
       companyNumber: client.companyNumber || client.company_number || "",
       companyName: client.business_name || client.name,
@@ -110,7 +112,6 @@ export default async function handler(req, res) {
 
     console.log("🟦 Envelope Input Object:", envelopeInput);
 
-    // 🔥 WRAP THE ENVELOPE BUILDER TO CATCH INTERNAL ERRORS
     let envelope;
     try {
       envelope = buildHmrcSubmissionEnvelope(envelopeInput);
