@@ -1,6 +1,5 @@
 // pages/api/forms/generate-pack.js
 
-import prisma from "../../../lib/prisma";
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
 import { generateCt600aPdf } from "../../../lib/pdf/templates/ct600a";
 import { generateCt600jPdf } from "../../../lib/pdf/templates/ct600j";
@@ -33,43 +32,79 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
-    // 1. LOAD COMPANY DETAILS
+    // 1. LOAD COMPANY DETAILS (FROM SUPABASE)
     // ────────────────────────────────────────────────
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-    });
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("id", clientId)
+      .maybeSingle();
 
-    if (!client) {
+    if (clientError || !client) {
       return res.status(404).json({
         success: false,
         message: "Client not found.",
       });
     }
 
+    const companyDetails = {
+      name: client.name,
+      business_name: client.business_name || client.name,
+      trading_name: client.trading_name,
+      company_number: client.company_number,
+      utr_number: client.utr_number,
+      registered_address: client.registered_address || client.address,
+      address: client.address,
+      postcode: client.postcode,
+      phone: client.phone,
+      email: client.email,
+      website: client.website,
+      contact_person: client.contact_person,
+      contact_phone: client.contact_phone,
+      contact_email: client.contact_email,
+      business_type: client.business_type,
+      nino: client.nino,
+      mtditsa_id: client.mtditsa_id,
+    };
+
     // ────────────────────────────────────────────────
-    // 2. DETECT SUPPLEMENTS
+    // 2. DETECT SUPPLEMENTS (JOURNALS FROM SUPABASE)
     // ────────────────────────────────────────────────
-    const journals = await prisma.journal.findMany({
-      where: {
-        clientId,
-        date: {
-          gte: new Date(periodStart),
-          lte: new Date(periodEnd),
-        },
-      },
-      include: { lines: true },
-    });
+    const { data: journals, error: journalsError } = await supabaseAdmin
+      .from("journals")
+      .select(
+        `
+        id,
+        date,
+        client_id,
+        lines:journal_lines (
+          accountCode,
+          amount
+        )
+      `
+      )
+      .eq("client_id", clientId)
+      .gte("date", periodStart)
+      .lte("date", periodEnd);
+
+    if (journalsError) {
+      console.error("Failed to load journals:", journalsError);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to load journals for supplement detection.",
+      });
+    }
 
     const sumByPrefix = (prefix) =>
-      journals
-        .flatMap((j) => j.lines)
+      (journals || [])
+        .flatMap((j) => j.lines || [])
         .filter((l) => l.accountCode?.startsWith(prefix))
         .reduce((sum, l) => sum + Number(l.amount || 0), 0);
 
     const supplements = {
       ct600ARequired: Math.abs(sumByPrefix("DLA")) > 0,
-      ct600JRequired: journals.some((j) =>
-        j.lines.some((l) => l.accountCode === "DOTAS")
+      ct600JRequired: (journals || []).some((j) =>
+        (j.lines || []).some((l) => l.accountCode === "DOTAS")
       ),
       ct600LRequired: sumByPrefix("RD") > 0,
       ct600FRequired: sumByPrefix("CHAR") > 0,
@@ -82,7 +117,6 @@ export default async function handler(req, res) {
     // ────────────────────────────────────────────────
     const computations = await computeCtForPeriod({
       clientId,
-      client,
       periodStart,
       periodEnd,
     });
@@ -99,7 +133,7 @@ export default async function handler(req, res) {
       year: new Date(periodEnd).getFullYear(),
       filename: `CT600_${clientId}_${periodEnd}.pdf`,
       createdBy: "system",
-      companyDetails: client,
+      companyDetails,
 
       ctSummary: computations.summary,
       computations: computations.computations,
@@ -126,7 +160,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600A_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600A");
     }
@@ -139,7 +173,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600J_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600J");
     }
@@ -152,7 +186,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600L_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600L");
     }
@@ -165,7 +199,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600F_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600F");
     }
@@ -178,7 +212,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600M_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600M");
     }
@@ -191,7 +225,7 @@ export default async function handler(req, res) {
         year: new Date(periodEnd).getFullYear(),
         filename: `CT600N_${clientId}_${periodEnd}.pdf`,
         createdBy: "system",
-        companyDetails: client,
+        companyDetails,
       });
       generated.push("CT600N");
     }
@@ -201,7 +235,7 @@ export default async function handler(req, res) {
     // ────────────────────────────────────────────────
     const computationsIxbrl = await buildComputationsIxbrl({
       clientId,
-      companyNumber: client.companyNumber || client.company_number || "",
+      companyNumber: client.company_number || "",
       companyName: client.business_name || client.name,
       gaapFramework: "FRS102-1A",
       computations,
@@ -227,7 +261,7 @@ export default async function handler(req, res) {
     // ────────────────────────────────────────────────
     const { ixbrl: accountsIxbrl, framework } = await buildAccountsIxbrl({
       clientId,
-      companyNumber: client.companyNumber || client.company_number || "",
+      companyNumber: client.company_number || "",
       companyName: client.business_name || client.name,
       periodStart,
       periodEnd,
