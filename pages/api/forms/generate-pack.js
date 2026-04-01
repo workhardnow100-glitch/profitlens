@@ -8,10 +8,11 @@ import { generateCt600fPdf } from "../../../lib/pdf/templates/ct600f";
 import { generateCt600mPdf } from "../../../lib/pdf/templates/ct600m";
 import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
 
-// NEW IMPORTS FOR iXBRL
+// NEW IMPORTS FOR iXBRL + XML
 import { computeCtForPeriod } from "../../../lib/ct/engine";
 import { buildComputationsIxbrl } from "../../../lib/ixbrl/computationsBuilder";
 import { buildAccountsIxbrl } from "../../../lib/ixbrl/accountBuilder";
+import { buildCt600Xml } from "../../../lib/ct/xmlBuilder";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -31,9 +32,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ────────────────────────────────────────────────
     // 1. LOAD COMPANY DETAILS (FROM SUPABASE)
-    // ────────────────────────────────────────────────
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -68,9 +67,7 @@ export default async function handler(req, res) {
       mtditsa_id: client.mtditsa_id,
     };
 
-    // ────────────────────────────────────────────────
     // 2. DETECT SUPPLEMENTS (JOURNALS FROM SUPABASE)
-    // ────────────────────────────────────────────────
     const { data: journals, error: journalsError } = await supabaseAdmin
       .from("journal_entries")
       .select(
@@ -122,20 +119,16 @@ export default async function handler(req, res) {
       ct600NRequired: sumByPrefix("NI") > 0,
     };
 
-    // ────────────────────────────────────────────────
     // 3. COMPUTE CT DATA ONCE
-    // ────────────────────────────────────────────────
     const computations = await computeCtForPeriod({
       clientId,
       periodStart,
       periodEnd,
     });
 
-    // ────────────────────────────────────────────────
-    // 3A. GENERATE CT600 PDF (WITH FULL DATA)
-    // ────────────────────────────────────────────────
     const generated = [];
 
+    // 3A. GENERATE CT600 PDF
     await generateCt600Pdf({
       clientId,
       periodStart,
@@ -157,11 +150,34 @@ export default async function handler(req, res) {
 
       supplements,
     });
-    generated.push("CT600");
+    generated.push("CT600_PDF");
 
-    // ────────────────────────────────────────────────
+    // 3A.1 GENERATE CT600 XML (MANDATORY FOR HMRC)
+    const ct600Xml = buildCt600Xml({
+      clientId,
+      companyNumber: client.company_number || "",
+      companyName: client.business_name || client.name,
+      periodStart,
+      periodEnd,
+      computations,
+    });
+
+    const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
+
+    const { error: ct600XmlError } = await supabaseAdmin.storage
+      .from("pdfs")
+      .upload(ct600XmlPath, ct600Xml, {
+        contentType: "application/xml",
+        upsert: true,
+      });
+
+    if (ct600XmlError) {
+      console.error("Failed to upload CT600 XML:", ct600XmlError);
+    } else {
+      generated.push("CT600_XML");
+    }
+
     // 3B. OTHER PDF FORMS
-    // ────────────────────────────────────────────────
     if (supplements.ct600ARequired) {
       await generateCt600aPdf({
         clientId,
@@ -172,7 +188,7 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600A");
+      generated.push("CT600A_PDF");
     }
 
     if (supplements.ct600JRequired) {
@@ -185,7 +201,7 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600J");
+      generated.push("CT600J_PDF");
     }
 
     if (supplements.ct600LRequired) {
@@ -198,7 +214,7 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600L");
+      generated.push("CT600L_PDF");
     }
 
     if (supplements.ct600FRequired) {
@@ -211,7 +227,7 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600F");
+      generated.push("CT600F_PDF");
     }
 
     if (supplements.ct600MRequired) {
@@ -224,7 +240,7 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600M");
+      generated.push("CT600M_PDF");
     }
 
     if (supplements.ct600NRequired) {
@@ -237,12 +253,10 @@ export default async function handler(req, res) {
         createdBy: "system",
         companyDetails,
       });
-      generated.push("CT600N");
+      generated.push("CT600N_PDF");
     }
 
-    // ────────────────────────────────────────────────
     // 3C. GENERATE COMPUTATIONS iXBRL
-    // ────────────────────────────────────────────────
     const computationsIxbrl = await buildComputationsIxbrl({
       clientId,
       companyNumber: client.company_number || "",
@@ -266,9 +280,7 @@ export default async function handler(req, res) {
       generated.push("iXBRL_COMPUTATIONS");
     }
 
-    // ────────────────────────────────────────────────
-    // 3D. GENERATE ACCOUNTS iXBRL (NEW)
-    // ────────────────────────────────────────────────
+    // 3D. GENERATE ACCOUNTS iXBRL
     const { ixbrl: accountsIxbrl, framework } =
       await buildAccountsIxbrl({
         clientId,
@@ -294,9 +306,7 @@ export default async function handler(req, res) {
       generated.push(`iXBRL_ACCOUNTS_${framework}`);
     }
 
-    // ────────────────────────────────────────────────
     // 4. RETURN RESULT
-    // ────────────────────────────────────────────────
     return res.status(200).json({
       success: true,
       generated,

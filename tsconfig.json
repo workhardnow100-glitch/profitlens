@@ -31,7 +31,7 @@
     "pages/home.jsx",
     "pages/api/forms/generate.js",
     ".next/types/**/*.ts"
-, "components/AccountantClientOverview.jsx", "lib/ct/submissionEnvelope.js"  ],
+, "components/AccountantClientOverview.jsx", "lib/ct/submissionEnvelope.js", "lib/ct/xmlBuilder.js"  ],
   "exclude": [
     "node_modules"
   ]
