@@ -73,32 +73,54 @@ export async function buildAccountsIxbrl(params: {
   }
 
   // ────────────────────────────────────────────────
-  // 2. LOAD JOURNALS FROM SUPABASE
-  // ────────────────────────────────────────────────
-  const { data: journals, error: journalsError } = await supabaseAdmin
-    .from("journals")
-    .select("*, lines(*)")
-    .eq("clientId", clientId)
-    .gte("date", periodStart)
-    .lte("date", periodEnd);
+// 2. LOAD JOURNALS FROM SUPABASE (FIXED)
+// ────────────────────────────────────────────────
+const { data: journals, error: journalsError } = await supabaseAdmin
+  .from("journal_entries")
+  .select(`
+    id,
+    date,
+    client_id,
+    lines:journal_lines (
+      debit,
+      credit,
+      account:chart_of_account_entries (
+        account_code,
+        account_name
+      )
+    )
+  `)
+  .eq("client_id", clientId)
+  .gte("date", periodStart)
+  .lte("date", periodEnd);
 
-  if (journalsError) {
-    throw new Error("Failed to load journals: " + journalsError.message);
+if (journalsError) {
+  throw new Error("Failed to load journals: " + journalsError.message);
+}
+
+
+ // ────────────────────────────────────────────────
+// 3. BUILD TRIAL BALANCE (FINAL FIXED VERSION)
+// ────────────────────────────────────────────────
+const balances: Record<string, number> = {};
+
+for (const j of journals || []) {
+  for (const line of j.lines || []) {
+    const account = Array.isArray(line.account)
+      ? line.account[0]
+      : line.account;
+
+    const code = account?.account_code;
+    if (!code) continue;
+
+    const amt =
+      Number(line.debit ?? 0) -
+      Number(line.credit ?? 0);
+
+    balances[code] = (balances[code] || 0) + amt;
   }
+}
 
-  // ────────────────────────────────────────────────
-  // 3. BUILD TRIAL BALANCE
-  // ────────────────────────────────────────────────
-  const balances: Record<string, number> = {};
-
-  for (const j of journals || []) {
-    for (const line of j.lines || []) {
-      const code = line.accountCode;
-      if (!code) continue;
-      const amt = Number(line.amount || 0);
-      balances[code] = (balances[code] || 0) + amt;
-    }
-  }
 
   // ────────────────────────────────────────────────
   // 4. AGGREGATE INTO HIGH-LEVEL BUCKETS
