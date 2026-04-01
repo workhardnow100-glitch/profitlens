@@ -3,9 +3,9 @@
  * File: pages/api/corp/summary.js
  * Purpose:
  *   Compute Corporation Tax summary using the UNIFIED JOURNAL ENGINE:
- *     - Trading income (journal-driven)
- *     - Allowable expenses (hmrc_bucket = 'allowable')
- *     - Disallowable expenses (hmrc_bucket = 'disallowable')
+ *     - Trading income (credit)
+ *     - Allowable expenses (net debit)
+ *     - Disallowable expenses (net debit)
  *     - Profit (from unified P&L)
  *     - Adjusted profit (profit + disallowables)
  *     - Corporation Tax due (marginal relief aware)
@@ -20,7 +20,6 @@ import { supabaseAdmin } from "../../../lib/supabase-admin";
 import {
   getUnifiedProfitAndLoss,
   getUnifiedTrialBalance,
-  getUnifiedBalanceSheet,
 } from "../../../lib/accounting/balance-sheet-engine";
 
 // Marginal relief calculator (unchanged)
@@ -97,42 +96,59 @@ export default async function handler(req, res) {
     const pl = await getUnifiedProfitAndLoss(clientId);
     const tb = await getUnifiedTrialBalance(clientId);
 
-    // 2. Classify journal lines
+    // 2. Classify journal lines with correct CT amounts
     const breakdown = tb.lines.map((line) => {
+      const debit = Number(line.debit || 0);
+      const credit = Number(line.credit || 0);
+
       let ctType = "ignore";
+      let ctAmount = 0;
 
       if (line.account_type === "INCOME") {
         ctType = "income";
+        ctAmount = credit; // income = credit
       } else if (line.account_type === "EXPENSE") {
-        if (line.hmrc_bucket === "allowable") ctType = "allowable";
-        else if (line.hmrc_bucket === "disallowable") ctType = "disallowable";
-        else ctType = "review";
+        const netExpense = debit - credit; // expense = debit - credit
+
+        if (line.hmrc_bucket === "allowable") {
+          ctType = "allowable";
+          ctAmount = netExpense > 0 ? netExpense : 0;
+        } else if (line.hmrc_bucket === "disallowable") {
+          ctType = "disallowable";
+          ctAmount = netExpense > 0 ? netExpense : 0;
+        } else {
+          ctType = "review";
+          ctAmount = netExpense > 0 ? netExpense : 0;
+        }
       }
 
       return {
         account_code: line.account_code,
         account_name: line.account_name,
-        amount: line.balance,
         hmrc_bucket: line.hmrc_bucket,
         account_type: line.account_type,
+        debit,
+        credit,
+        balance: Number(line.balance || 0),
         ctType,
+        amount: ctAmount,
       };
     });
 
-    // 3. Totals
+    // 3. Totals (correct sign logic)
     const income = breakdown
       .filter((b) => b.ctType === "income")
       .reduce((sum, b) => sum + b.amount, 0);
 
     const allowable = breakdown
       .filter((b) => b.ctType === "allowable")
-      .reduce((sum, b) => sum + Math.abs(b.amount), 0);
+      .reduce((sum, b) => sum + b.amount, 0);
 
     const disallowable = breakdown
       .filter((b) => b.ctType === "disallowable")
-      .reduce((sum, b) => sum + Math.abs(b.amount), 0);
+      .reduce((sum, b) => sum + b.amount, 0);
 
-    // 4. Profit from unified P&L
+    // 4. Profit from unified P&L (correct)
     const profit = pl.summary.net_profit;
 
     // 5. Adjusted profit
