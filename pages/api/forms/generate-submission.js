@@ -12,13 +12,15 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Method not allowed" });
     }
 
-    // FIX 1: include periodStart
-    const { clientId, periodStart, periodEnd } = req.body;
+    const { clientId, periodStart, periodEnd } = req.body || {};
 
-    if (!clientId || !periodStart || !periodEnd) {
+    console.log("GENERATE-SUBMISSION BODY:", req.body);
+
+    // Only hard‑require clientId and periodEnd now
+    if (!clientId || !periodEnd) {
       return res.status(400).json({
         success: false,
-        message: "Missing clientId, periodStart, or periodEnd.",
+        message: "Missing clientId or periodEnd.",
       });
     }
 
@@ -33,6 +35,13 @@ export default async function handler(req, res) {
         message: "Client not found.",
       });
     }
+
+    // Derive a safe periodStart (fallbacks)
+    const safePeriodStart =
+      periodStart ||
+      client.periodStart ||
+      client.accounting_period_start ||
+      periodEnd; // last‑ditch fallback
 
     // Paths for artefacts
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
@@ -63,16 +72,12 @@ export default async function handler(req, res) {
       senderId: "YOUR_SENDER_ID",
       password: "YOUR_PASSWORD",
 
-      // FIX 2: pass full client object
       client,
 
       companyNumber: client.companyNumber || client.company_number || "",
       companyName: client.business_name || client.name,
-
-      // FIX 3: use periodStart from request, not client.periodStart
-      periodStart,
+      periodStart: safePeriodStart,
       periodEnd,
-
       ct600Xml,
       computationsIxbrl,
       accountsIxbrl,
@@ -100,7 +105,6 @@ export default async function handler(req, res) {
       success: true,
       submissionPath,
     });
-
   } catch (err) {
     console.error("Submission envelope generation failed:", err);
     return res.status(500).json({
