@@ -3,7 +3,7 @@
 export type TaxonomyType = "accounts" | "computations";
 
 export interface TaxonomyRegistryEntry {
-  id: string;                 // e.g. "frc-2023-small", "hmrc-ct-2024"
+  id: string;                 // e.g. "frs102-1a-2024", "hmrc-ct-2024"
   type: TaxonomyType;
   version: string;            // "2023", "2024", etc.
   label: string;              // Human label
@@ -12,13 +12,20 @@ export interface TaxonomyRegistryEntry {
   entryPointUrl: string;      // Official entry point URL
 }
 
+export type TaxonomyDataType =
+  | "monetary"
+  | "string"
+  | "boolean"
+  | "integer"
+  | "textBlock";
+
 export interface TaxonomyConceptMapEntry {
   id: string;
   taxonomyId: string;         // FK to TaxonomyRegistryEntry.id
-  internalKey: string;        // e.g. "ct.taxable_profit", "bs.assets.current.cash"
+  internalKey: string;        // e.g. "ct.taxable_profit", "accounts.bs.total_assets"
   xbrlName: string;           // e.g. "uk-corp-tax:TaxableProfit"
   xbrlNamespace: string;      // e.g. "http://www.gov.uk/taxonomy/uk-corp-tax"
-  dataType: "monetary" | "string" | "boolean" | "integer";
+  dataType: TaxonomyDataType;
   balanceType?: "debit" | "credit" | null;
   notes?: string;
 }

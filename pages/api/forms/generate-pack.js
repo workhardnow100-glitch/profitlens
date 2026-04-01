@@ -12,6 +12,7 @@ import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
 // NEW IMPORTS FOR iXBRL
 import { computeCtForPeriod } from "../../../lib/ct/engine";
 import { buildComputationsIxbrl } from "../../../lib/ixbrl/computationsBuilder";
+import { buildAccountsIxbrl } from "../../../lib/ixbrl/accountsBuilder";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
@@ -170,17 +171,15 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
-    // 3B. GENERATE COMPUTATIONS iXBRL (NEW)
+    // 3B. GENERATE COMPUTATIONS iXBRL
     // ────────────────────────────────────────────────
 
-    // 1. Compute CT figures
     const computations = await computeCtForPeriod({
       clientId,
       periodStart,
       periodEnd,
     });
 
-    // 2. Build iXBRL XHTML
     const computationsIxbrl = await buildComputationsIxbrl({
       clientId,
       companyNumber: client.companyNumber || client.company_number || "",
@@ -189,7 +188,6 @@ export default async function handler(req, res) {
       computations,
     });
 
-    // 3. Upload to Supabase
     const ixbrlPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
 
     const { error: ixbrlError } = await supabaseAdmin.storage
@@ -203,6 +201,34 @@ export default async function handler(req, res) {
       console.error("Failed to upload computations iXBRL:", ixbrlError);
     } else {
       generated.push("iXBRL_COMPUTATIONS");
+    }
+
+    // ────────────────────────────────────────────────
+    // 3C. GENERATE ACCOUNTS iXBRL (NEW)
+    // ────────────────────────────────────────────────
+
+    const { ixbrl: accountsIxbrl, framework } = await buildAccountsIxbrl({
+      clientId,
+      companyNumber: client.companyNumber || client.company_number || "",
+      companyName: client.business_name || client.name,
+      periodStart,
+      periodEnd,
+      defaultFramework: "FRS102-1A",
+    });
+
+    const accountsPath = `ixbrl/ACCOUNTS_${framework}_${clientId}_${periodEnd}.xhtml`;
+
+    const { error: accountsError } = await supabaseAdmin.storage
+      .from("pdfs")
+      .upload(accountsPath, accountsIxbrl, {
+        contentType: "application/xhtml+xml",
+        upsert: true,
+      });
+
+    if (accountsError) {
+      console.error("Failed to upload accounts iXBRL:", accountsError);
+    } else {
+      generated.push(`iXBRL_ACCOUNTS_${framework}`);
     }
 
     // ────────────────────────────────────────────────
