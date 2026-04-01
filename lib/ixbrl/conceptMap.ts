@@ -3,7 +3,7 @@ import { TaxonomyConceptMapEntry } from "./types";
 
 export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
   // ────────────────────────────────────────────────
-  // CT COMPUTATIONS (existing)
+  // CT COMPUTATIONS
   // ────────────────────────────────────────────────
   {
     id: "ct-taxable-profit",
@@ -111,7 +111,6 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
 
   // ────────────────────────────────────────────────
   // ACCOUNTS — FRS105 (2024)
-  // (mapped to equivalent micro-entity concepts)
   // ────────────────────────────────────────────────
   {
     id: "frs105-assets-total",
@@ -141,9 +140,46 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
     balanceType: "credit",
   },
 
+  // ⭐ NEW — FRS105 P&L mappings
+  {
+    id: "frs105-turnover",
+    taxonomyId: "frs105-2024",
+    internalKey: "accounts.pl.turnover",
+    xbrlName: "frs105:Turnover",
+    xbrlNamespace: "http://www.xbrl.org/uk/frs/105/2024-01-01",
+    dataType: "monetary",
+    balanceType: "credit",
+  },
+  {
+    id: "frs105-cost-of-sales",
+    taxonomyId: "frs105-2024",
+    internalKey: "accounts.pl.cost_of_sales",
+    xbrlName: "frs105:CostOfSales",
+    xbrlNamespace: "http://www.xbrl.org/uk/frs/105/2024-01-01",
+    dataType: "monetary",
+    balanceType: "debit",
+  },
+  {
+    id: "frs105-gross-profit",
+    taxonomyId: "frs105-2024",
+    internalKey: "accounts.pl.gross_profit",
+    xbrlName: "frs105:GrossProfitLoss",
+    xbrlNamespace: "http://www.xbrl.org/uk/frs/105/2024-01-01",
+    dataType: "monetary",
+    balanceType: "credit",
+  },
+  {
+    id: "frs105-profit-for-year",
+    taxonomyId: "frs105-2024",
+    internalKey: "accounts.pl.profit_for_year",
+    xbrlName: "frs105:ProfitLossForPeriod",
+    xbrlNamespace: "http://www.xbrl.org/uk/frs/105/2024-01-01",
+    dataType: "monetary",
+    balanceType: "credit",
+  },
+
   // ────────────────────────────────────────────────
   // ACCOUNTS — IFRS (2024)
-  // (mapped to equivalent IFRS concepts)
   // ────────────────────────────────────────────────
   {
     id: "ifrs-assets-total",
@@ -174,10 +210,7 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
   },
 ];
 
-export function getConceptByInternalKey(
-  taxonomyId: string,
-  internalKey: string
-) {
+export function getConceptByInternalKey(taxonomyId: string, internalKey: string) {
   const concept = TAXONOMY_CONCEPT_MAP.find(
     (c) => c.taxonomyId === taxonomyId && c.internalKey === internalKey
   );
