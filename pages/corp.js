@@ -34,6 +34,13 @@ export default function CorpPage() {
   const [ctLoading, setCtLoading] = useState(false);
   const [ctError, setCtError] = useState(null);
 
+  // CT600 filing engine state
+  const [filingLoading, setFilingLoading] = useState(false);
+  const [filingError, setFilingError] = useState(null);
+  const [filingPack, setFilingPack] = useState(null);
+  const [submissionEnvelope, setSubmissionEnvelope] = useState(null);
+  const [hmrcSubmission, setHmrcSubmission] = useState(null);
+
   // Unified client resolution
   const clientId = user?.actingAsClientId ?? user?.clientId;
 
@@ -106,13 +113,13 @@ export default function CorpPage() {
     }
   }
 
-  // Submit CT period
+  // Submit CT period (lock)
   async function submitCorp() {
     if (!from || !to) {
       alert("Please select both start and end dates.");
       return;
     }
-    if (!confirm("Submit this Corporation Tax period? This will lock it.")) return;
+    if (!confirm("Lock this Corporation Tax period? This will prevent further edits.")) return;
 
     setLoading(true);
     try {
@@ -235,6 +242,145 @@ export default function CorpPage() {
     }
   }
 
+  // CT600 filing: generate pack
+  async function generateFilingPack() {
+    if (!clientId) {
+      alert("Missing client ID.");
+      return;
+    }
+    if (!from || !to) {
+      alert("Please select both start and end dates before generating the filing pack.");
+      return;
+    }
+
+    setFilingLoading(true);
+    setFilingError(null);
+    try {
+      const res = await fetch("/api/forms/generate-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setFilingError(data.error || "Error generating filing pack.");
+        alert("Error generating filing pack: " + (data.error || "Unknown error"));
+        return;
+      }
+
+      // Expecting backend to return something like:
+      // { success: true, pack: { ct600PdfUrl, accountsIxbrlUrl, computationsIxbrlUrl, ct600XmlUrl } }
+      setFilingPack(data.pack || null);
+      alert("Filing pack generated successfully.");
+    } catch (err) {
+      console.error(err);
+      setFilingError(err.message);
+      alert("Error generating filing pack: " + err.message);
+    } finally {
+      setFilingLoading(false);
+    }
+  }
+
+  // CT600 filing: build submission envelope
+  async function buildSubmissionEnvelope() {
+    if (!clientId) {
+      alert("Missing client ID.");
+      return;
+    }
+    if (!from || !to) {
+      alert("Please select both start and end dates before building the submission envelope.");
+      return;
+    }
+
+    setFilingLoading(true);
+    setFilingError(null);
+    try {
+      const res = await fetch("/api/forms/generate-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodEnd: to,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setFilingError(data.error || "Error generating submission envelope.");
+        alert("Error generating submission envelope: " + (data.error || "Unknown error"));
+        return;
+      }
+
+      // Expecting backend to return something like:
+      // { success: true, submission: { envelopeUrl } }
+      setSubmissionEnvelope(data.submission || null);
+      alert("Submission envelope generated successfully.");
+    } catch (err) {
+      console.error(err);
+      setFilingError(err.message);
+      alert("Error generating submission envelope: " + err.message);
+    } finally {
+      setFilingLoading(false);
+    }
+  }
+
+  // CT600 filing: submit to HMRC (test or live)
+  async function submitToHmrc(environment = "test") {
+    if (!clientId) {
+      alert("Missing client ID.");
+      return;
+    }
+    if (!from || !to) {
+      alert("Please select both start and end dates before submitting to HMRC.");
+      return;
+    }
+
+    const label = environment === "live" ? "LIVE" : "TEST";
+    if (
+      environment === "live" &&
+      !confirm("Submit this CT600 to HMRC LIVE gateway? This cannot be undone.")
+    ) {
+      return;
+    }
+
+    setFilingLoading(true);
+    setFilingError(null);
+    try {
+      const res = await fetch("/api/forms/submit-to-hmrc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodEnd: to,
+          environment,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setFilingError(data.error || `Error submitting CT600 to HMRC (${label}).`);
+        alert("Error submitting CT600 to HMRC: " + (data.error || "Unknown error"));
+        return;
+      }
+
+      // Expecting backend to return something like:
+      // { success: true, environment, response: { hmrcResponseUrl } }
+      setHmrcSubmission(data.response || null);
+      alert(`CT600 submitted to HMRC (${label}) successfully.`);
+    } catch (err) {
+      console.error(err);
+      setFilingError(err.message);
+      alert("Error submitting CT600 to HMRC: " + err.message);
+    } finally {
+      setFilingLoading(false);
+    }
+  }
+
   const hasResult = !!result;
 
   // RENDER
@@ -351,8 +497,159 @@ export default function CorpPage() {
               {reviewRows.length > 0 && (
                 <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
                   There are <strong>{reviewRows.length}</strong> transactions marked as{" "}
-                    <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
-                    CT rules and should be checked before filing.
+                  <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
+                  CT rules and should be checked before filing.
+                </div>
+              )}
+            </ResponsiveCard>
+
+            {/* CT600 Filing – new engine */}
+            <ResponsiveCard title="CT600 Filing">
+              <p className="text-sm text-slate-600 mb-3">
+                Generate CT600 PDFs, iXBRL accounts and computations, build the HMRC submission
+                envelope, and submit to HMRC. Review all artefacts before filing.
+              </p>
+
+              {filingError && (
+                <div className="mb-3 p-3 rounded border border-red-300 bg-red-50 text-red-800 text-sm">
+                  Filing error: {filingError}
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 mb-4">
+                <button
+                  onClick={generateFilingPack}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded text-sm"
+                  disabled={filingLoading || !from || !to}
+                >
+                  {filingLoading ? "Working…" : "Generate Filing Pack"}
+                </button>
+                <button
+                  onClick={buildSubmissionEnvelope}
+                  className="bg-slate-800 text-white px-4 py-2 rounded text-sm"
+                  disabled={filingLoading || !from || !to}
+                >
+                  {filingLoading ? "Working…" : "Build Submission Envelope"}
+                </button>
+                <button
+                  onClick={() => submitToHmrc("test")}
+                  className="bg-emerald-600 text-white px-4 py-2 rounded text-sm"
+                  disabled={filingLoading || !from || !to}
+                >
+                  {filingLoading ? "Submitting…" : "Submit to HMRC (Test)"}
+                </button>
+                <button
+                  onClick={() => submitToHmrc("live")}
+                  className="bg-red-600 text-white px-4 py-2 rounded text-sm"
+                  disabled={filingLoading || !from || !to}
+                >
+                  {filingLoading ? "Submitting…" : "Submit to HMRC (Live)"}
+                </button>
+              </div>
+
+              {/* Preview artefacts from filing pack */}
+              {filingPack && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">
+                    Generated artefacts (from filing pack):
+                  </p>
+                  <ul className="text-xs text-slate-600 space-y-1">
+                    {filingPack.ct600PdfUrl && (
+                      <li>
+                        <a
+                          href={filingPack.ct600PdfUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-700 underline"
+                        >
+                          View CT600 PDF
+                        </a>
+                      </li>
+                    )}
+                    {filingPack.accountsIxbrlUrl && (
+                      <li>
+                        <a
+                          href={filingPack.accountsIxbrlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-700 underline"
+                        >
+                          View Accounts iXBRL
+                        </a>
+                      </li>
+                    )}
+                    {filingPack.computationsIxbrlUrl && (
+                      <li>
+                        <a
+                          href={filingPack.computationsIxbrlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-700 underline"
+                        >
+                          View Computations iXBRL
+                        </a>
+                      </li>
+                    )}
+                    {filingPack.ct600XmlUrl && (
+                      <li>
+                        <a
+                          href={filingPack.ct600XmlUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-indigo-700 underline"
+                        >
+                          View CT600 XML
+                        </a>
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {/* Preview submission envelope */}
+              {submissionEnvelope && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">
+                    HMRC submission envelope:
+                  </p>
+                  {submissionEnvelope.envelopeUrl ? (
+                    <a
+                      href={submissionEnvelope.envelopeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-700 underline text-xs"
+                    >
+                      View Submission Envelope XML
+                    </a>
+                  ) : (
+                    <p className="text-xs text-slate-500">
+                      Submission envelope generated, but no URL returned. Check backend response
+                      shape.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* HMRC response */}
+              {hmrcSubmission && (
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-semibold text-slate-700">
+                    HMRC response:
+                  </p>
+                  {hmrcSubmission.hmrcResponseUrl ? (
+                    <a
+                      href={hmrcSubmission.hmrcResponseUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-indigo-700 underline text-xs"
+                    >
+                      View HMRC Response XML
+                    </a>
+                  ) : (
+                    <p className="text-xs text-slate-500">
+                      HMRC response recorded, but no URL returned. Check backend response shape.
+                    </p>
+                  )}
                 </div>
               )}
             </ResponsiveCard>
