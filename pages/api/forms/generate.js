@@ -21,6 +21,13 @@ import { v4 as uuidv4 } from "uuid";
 
 // PDF templates
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
+import { generateCt600aPdf } from "../../../lib/pdf/templates/ct600a";
+import { generateCt600jPdf } from "../../../lib/pdf/templates/ct600j";
+import { generateCt600lPdf } from "../../../lib/pdf/templates/ct600l";
+import { generateCt600fPdf } from "../../../lib/pdf/templates/ct600f";
+import { generateCt600mPdf } from "../../../lib/pdf/templates/ct600m";
+import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
+
 import { generateSa100Pdf } from "../../../lib/pdf/templates/sa100";
 import { generateSa103Pdf } from "../../../lib/pdf/templates/sa103";
 import { generateSa105Pdf } from "../../../lib/pdf/templates/sa105";
@@ -403,8 +410,8 @@ async function buildCTFormData(
   // CT is journal‑driven, filtered by CT toggle on transactions
   const ctJournals = await loadCTJournals(clientId, periodStart, periodEnd);
 
-  let turnover = 0;              // Trading income only (Sales + Other Income)
-  let nonTradingIncome = 0;      // Asset sales, grants, refunds, etc.
+  let turnover = 0; // Trading income only (Sales + Other Income)
+  let nonTradingIncome = 0; // Asset sales, grants, refunds, etc.
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
 
@@ -424,6 +431,12 @@ async function buildCTFormData(
   let rAndDSmeSpend = 0;
   let rAndDGrants = 0;
 
+  // Simple placeholders for other supplements (can be refined later)
+  let dotasFlag = false;
+  let charityIncome = 0;
+  let royaltyIncome = 0;
+  let niTradingFlag = false;
+
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
       const accountName =
@@ -431,7 +444,6 @@ async function buildCTFormData(
       const amt = amountFromLine(line);
 
       // --- CT600A / DLA movements & interest (always tracked, even if ignored for CT P&L) ---
-
       if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
         if (amt > 0) {
           // Debit to DLA-related asset account → loan advanced / overdrawn
@@ -443,33 +455,51 @@ async function buildCTFormData(
       }
 
       if (accountName === DLA_INTEREST_INCOME_ACCOUNT) {
-        // Interest charged to director (income)
         if (amt > 0) {
           dlaInterestCharged += amt;
         }
       }
 
       if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT) {
-        // Interest paid on director loan (expense)
         if (amt > 0) {
           dlaInterestPaid += amt;
         }
       }
 
       // --- CT600L / R&D detection (journal-driven) ---
-
       if (R_AND_D_SME_ACCOUNTS.includes(accountName)) {
         if (amt > 0) {
           rAndDSmeSpend += amt;
         }
-        // still treated as allowable expense below
       }
 
       if (accountName === R_AND_D_GRANTS_ACCOUNT) {
         if (amt > 0) {
           rAndDGrants += amt;
         }
-        // grants are non-trading income for CT, but we also track them for R&D
+      }
+
+      // --- Other supplements (simple, conservative detection) ---
+      const lowerName = accountName.toLowerCase();
+
+      // CT600J — DOTAS (placeholder: any account explicitly named DOTAS)
+      if (lowerName.includes("dotas")) {
+        dotasFlag = true;
+      }
+
+      // CT600F — Charity (placeholder: any account containing "charity")
+      if (lowerName.includes("charity")) {
+        if (amt > 0) charityIncome += amt;
+      }
+
+      // CT600M — Royalties (placeholder: any account containing "royalty")
+      if (lowerName.includes("royalty")) {
+        if (amt > 0) royaltyIncome += amt;
+      }
+
+      // CT600N — NI trading (placeholder: any account containing "northern ireland")
+      if (lowerName.includes("northern ireland")) {
+        niTradingFlag = true;
       }
 
       // 1. Ignore system accounts for CT profit computation
@@ -594,7 +624,6 @@ async function buildCTFormData(
     autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
   // For now, we keep SME payable credit and surrendered loss at 0
-  // (can be extended later with full waterfall)
   const autoSmePayableCredit = 0;
   const autoSurrenderedLoss = 0;
 
@@ -662,6 +691,19 @@ async function buildCTFormData(
   // Derived total loans to participators from journals if not explicitly stored
   const derivedTotalLoans =
     dlaLoansAdvanced - dlaLoansRepaid;
+
+  // Supplement detection (engine-wide, journal-driven)
+  const ct600ARequired =
+    (corpSubmission?.loans_to_participators != null
+      ? corpSubmission.loans_to_participators
+      : derivedTotalLoans) !== 0;
+
+  const ct600LRequired = rAndDSpend > 0;
+
+  const ct600JRequired = dotasFlag;
+  const ct600FRequired = charityIncome > 0;
+  const ct600MRequired = royaltyIncome > 0;
+  const ct600NRequired = niTradingFlag;
 
   return {
     summary: {
@@ -769,13 +811,16 @@ async function buildCTFormData(
     disclosures: {
       notes: corpSubmission?.notes || null,
     },
+    supplements: {
+      ct600ARequired,
+      ct600JRequired,
+      ct600LRequired,
+      ct600FRequired,
+      ct600MRequired,
+      ct600NRequired,
+    },
   };
 }
-
-
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /*                                SA ENGINE                                   */
@@ -1397,7 +1442,9 @@ async function generatePdfForForm(params) {
     contact_email: client.contact_email,
   };
 
-  if (formCode.startsWith("CT")) {
+  // ---------------- CT600 FAMILY ----------------
+
+  if (formCode === "CT600") {
     return await generateCt600Pdf({
       clientId,
       year,
@@ -1415,8 +1462,101 @@ async function generatePdfForForm(params) {
       loansToParticipators: formData.loansToParticipators,
       payments: formData.payments,
       disclosures: formData.disclosures,
+      supplements: formData.supplements || {},
     });
   }
+
+  if (formCode === "CT600A") {
+    return await generateCt600aPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      loansToParticipators: formData.loansToParticipators,
+      ctSummary: formData.summary,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  if (formCode === "CT600J") {
+    return await generateCt600jPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      ctSummary: formData.summary,
+      computations: formData.computations,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  if (formCode === "CT600L") {
+    return await generateCt600lPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      rAndD: formData.rAndD,
+      ctSummary: formData.summary,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  if (formCode === "CT600F") {
+    return await generateCt600fPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      ctSummary: formData.summary,
+      computations: formData.computations,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  if (formCode === "CT600M") {
+    return await generateCt600mPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      ctSummary: formData.summary,
+      computations: formData.computations,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  if (formCode === "CT600N") {
+    return await generateCt600nPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      ctSummary: formData.summary,
+      computations: formData.computations,
+      disclosures: formData.disclosures,
+    });
+  }
+
+  // ---------------- SA FAMILY ----------------
 
   if (formCode === "SA100") {
     return await generateSa100Pdf({
@@ -1538,6 +1678,8 @@ async function generatePdfForForm(params) {
       disclosures: formData.disclosures,
     });
   }
+
+  // ---------------- CIS FAMILY ----------------
 
   if (formCode === "CIS300") {
     return await generateCis300Pdf({

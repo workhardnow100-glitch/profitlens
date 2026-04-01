@@ -67,6 +67,10 @@ export default function FormsPage() {
   const [ctAdjustmentsLoaded, setCtAdjustmentsLoaded] = useState(false);
   const [ctValidationError, setCtValidationError] = useState("");
 
+  // ⭐ CT600 Supplement Detection
+  const [supplements, setSupplements] = useState(null);
+  const [supplementsLoading, setSupplementsLoading] = useState(false);
+
   const CT_FORMS = [
     { code: "CT600", label: "CT600 — Main Corporation Tax return" },
     { code: "CT600A", label: "CT600A — Loans to participators" },
@@ -168,6 +172,38 @@ export default function FormsPage() {
     loadAdjustments();
   }, [selectedCTForm, clientId, periodStart, periodEnd]);
 
+  // ⭐ AUTO‑LOAD CT600 SUPPLEMENTS (period + client)
+  useEffect(() => {
+    if (!clientId || !periodStart || !periodEnd) {
+      setSupplements(null);
+      return;
+    }
+
+    const loadSupplements = async () => {
+      try {
+        setSupplementsLoading(true);
+
+        const res = await fetch(
+          `/api/forms/ct600/supplements?clientId=${clientId}&periodStart=${periodStart}&periodEnd=${periodEnd}`
+        );
+
+        const data = await res.json();
+        if (data.success) {
+          setSupplements(data.supplements);
+        } else {
+          setSupplements(null);
+        }
+      } catch (err) {
+        console.error("Failed to load supplements", err);
+        setSupplements(null);
+      } finally {
+        setSupplementsLoading(false);
+      }
+    };
+
+    loadSupplements();
+  }, [clientId, periodStart, periodEnd]);
+
   // ⭐ Save CT Adjustments
   const handleSaveCTAdjustments = async () => {
     setErrorMessage(null);
@@ -213,7 +249,7 @@ export default function FormsPage() {
     }
   };
 
-  // ⭐ Generate form
+  // ⭐ Generate single form
   const handleGenerate = async (category) => {
     setResultMessage(null);
     setErrorMessage(null);
@@ -263,6 +299,43 @@ export default function FormsPage() {
       setResultMessage(
         `Form ${formCode} generated successfully. PDF saved and available for download.`
       );
+    } catch (err) {
+      setErrorMessage(err.message || "Something went wrong.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ⭐ Generate full CT pack
+  const handleGeneratePack = async () => {
+    setResultMessage(null);
+    setErrorMessage(null);
+
+    if (!clientId || !periodStart || !periodEnd) {
+      setErrorMessage("Client and period must be selected.");
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+
+      const res = await fetch("/api/forms/generate-pack", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart,
+          periodEnd,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to generate CT pack.");
+      }
+
+      setResultMessage(`CT pack generated: ${data.generated.join(", ")}`);
     } catch (err) {
       setErrorMessage(err.message || "Something went wrong.");
     } finally {
@@ -502,6 +575,53 @@ export default function FormsPage() {
                 {isLoading ? "Saving…" : "Save CT Adjustments"}
               </button>
             </div>
+          )}
+
+          {/* ⭐ CT600 Supplement Detection + Full Pack */}
+          {supplements && (
+            <section className="border border-blue-200 bg-blue-50 rounded-md p-4 space-y-2 text-sm md:col-span-3">
+              <h3 className="font-semibold">Detected CT600 Supplements</h3>
+
+              {supplementsLoading ? (
+                <p className="text-xs text-gray-600">Checking supplements…</p>
+              ) : (
+                <ul className="list-disc list-inside space-y-1">
+                  <li>
+                    CT600A — Loans to Participators:{" "}
+                    <strong>{supplements.ct600ARequired ? "Yes" : "No"}</strong>
+                  </li>
+                  <li>
+                    CT600J — DOTAS Disclosure:{" "}
+                    <strong>{supplements.ct600JRequired ? "Yes" : "No"}</strong>
+                  </li>
+                  <li>
+                    CT600L — R&amp;D Supplement:{" "}
+                    <strong>{supplements.ct600LRequired ? "Yes" : "No"}</strong>
+                  </li>
+                  <li>
+                    CT600F — Charity Exemptions:{" "}
+                    <strong>{supplements.ct600FRequired ? "Yes" : "No"}</strong>
+                  </li>
+                  <li>
+                    CT600M — Cross-Border Royalties:{" "}
+                    <strong>{supplements.ct600MRequired ? "Yes" : "No"}</strong>
+                  </li>
+                  <li>
+                    CT600N — Northern Ireland Rate:{" "}
+                    <strong>{supplements.ct600NRequired ? "Yes" : "No"}</strong>
+                  </li>
+                </ul>
+              )}
+
+              <button
+                type="button"
+                onClick={handleGeneratePack}
+                disabled={isLoading}
+                className="mt-3 w-full bg-indigo-600 text-white text-sm font-medium py-2 rounded disabled:opacity-50"
+              >
+                {isLoading ? "Generating CT Pack…" : "Generate Full CT Pack"}
+              </button>
+            </section>
           )}
 
           {/* SA */}
