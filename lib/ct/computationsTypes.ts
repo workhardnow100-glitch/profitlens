@@ -8,42 +8,63 @@ export interface CtComputations {
   taxableProfit: number;
   corporationTaxDue: number;
 
-  // 1. Summary
-  summary?: any;
-
-  // 2. Computations (high‑level)
-  computations?: {
+  // 1. Summary (normalised)
+  summary: {
+    tradingProfit: number;
+    adjustments: number;
+    capitalAllowances: number;
+    lossesUsed: number;
     taxableProfit: number;
-    taxDue: number;
-    capitalAllowances?: any[];
-    losses?: any[];
-    adjustments?: any[];
+    corporationTaxDue: number;
   };
 
-  // 3. Capital Allowances
-  capitalAllowances?: any[];
+  // 2. Capital Allowances (normalised)
+  capitalAllowances: {
+    total: number;
+    annualInvestmentAllowance: number;
+    firstYearAllowance: number;
+  };
 
-  // 4. Losses
-  losses?: any[];
+  // 3. Losses (normalised)
+  losses: {
+    broughtForward: number;
+    used: number;
+    carriedForward: number;
+  };
 
-  // 5. Adjustments
-  adjustments?: any[];
+  // 4. Adjustments (normalised)
+  adjustments: {
+    disallowableExpenses: number;
+    other: number;
+  };
+
+  // 5. Payments (normalised)
+  payments: {
+    totalPaid: number;
+    balancingDue: number;
+  };
 
   // 6. R&D (CT600L)
-  rAndD?: any;
+  rAndD: {
+    total: number;
+    enhancedDeduction: number;
+  };
 
   // 7. Loans to Participators (CT600A)
-  loansToParticipators?: any;
+  loansToParticipators: {
+    outstanding: number;
+    writtenOff: number;
+  };
 
-  // 8. Payments & Balances
-  payments?: any[];
+  // 8. Disclosures (normalised)
+  disclosures: {
+    charitableDonations: number;
+    politicalDonations: number;
+  };
 
-  // 9. Additional Disclosures
-  disclosures?: any[];
+  // 9. Income categories (unchanged)
+  incomeCategories: any[];
 
-  // 12. Income Categories
-  incomeCategories?: any[];
-
-  // 13. Payments & Balances (Expanded)
-  paymentsExpanded?: any;
+  // 10. Payments expanded (unchanged)
+  paymentsExpanded: any;
 }

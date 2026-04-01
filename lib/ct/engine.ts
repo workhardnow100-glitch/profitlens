@@ -1,6 +1,6 @@
 // lib/ct/engine.ts
 
-import { CtComputations } from "./computationsTypes";
+import type { CtComputations } from "./computationsTypes";
 import { getCt600Data } from "../ct/ct600Engine";
 import { supabaseAdmin } from "../supabase-admin";
 
@@ -11,12 +11,14 @@ export async function computeCtForPeriod(params: {
 }): Promise<CtComputations> {
   const { clientId, periodStart, periodEnd } = params;
 
+  // Load client
   const { data: client } = await supabaseAdmin
     .from("clients")
     .select("*")
     .eq("id", clientId)
     .maybeSingle();
 
+  // Load raw CT600 data from your tax engine
   const ctRaw = await getCt600Data({
     formCode: "CT600",
     client,
@@ -25,66 +27,80 @@ export async function computeCtForPeriod(params: {
     periodEnd,
   });
 
-  // Loosen types here so we’re not blocked by ct600Engine’s narrow typings
   const ct = ctRaw as any;
-  const computations = (ct.computations || {}) as any;
+  const c = ct.computations || {};
 
-  // Normalise disclosures: ct.disclosures might be { notes: ... } or an array
-  const rawDisclosures = ct.disclosures;
-  let disclosures: any[] = [];
-  if (Array.isArray(rawDisclosures)) {
-    disclosures = rawDisclosures;
-  } else if (rawDisclosures?.notes) {
-    disclosures = Array.isArray(rawDisclosures.notes)
-      ? rawDisclosures.notes
-      : [rawDisclosures.notes];
-  }
+  /* -------------------------------------------------------------------------- */
+  /* NORMALISE ALL CT600 SECTIONS INTO OBJECTS (NOT ARRAYS)                     */
+  /* -------------------------------------------------------------------------- */
+
+  const summary = {
+    tradingProfit: c.summary?.tradingProfit ?? 0,
+    adjustments: c.summary?.adjustments ?? 0,
+    capitalAllowances: c.summary?.capitalAllowances ?? 0,
+    lossesUsed: c.summary?.lossesUsed ?? 0,
+    taxableProfit: c.summary?.taxableProfit ?? 0,
+    corporationTaxDue: c.summary?.corporationTaxDue ?? 0,
+  };
+
+  const capitalAllowances = {
+    total: c.capitalAllowances?.total ?? 0,
+    annualInvestmentAllowance: c.capitalAllowances?.annualInvestmentAllowance ?? 0,
+    firstYearAllowance: c.capitalAllowances?.firstYearAllowance ?? 0,
+  };
+
+  const losses = {
+    broughtForward: c.losses?.broughtForward ?? 0,
+    used: c.losses?.used ?? 0,
+    carriedForward: c.losses?.carriedForward ?? 0,
+  };
+
+  const adjustments = {
+    disallowableExpenses: c.adjustments?.disallowableExpenses ?? 0,
+    other: c.adjustments?.other ?? 0,
+  };
+
+  const payments = {
+    totalPaid: c.payments?.totalPaid ?? 0,
+    balancingDue: c.payments?.balancingDue ?? 0,
+  };
+
+  const rAndD = {
+    total: c.rAndD?.total ?? 0,
+    enhancedDeduction: c.rAndD?.enhancedDeduction ?? 0,
+  };
+
+  const loansToParticipators = {
+    outstanding: c.loansToParticipators?.outstanding ?? 0,
+    writtenOff: c.loansToParticipators?.writtenOff ?? 0,
+  };
+
+  const disclosures = {
+    charitableDonations: c.disclosures?.charitableDonations ?? 0,
+    politicalDonations: c.disclosures?.politicalDonations ?? 0,
+  };
+
+  /* -------------------------------------------------------------------------- */
+  /* RETURN CT600‑READY COMPUTATION OBJECT                                      */
+  /* -------------------------------------------------------------------------- */
 
   return {
     periodStart,
     periodEnd,
 
-    // Headline figures (fallback to 0 if not present)
-    taxableProfit: computations.taxableProfit ?? 0,
-    corporationTaxDue: computations.taxDue ?? 0,
+    taxableProfit: summary.taxableProfit,
+    corporationTaxDue: summary.corporationTaxDue,
 
-    // 1. Summary
-    summary: ct.summary ?? null,
-
-    // 2. Computations (high‑level)
-    computations: {
-      taxableProfit: computations.taxableProfit ?? 0,
-      taxDue: computations.taxDue ?? 0,
-      capitalAllowances: computations.capitalAllowances ?? [],
-      losses: computations.losses ?? [],
-      adjustments: computations.adjustments ?? [],
-    },
-
-    // 3. Capital Allowances
-    capitalAllowances: computations.capitalAllowances ?? [],
-
-    // 4. Losses
-    losses: computations.losses ?? [],
-
-    // 5. Adjustments
-    adjustments: computations.adjustments ?? [],
-
-    // 6. R&D (CT600L)
-    rAndD: computations.rAndD ?? null,
-
-    // 7. Loans to Participators (CT600A)
-    loansToParticipators: computations.loansToParticipators ?? null,
-
-    // 8. Payments & Balances
-    payments: computations.payments ?? [],
-
-    // 9. Additional Disclosures
+    summary,
+    capitalAllowances,
+    losses,
+    adjustments,
+    payments,
+    rAndD,
+    loansToParticipators,
     disclosures,
 
-    // 12. Income Categories
     incomeCategories: ct.incomeCategories ?? [],
-
-    // 13. Payments & Balances (Expanded)
     paymentsExpanded: ct.paymentsExpanded ?? null,
   };
 }
