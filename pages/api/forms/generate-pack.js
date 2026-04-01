@@ -18,7 +18,9 @@ import { supabaseAdmin } from "../../../lib/supabase-admin";
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
-      return res.status(405).json({ success: false, message: "Method not allowed" });
+      return res
+        .status(405)
+        .json({ success: false, message: "Method not allowed" });
     }
 
     const { clientId, periodStart, periodEnd } = req.body;
@@ -80,6 +82,7 @@ export default async function handler(req, res) {
     // ────────────────────────────────────────────────
     const computations = await computeCtForPeriod({
       clientId,
+      client,
       periodStart,
       periodEnd,
     });
@@ -253,7 +256,6 @@ export default async function handler(req, res) {
       success: true,
       generated,
     });
-
   } catch (err) {
     console.error("CT pack generation failed:", err);
     return res.status(500).json({
