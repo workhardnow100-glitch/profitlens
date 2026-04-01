@@ -286,48 +286,48 @@ export default function CorpPage() {
     }
   }
 
-  // CT600 filing: build submission envelope
-  async function buildSubmissionEnvelope() {
-    if (!clientId) {
-      alert("Missing client ID.");
-      return;
-    }
-    if (!from || !to) {
-      alert("Please select both start and end dates before building the submission envelope.");
-      return;
-    }
-
-    setFilingLoading(true);
-    setFilingError(null);
-    try {
-      const res = await fetch("/api/forms/generate-submission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId,
-          periodEnd: to,
-        }),
-      });
-
-      const data = await res.json();
-      if (!data.success) {
-        setFilingError(data.error || "Error generating submission envelope.");
-        alert("Error generating submission envelope: " + (data.error || "Unknown error"));
-        return;
-      }
-
-      // Expecting backend to return something like:
-      // { success: true, submission: { envelopeUrl } }
-      setSubmissionEnvelope(data.submission || null);
-      alert("Submission envelope generated successfully.");
-    } catch (err) {
-      console.error(err);
-      setFilingError(err.message);
-      alert("Error generating submission envelope: " + err.message);
-    } finally {
-      setFilingLoading(false);
-    }
+// CT600 filing: build submission envelope
+async function buildSubmissionEnvelope() {
+  if (!clientId) {
+    alert("Missing client ID.");
+    return;
   }
+  if (!from || !to) {
+    alert("Please select both start and end dates before building the submission envelope.");
+    return;
+  }
+
+  setFilingLoading(true);
+  setFilingError(null);
+  try {
+    const res = await fetch("/api/forms/generate-submission", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId,
+        periodStart: from,   // FIXED
+        periodEnd: to,       // FIXED
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.success) {
+      setFilingError(data.error || "Error generating submission envelope.");
+      alert("Error generating submission envelope: " + (data.error || "Unknown error"));
+      return;
+    }
+
+    setSubmissionEnvelope(data.submission || null);
+    alert("Submission envelope generated successfully.");
+  } catch (err) {
+    console.error(err);
+    setFilingError(err.message);
+    alert("Error generating submission envelope: " + err.message);
+  } finally {
+    setFilingLoading(false);
+  }
+}
+
 
   // CT600 filing: submit to HMRC (test or live)
   async function submitToHmrc(environment = "test") {
