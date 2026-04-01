@@ -2,7 +2,6 @@
 
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { sendToHmrcGateway } from "../../../lib/ct/gatewayClient";
-import prisma from "../../../lib/prisma";
 
 export default async function handler(req, res) {
   try {
@@ -23,23 +22,25 @@ export default async function handler(req, res) {
       });
     }
 
-    // Load client
+    // Load client from Supabase
     console.log("🟦 [HMRC] Loading client:", clientId);
-    const client = await prisma.client.findUnique({
-      where: { id: clientId },
-    });
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from("clients")
+      .select("*")
+      .eq("id", clientId)
+      .single();
 
     console.log("🟩 [HMRC] Loaded client:", client);
 
-    if (!client) {
-      console.log("🟥 [HMRC] Client not found");
+    if (clientError || !client) {
+      console.log("🟥 [HMRC] Client not found in Supabase:", clientError);
       return res.status(404).json({
         success: false,
         message: "Client not found.",
       });
     }
 
-    // Paths to artefacts
+    // Paths to CT600 and Computations
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
     const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
 
@@ -48,19 +49,15 @@ export default async function handler(req, res) {
       computationsPath,
     });
 
-    // Detect accounts file dynamically
-    console.log("🟦 [HMRC] Searching for accounts iXBRL…");
+    // 🔥 Dynamically detect the correct accounts file
     const { data: list } = await supabaseAdmin.storage
       .from("pdfs")
-      .list("ixbrl", { search: `ACCOUNTS_` });
-
-    console.log("🟩 [HMRC] Accounts file list:", list);
+      .list("ixbrl");
 
     const accountsFileName = list?.find(f =>
-      f.name.includes(`${clientId}_${periodEnd}`)
+      f.name.includes(`${clientId}_${periodEnd}`) &&
+      f.name.startsWith("ACCOUNTS_")
     )?.name;
-
-    console.log("🟦 [HMRC] Detected accounts file:", accountsFileName);
 
     if (!accountsFileName) {
       console.log("🟥 [HMRC] No accounts iXBRL found");
@@ -71,6 +68,7 @@ export default async function handler(req, res) {
     }
 
     const accountsPath = `ixbrl/${accountsFileName}`;
+    console.log("🟩 [HMRC] Using accounts file:", accountsPath);
 
     // Download artefacts
     console.log("🟦 [HMRC] Downloading artefacts…");
