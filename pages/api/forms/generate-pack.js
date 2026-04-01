@@ -10,7 +10,7 @@ import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
 import { computeCtForPeriod } from "../../../lib/ct/engine";
 import { buildComputationsIxbrl } from "../../../lib/ixbrl/computationsBuilder";
 import { buildAccountsIxbrl } from "../../../lib/ixbrl/accountBuilder";
-import { buildCt600Xml } from "../../../lib/xml/buildCt600Xml";
+import { buildCt600Xml } from "../../lib/ct/xmlbuilder";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
