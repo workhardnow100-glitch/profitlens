@@ -178,6 +178,17 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
     balanceType: "credit",
   },
 
+  // ⭐ NEW — FRS105 Directors’ Report
+  {
+    id: "frs105-directors-report",
+    taxonomyId: "frs105-2024",
+    internalKey: "accounts.directors_report",
+    xbrlName: "frs105:DirectorsReportTextBlock",
+    xbrlNamespace: "http://www.xbrl.org/uk/frs/105/2024-01-01",
+    dataType: "textBlock",
+    balanceType: null,
+  },
+
   // ────────────────────────────────────────────────
   // ACCOUNTS — IFRS (2024)
   // ────────────────────────────────────────────────
