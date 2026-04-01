@@ -12,7 +12,7 @@ import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
 // NEW IMPORTS FOR iXBRL
 import { computeCtForPeriod } from "../../../lib/ct/engine";
 import { buildComputationsIxbrl } from "../../../lib/ixbrl/computationsBuilder";
-import { buildAccountsIxbrl } from "../../../lib/ixbrl/accountsBuilder";
+import { buildAccountsIxbrl } from "../../../lib/ixbrl/accountBuilder";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
