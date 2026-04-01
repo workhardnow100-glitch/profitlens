@@ -30,11 +30,23 @@ async function loadCTJournals(
   periodEnd: string
 ) {
   const { data, error } = await supabaseAdmin
-    .from("journals")
-    .select("*, journal_lines(*, chart_of_account_entries(*))")
+    .from("journal_entries")
+    .select(`
+      id,
+      date,
+      client_id,
+      lines:journal_lines (
+        debit,
+        credit,
+        account:chart_of_account_entries (
+          account_code,
+          account_name
+        )
+      )
+    `)
     .eq("client_id", clientId)
-    .gte("journal_date", periodStart)
-    .lte("journal_date", periodEnd);
+    .gte("date", periodStart)
+    .lte("date", periodEnd);
 
   if (error) {
     console.error("Failed to load CT journals:", error);
@@ -43,6 +55,8 @@ async function loadCTJournals(
 
   return data || [];
 }
+
+export { loadCTJournals, amountFromLine, sumBy };
 
 
 
