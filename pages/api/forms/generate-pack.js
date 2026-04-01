@@ -76,7 +76,16 @@ export default async function handler(req, res) {
     };
 
     // ────────────────────────────────────────────────
-    // 3. GENERATE FORMS (PDFs)
+    // 3. COMPUTE CT DATA ONCE
+    // ────────────────────────────────────────────────
+    const computations = await computeCtForPeriod({
+      clientId,
+      periodStart,
+      periodEnd,
+    });
+
+    // ────────────────────────────────────────────────
+    // 3A. GENERATE CT600 PDF (WITH FULL DATA)
     // ────────────────────────────────────────────────
     const generated = [];
 
@@ -88,10 +97,24 @@ export default async function handler(req, res) {
       filename: `CT600_${clientId}_${periodEnd}.pdf`,
       createdBy: "system",
       companyDetails: client,
+
+      ctSummary: computations.summary,
+      computations: computations.computations,
+      capitalAllowances: computations.capitalAllowances,
+      losses: computations.losses,
+      adjustments: computations.adjustments,
+      rAndD: computations.rAndD,
+      loansToParticipators: computations.loansToParticipators,
+      payments: computations.payments,
+      disclosures: computations.disclosures,
+
       supplements,
     });
     generated.push("CT600");
 
+    // ────────────────────────────────────────────────
+    // 3B. OTHER PDF FORMS
+    // ────────────────────────────────────────────────
     if (supplements.ct600ARequired) {
       await generateCt600aPdf({
         clientId,
@@ -171,15 +194,8 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
-    // 3B. GENERATE COMPUTATIONS iXBRL
+    // 3C. GENERATE COMPUTATIONS iXBRL
     // ────────────────────────────────────────────────
-
-    const computations = await computeCtForPeriod({
-      clientId,
-      periodStart,
-      periodEnd,
-    });
-
     const computationsIxbrl = await buildComputationsIxbrl({
       clientId,
       companyNumber: client.companyNumber || client.company_number || "",
@@ -204,9 +220,8 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
-    // 3C. GENERATE ACCOUNTS iXBRL (NEW)
+    // 3D. GENERATE ACCOUNTS iXBRL (NEW)
     // ────────────────────────────────────────────────
-
     const { ixbrl: accountsIxbrl, framework } = await buildAccountsIxbrl({
       clientId,
       companyNumber: client.companyNumber || client.company_number || "",
