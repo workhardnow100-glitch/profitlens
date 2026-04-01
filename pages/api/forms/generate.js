@@ -19,6 +19,8 @@ import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { v4 as uuidv4 } from "uuid";
 
+
+
 // PDF templates
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
 import { generateCt600aPdf } from "../../../lib/pdf/templates/ct600a";

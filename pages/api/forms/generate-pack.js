@@ -1,4 +1,5 @@
 // pages/api/forms/generate-pack.js
+
 import prisma from "../../../lib/prisma";
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
 import { generateCt600aPdf } from "../../../lib/pdf/templates/ct600a";
@@ -7,6 +8,11 @@ import { generateCt600lPdf } from "../../../lib/pdf/templates/ct600l";
 import { generateCt600fPdf } from "../../../lib/pdf/templates/ct600f";
 import { generateCt600mPdf } from "../../../lib/pdf/templates/ct600m";
 import { generateCt600nPdf } from "../../../lib/pdf/templates/ct600n";
+
+// NEW IMPORTS FOR iXBRL
+import { computeCtForPeriod } from "../../../lib/ct/engine";
+import { buildComputationsIxbrl } from "../../../lib/ixbrl/computationsBuilder";
+import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
   try {
@@ -38,7 +44,7 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
-    // 2. DETECT SUPPLEMENTS (same logic as supplements API)
+    // 2. DETECT SUPPLEMENTS
     // ────────────────────────────────────────────────
     const journals = await prisma.journal.findMany({
       where: {
@@ -69,11 +75,10 @@ export default async function handler(req, res) {
     };
 
     // ────────────────────────────────────────────────
-    // 3. GENERATE FORMS
+    // 3. GENERATE FORMS (PDFs)
     // ────────────────────────────────────────────────
     const generated = [];
 
-    // Always generate CT600
     await generateCt600Pdf({
       clientId,
       periodStart,
@@ -86,7 +91,6 @@ export default async function handler(req, res) {
     });
     generated.push("CT600");
 
-    // Conditionally generate supplements
     if (supplements.ct600ARequired) {
       await generateCt600aPdf({
         clientId,
@@ -166,12 +170,49 @@ export default async function handler(req, res) {
     }
 
     // ────────────────────────────────────────────────
+    // 3B. GENERATE COMPUTATIONS iXBRL (NEW)
+    // ────────────────────────────────────────────────
+
+    // 1. Compute CT figures
+    const computations = await computeCtForPeriod({
+      clientId,
+      periodStart,
+      periodEnd,
+    });
+
+    // 2. Build iXBRL XHTML
+    const computationsIxbrl = await buildComputationsIxbrl({
+      clientId,
+      companyNumber: client.companyNumber || client.company_number || "",
+      companyName: client.business_name || client.name,
+      gaapFramework: "FRS102-1A",
+      computations,
+    });
+
+    // 3. Upload to Supabase
+    const ixbrlPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
+
+    const { error: ixbrlError } = await supabaseAdmin.storage
+      .from("pdfs")
+      .upload(ixbrlPath, computationsIxbrl, {
+        contentType: "application/xhtml+xml",
+        upsert: true,
+      });
+
+    if (ixbrlError) {
+      console.error("Failed to upload computations iXBRL:", ixbrlError);
+    } else {
+      generated.push("iXBRL_COMPUTATIONS");
+    }
+
+    // ────────────────────────────────────────────────
     // 4. RETURN RESULT
     // ────────────────────────────────────────────────
     return res.status(200).json({
       success: true,
       generated,
     });
+
   } catch (err) {
     console.error("CT pack generation failed:", err);
     return res.status(500).json({
