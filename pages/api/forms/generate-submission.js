@@ -12,12 +12,13 @@ export default async function handler(req, res) {
         .json({ success: false, message: "Method not allowed" });
     }
 
-    const { clientId, periodEnd } = req.body;
+    // FIX 1: include periodStart
+    const { clientId, periodStart, periodEnd } = req.body;
 
-    if (!clientId || !periodEnd) {
+    if (!clientId || !periodStart || !periodEnd) {
       return res.status(400).json({
         success: false,
-        message: "Missing clientId or periodEnd.",
+        message: "Missing clientId, periodStart, or periodEnd.",
       });
     }
 
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
     // Paths for artefacts
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
     const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
-    const accountsPath = `ixbrl/ACCOUNTS_FRS102-1A_${clientId}_${periodEnd}.xhtml`; // framework auto-detected earlier
+    const accountsPath = `ixbrl/ACCOUNTS_FRS102-1A_${clientId}_${periodEnd}.xhtml`;
 
     // Download artefacts
     const [ct600XmlFile, computationsFile, accountsFile] = await Promise.all([
@@ -62,13 +63,16 @@ export default async function handler(req, res) {
       senderId: "YOUR_SENDER_ID",
       password: "YOUR_PASSWORD",
 
-      // FIX: pass full client object so submissionEnvelope can read client.*
+      // FIX 2: pass full client object
       client,
 
       companyNumber: client.companyNumber || client.company_number || "",
       companyName: client.business_name || client.name,
-      periodStart: client.periodStart,
+
+      // FIX 3: use periodStart from request, not client.periodStart
+      periodStart,
       periodEnd,
+
       ct600Xml,
       computationsIxbrl,
       accountsIxbrl,
@@ -96,6 +100,7 @@ export default async function handler(req, res) {
       success: true,
       submissionPath,
     });
+
   } catch (err) {
     console.error("Submission envelope generation failed:", err);
     return res.status(500).json({
