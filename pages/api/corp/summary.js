@@ -3,22 +3,6 @@
  * File: pages/api/corp/summary.js
  * Purpose:
  *   Compute Corporation Tax summary using the UNIFIED JOURNAL ENGINE:
- *     - Trading income (credit)
- *     - Allowable expenses (net debit)
- *     - Disallowable expenses (net debit)
- *     - Profit (from unified P&L)
- *     - Adjusted profit (profit + disallowables)
- *     - Corporation Tax due (marginal relief aware)
- *     - Breakdown rows (journal lines classified by COA)
- *     - Drilldown rows built from journal_entries + journal_lines + COA
- *     - Transactions classification restored for banner count
- * ============================================================
- */
-/**
- * ============================================================
- * File: pages/api/corp/summary.js
- * Purpose:
- *   Compute Corporation Tax summary using the UNIFIED JOURNAL ENGINE:
  * ============================================================
  */
 
@@ -48,6 +32,10 @@ function calculateCorporationTax(profit) {
 }
 
 export default async function handler(req, res) {
+
+  // 🔥 ADD THIS — CONFIRMS WHICH VERSION OF THE API IS RUNNING
+  console.log("🔥 CT SUMMARY API VERSION: DEPLOYED-HOTFIX-1");
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -136,7 +124,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // 2.5 Journal-based drilldown (FIXED JOIN + FIXED DATE FILTER)
+    // 2.5 Journal-based drilldown
     const { data: jlJoined, error: jlJoinedErr } = await supabaseAdmin
       .from("journal_lines")
       .select(`
@@ -208,7 +196,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // 2.6 Transaction classification (banner count)
+    // 2.6 Transaction classification
     const { data: txRowsRaw, error: txErr } = await supabaseAdmin
       .from("transactions")
       .select(`
