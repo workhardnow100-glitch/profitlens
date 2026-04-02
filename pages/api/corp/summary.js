@@ -250,7 +250,7 @@ export default async function handler(req, res) {
 
     // 3. Totals
     const income = breakdown.filter((b) => b.ctType === "income").reduce((s, b) => s + b.amount, 0);
-    const allowable = breakdown.filter((b) => b.ctType === "allowallowable").reduce((s, b) => s + b.amount, 0);
+    const allowable = breakdown.filter((b) => b.ctType === "allowable").reduce((s, b) => s + b.amount, 0);
     const disallowable = breakdown.filter((b) => b.ctType === "disallowable").reduce((s, b) => s + b.amount, 0);
 
     const profit = pl.summary.net_profit;
