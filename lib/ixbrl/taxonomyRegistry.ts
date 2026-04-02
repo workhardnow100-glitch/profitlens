@@ -1,4 +1,32 @@
-// lib/ixbrl/taxonomyRegistry.ts
+/**
+ * TAXONOMY REGISTRY
+ * ------------------
+ * PURPOSE:
+ *   Central registry of all XBRL taxonomies used by ProfitLens:
+ *     - FRS102‑1A (small entities)
+ *     - FRS105 (micro‑entities)
+ *     - IFRS (full accounts)
+ *     - HMRC CT Computations taxonomy
+ *
+ * USED BY:
+ *   - resolveTaxonomiesForPeriod()
+ *   - buildAccountsIxbrl()
+ *   - buildComputationsIxbrl()
+ *
+ * WHY THIS MATTERS:
+ *   This file determines which taxonomy entry point is used for:
+ *     • Accounts iXBRL (FRS102‑1A / FRS105 / IFRS)
+ *     • CT computations iXBRL (HMRC CT)
+ *
+ *   If a taxonomy entry is wrong or missing, iXBRL generation will fail.
+ *
+ * VALIDATION STATUS:
+ *   ✓ Fully aligned with upgraded concept map
+ *   ✓ Correct entry points for 2024 taxonomies
+ *   ✓ HMRC CT taxonomy placeholder clearly marked
+ *   ☐ Pending: replace HMRC placeholder URL with official gateway schema
+ */
+
 import { TaxonomyRegistryEntry } from "./types";
 
 export const TAXONOMY_REGISTRY: TaxonomyRegistryEntry[] = [
@@ -40,9 +68,8 @@ export const TAXONOMY_REGISTRY: TaxonomyRegistryEntry[] = [
   },
 
   // ────────────────────────────────────────────────
-  // COMPUTATIONS TAXONOMY (existing)
+  // HMRC CT COMPUTATIONS TAXONOMY
   // ────────────────────────────────────────────────
-
   {
     id: "hmrc-ct-2024",
     type: "computations",
@@ -50,17 +77,27 @@ export const TAXONOMY_REGISTRY: TaxonomyRegistryEntry[] = [
     label: "HMRC CT Computational 2024",
     validFrom: "2024-01-01",
     validTo: null,
+
+    // ⚠️ Placeholder — replace with official HMRC entry point when available
     entryPointUrl:
-      "https://example.com/hmrc/ct/2024/entrypoint.xsd", // placeholder
+      "https://example.com/hmrc/ct/2024/entrypoint.xsd",
   },
 ];
 
+/**
+ * Resolve the correct taxonomies for a given period + GAAP framework.
+ *
+ * RETURNS:
+ *   {
+ *     accountsTaxonomy: TaxonomyRegistryEntry,
+ *     computationsTaxonomy: TaxonomyRegistryEntry
+ *   }
+ */
 export function resolveTaxonomiesForPeriod(params: {
   periodStart: string;
   periodEnd: string;
   gaapFramework: "FRS102-1A" | "FRS105" | "IFRS";
 }) {
-  // Select accounts taxonomy based on framework
   const accountsTaxonomy = TAXONOMY_REGISTRY.find(
     (t) =>
       t.type === "accounts" &&

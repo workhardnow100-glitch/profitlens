@@ -1,3 +1,4 @@
+
 // pages/profile.js
 import React, {
   useEffect,
@@ -12,17 +13,16 @@ import { useRouter } from "next/router";
 import ResponsiveLayout from "../components/ResponsiveLayout";
 import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
+import EditableField from "../components/EditableField";
 
 import { CT_MAP } from "../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../lib/constants/systemCategories";
-import EditableField from "../components/EditableField";
 
 const HighchartsReact = dynamic(
   () => import("highcharts-react-official"),
   { ssr: false }
 );
 
-// ✅ Unified category options (CT_MAP + system + Uncategorised)
 const CT_CATEGORY_OPTIONS = Array.from(
   new Set([
     ...CT_MAP.income,
@@ -35,11 +35,119 @@ const CT_CATEGORY_OPTIONS = Array.from(
   ])
 ).sort();
 
-
-
 const ALLOWABLE_SET = new Set(CT_MAP.allowable);
 const DISALLOWABLE_SET = new Set(CT_MAP.disallowable);
 
+/* -------------------------------------------------------
+   Business Details (collapsible)
+-------------------------------------------------------- */
+function ProfileBusinessDetails({ client, accountsMeta, saveField }) {
+  const [open, setOpen] = useState(true);
+  if (!client) return null;
+
+  return (
+    <div className="border rounded-lg bg-white shadow-sm">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex justify-between items-center px-4 py-3 text-left"
+      >
+        <h2 className="text-sm font-semibold text-slate-800">
+          Business Details
+        </h2>
+        <span className="text-xs text-slate-500">{open ? "Hide" : "Show"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-700">
+
+          <EditableField label="Business Name" value={client.business_name} field="business_name" onSave={saveField} />
+          <EditableField label="Trading Name" value={client.trading_name} field="trading_name" onSave={saveField} />
+          <EditableField label="Business Type" value={client.business_type} field="business_type" onSave={saveField} />
+          <EditableField label="Company Number" value={client.company_number} field="company_number" onSave={saveField} />
+          <EditableField label="VAT Number" value={client.vat_number} field="vat_number" onSave={saveField} />
+          <EditableField label="Registered Address" value={client.registered_address} field="registered_address" onSave={saveField} />
+          <EditableField label="Industry" value={client.industry} field="industry" onSave={saveField} />
+          <EditableField label="Website" value={client.website} field="website" onSave={saveField} />
+          <EditableField label="Contact Person" value={client.contact_person} field="contact_person" onSave={saveField} />
+          <EditableField label="Business Email" value={client.contact_email} field="contact_email" onSave={saveField} />
+          <EditableField label="Business Phone" value={client.contact_phone} field="contact_phone" onSave={saveField} />
+          <EditableField label="Notes" value={client.notes} field="notes" onSave={saveField} />
+
+          {accountsMeta && (
+            <>
+              <div className="md:col-span-2 pt-2">
+                <p className="text-xs uppercase text-slate-500">
+                  Statutory Accounts (read‑only)
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase text-slate-500">Director</p>
+                <p className="font-medium">{accountsMeta.director_name || "—"}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase text-slate-500">Approval date</p>
+                <p className="font-medium">{accountsMeta.accounts_approval_date || "—"}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase text-slate-500">Employees (current)</p>
+                <p className="font-medium">{accountsMeta.employees_current_year ?? "—"}</p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase text-slate-500">Employees (previous)</p>
+                <p className="font-medium">{accountsMeta.employees_previous_year ?? "—"}</p>
+              </div>
+
+              <div className="md:col-span-2">
+                <a href="/corp" className="text-xs text-indigo-600 underline">
+                  Edit statutory details →
+                </a>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------
+   Personal Details (collapsible)
+-------------------------------------------------------- */
+function ProfilePersonalDetails({ client, saveField }) {
+  const [open, setOpen] = useState(false);
+  if (!client) return null;
+
+  return (
+    <div className="border rounded-lg bg-white shadow-sm">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex justify-between items-center px-4 py-3 text-left"
+      >
+        <h2 className="text-sm font-semibold text-slate-800">Personal Details</h2>
+        <span className="text-xs text-slate-500">{open ? "Hide" : "Show"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-700">
+          <EditableField label="Full Name" value={client.name} field="name" onSave={saveField} />
+          <EditableField label="Address" value={client.address} field="address" onSave={saveField} />
+          <EditableField label="Postcode" value={client.postcode} field="postcode" onSave={saveField} />
+          <EditableField label="Phone Number" value={client.phone} field="phone" onSave={saveField} />
+          <EditableField label="Email" value={client.email} field="email" onSave={saveField} />
+          <EditableField label="UTR Number" value={client.utr_number} field="utr_number" onSave={saveField} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------
+   MAIN PROFILE PAGE
+-------------------------------------------------------- */
 export default function ProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -48,13 +156,10 @@ export default function ProfilePage() {
   const [error, setError] = useState(null);
 
   const [transactions, setTransactions] = useState([]);
-  const [hmrcCategories, setHmrcCategories] = useState([]);
   const [account, setAccount] = useState(null);
   const [client, setClient] = useState(null);
-  const [totalsByType, setTotalsByType] = useState({
-    sole_trader: {},
-    limited_company: {},
-  });
+  const [accountsMeta, setAccountsMeta] = useState(null);
+
   const [byMonth, setByMonth] = useState({});
   const [summary, setSummary] = useState({
     totalIncome: 0,
@@ -74,10 +179,8 @@ export default function ProfilePage() {
 
   const reportRef = useRef();
   const taxReportRef = useRef();
-
   const fetchProfileRef = useRef(null);
 
-  // Access control
   useEffect(() => {
     if (status === "loading") return;
     if (!session?.user) {
@@ -93,7 +196,6 @@ export default function ProfilePage() {
     }
   }, [session, status, router]);
 
-  // Fetch profile data
   useEffect(() => {
     fetchProfileRef.current = async () => {
       if (status !== "authenticated") return;
@@ -107,21 +209,11 @@ export default function ProfilePage() {
         if (!res.ok) throw new Error(json.error || "Failed to load profile");
 
         setTransactions(json.transactions || []);
-        setHmrcCategories(json.hmrcCategories || []);
         setAccount(json.account || null);
         setClient(json.client || null);
-        setTotalsByType(
-          json.totalsByType || { sole_trader: {}, limited_company: {} }
-        );
+        setAccountsMeta(json.accountsMeta || null);
         setByMonth(json.byMonth || {});
-        setSummary(
-          json.summary || {
-            totalIncome: 0,
-            totalExpenses: 0,
-            netProfit: 0,
-            liabilities: { sole_trader: 0, limited_company: 0 },
-          }
-        );
+        setSummary(json.summary || summary);
 
         const todayYear = new Date().getFullYear();
         const yearsFromData = new Set(
@@ -146,7 +238,6 @@ export default function ProfilePage() {
     fetchProfileRef.current();
   }, [status]);
 
-  // Highcharts loader
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -170,7 +261,21 @@ export default function ProfilePage() {
     })();
   }, []);
 
-  // Year options
+  async function saveField(field, value) {
+    await fetch("/api/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        updateClient: true,
+        [field]: value,
+      }),
+    });
+
+    if (fetchProfileRef.current) {
+      fetchProfileRef.current();
+    }
+  }
+
   const yearOptions = useMemo(() => {
     const years = new Set(
       (transactions || [])
@@ -180,7 +285,6 @@ export default function ProfilePage() {
     return Array.from(years).sort((a, b) => b - a);
   }, [transactions]);
 
-  // Filtered transactions
   const filteredTransactions = useMemo(() => {
     if (!selectedYear) return transactions || [];
     return (transactions || []).filter((tx) => {
@@ -190,7 +294,6 @@ export default function ProfilePage() {
     });
   }, [transactions, selectedYear]);
 
-  // Filtered byMonth (from API, COA-driven)
   const filteredByMonth = useMemo(() => {
     if (!selectedYear) return byMonth || {};
     const result = {};
@@ -204,7 +307,6 @@ export default function ProfilePage() {
     return result;
   }, [byMonth, selectedYear]);
 
-  // Year summary (COA / CT-driven via byMonth from API)
   const yearSummary = useMemo(() => {
     let totalIncome = 0;
     let totalExpenses = 0;
@@ -230,13 +332,11 @@ export default function ProfilePage() {
     };
   }, [filteredByMonth]);
 
-  // Income / expense aggregations (respect CT toggle)
   const { incomeByCategory, expensesByCategory } = useMemo(() => {
     const incomeMap = {};
     const expenseMap = {};
 
     for (const tx of filteredTransactions || []) {
-      // Respect CT inclusion toggle
       if (tx.includedinct === false) continue;
 
       const cat =
@@ -264,13 +364,11 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, expenseView]);
 
-  // HMRC breakdown (respect CT toggle)
   const hmrcBreakdown = useMemo(() => {
     let allowable = 0;
     let disallowable = 0;
 
     for (const tx of filteredTransactions || []) {
-      // Respect CT inclusion toggle
       if (tx.includedinct === false) continue;
 
       const cat =
@@ -314,7 +412,6 @@ export default function ProfilePage() {
     };
   }, [filteredTransactions, yearSummary]);
 
-  // Income drilldown chart options
   const incomeChartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
 
@@ -376,7 +473,6 @@ export default function ProfilePage() {
     };
   }, [hcReady, Highcharts, incomeByCategory, filteredTransactions]);
 
-  // Expenses drilldown chart options
   const expensesChartOptions = useMemo(() => {
     if (!hcReady || !Highcharts) return null;
 
@@ -394,7 +490,8 @@ export default function ProfilePage() {
         .filter((tx) => {
           const catMatch = tx.business_category?.trim() === cat;
           const isExpense = Number(tx.amount || 0) < 0;
-          if (!catMatch || !isExpense) return false;
+
+                    if (!catMatch || !isExpense) return false;
 
           if (tx.includedinct === false) return false;
 
@@ -492,22 +589,6 @@ export default function ProfilePage() {
     document.body.removeChild(link);
   };
 
-  // saveField
-  async function saveField(field, value) {
-    await fetch("/api/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        updateClient: true,
-        [field]: value,
-      }),
-    });
-
-    if (fetchProfileRef.current) {
-      fetchProfileRef.current();
-    }
-  }
-
   // PDF handlers
   async function handleDownloadPdf() {
     try {
@@ -532,8 +613,6 @@ export default function ProfilePage() {
       const data = await res.json();
       if (data?.pdf?.url) {
         window.open(data.pdf.url, "_blank");
-      } else {
-        console.error("PDF generation failed:", data);
       }
     } catch (err) {
       console.error("Error generating PDF:", err);
@@ -641,37 +720,18 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Business Profile */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Personal Details */}
-          <ResponsiveCard title="Personal Details">
-            <div className="grid grid-cols-1 gap-4">
-              <EditableField label="Full Name" value={client?.name} field="name" onSave={saveField} />
-              <EditableField label="Address" value={client?.address} field="address" onSave={saveField} />
-              <EditableField label="Postcode" value={client?.postcode} field="postcode" onSave={saveField} />
-              <EditableField label="Phone Number" value={client?.phone} field="phone" onSave={saveField} />
-              <EditableField label="Email" value={client?.email} field="email" onSave={saveField} />
-              <EditableField label="UTR Number" value={client?.utr_number} field="utr_number" onSave={saveField} />
-            </div>
-          </ResponsiveCard>
+        {/* NEW collapsible cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          <ProfileBusinessDetails
+            client={client}
+            accountsMeta={accountsMeta}
+            saveField={saveField}
+          />
 
-          {/* Business Details */}
-          <ResponsiveCard title="Business Details">
-            <div className="grid grid-cols-1 gap-4">
-              <EditableField label="Business Name" value={client?.business_name} field="business_name" onSave={saveField} />
-              <EditableField label="Trading Name" value={client?.trading_name} field="trading_name" onSave={saveField} />
-              <EditableField label="Business Type" value={client?.business_type} field="business_type" onSave={saveField} />
-              <EditableField label="Company Number" value={client?.company_number} field="company_number" onSave={saveField} />
-              <EditableField label="VAT Number" value={client?.vat_number} field="vat_number" onSave={saveField} />
-              <EditableField label="Registered Business Address" value={client?.registered_address} field="registered_address" onSave={saveField} />
-              <EditableField label="Industry" value={client?.industry} field="industry" onSave={saveField} />
-              <EditableField label="Website" value={client?.website} field="website" onSave={saveField} />
-              <EditableField label="Contact Person" value={client?.contact_person} field="contact_person" onSave={saveField} />
-              <EditableField label="Business Email" value={client?.contact_email} field="contact_email" onSave={saveField} />
-              <EditableField label="Business Phone" value={client?.contact_phone} field="contact_phone" onSave={saveField} />
-              <EditableField label="Notes" value={client?.notes} field="notes" onSave={saveField} />
-            </div>
-          </ResponsiveCard>
+          <ProfilePersonalDetails
+            client={client}
+            saveField={saveField}
+          />
         </div>
 
         {/* Account info */}
@@ -712,7 +772,7 @@ export default function ProfilePage() {
 
         {error && <p className="text-red-500 mt-6">Error: {error}</p>}
 
-        {/* Summary (year filtered) */}
+        {/* Summary */}
         <ResponsiveCard title="Summary (filtered by year)">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
             <div className="border border-slate-200 rounded p-3">
@@ -736,7 +796,7 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* HMRC Trader / Limited Company breakdown */}
+        {/* HMRC breakdown */}
         <div ref={taxReportRef}>
           <ResponsiveCard title="HMRC – Trader breakdown">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
@@ -911,7 +971,7 @@ export default function ProfilePage() {
           </ResponsiveTable>
         </ResponsiveCard>
 
-        {/* Monthly breakdown (filtered by year) */}
+        {/* Monthly breakdown */}
         <ResponsiveCard title="By month (filtered by year)">
           <div className="mt-3 space-y-2">
             {Object.entries(filteredByMonth).map(([month, vals]) => (
@@ -934,7 +994,6 @@ export default function ProfilePage() {
           </div>
         </ResponsiveCard>
 
-        {/* Disclaimer */}
         <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
           ProfitLens provides estimates only. Always verify figures before filing
           with HMRC. Nothing displayed here constitutes tax, accounting, or legal

@@ -41,6 +41,27 @@ export default function CorpPage() {
   const [submissionEnvelope, setSubmissionEnvelope] = useState(null);
   const [hmrcSubmission, setHmrcSubmission] = useState(null);
 
+  // Statutory accounts metadata state (drives accountsBuilder.ts)
+  const [accountsMetaLoading, setAccountsMetaLoading] = useState(false);
+  const [accountsMetaError, setAccountsMetaError] = useState(null);
+  const [accountsMetaSavedAt, setAccountsMetaSavedAt] = useState(null);
+
+  const [directorNameInput, setDirectorNameInput] = useState("");
+  const [approvalDateInput, setApprovalDateInput] = useState("");
+
+  const [employeesCurrentInput, setEmployeesCurrentInput] = useState("");
+  const [employeesPreviousInput, setEmployeesPreviousInput] = useState("");
+
+  const [directorsRemCurrentInput, setDirectorsRemCurrentInput] = useState("");
+  const [directorsRemPreviousInput, setDirectorsRemPreviousInput] = useState("");
+
+  const [relatedPartyNotesInput, setRelatedPartyNotesInput] = useState("");
+  const [contingentLiabilitiesNotesInput, setContingentLiabilitiesNotesInput] = useState("");
+  const [postBalanceSheetEventsNotesInput, setPostBalanceSheetEventsNotesInput] = useState("");
+
+  const [accountingPoliciesOverrideInput, setAccountingPoliciesOverrideInput] = useState("");
+  const [smallCompaniesRegimeOverrideInput, setSmallCompaniesRegimeOverrideInput] = useState("");
+
   // Unified client resolution
   const clientId = user?.actingAsClientId ?? user?.clientId;
 
@@ -273,7 +294,6 @@ export default function CorpPage() {
         return;
       }
 
-      // Expecting backend to return something like:
       // { success: true, pack: { ct600PdfUrl, accountsIxbrlUrl, computationsIxbrlUrl, ct600XmlUrl } }
       setFilingPack(data.pack || null);
       alert("Filing pack generated successfully.");
@@ -286,48 +306,47 @@ export default function CorpPage() {
     }
   }
 
-// CT600 filing: build submission envelope
-async function buildSubmissionEnvelope() {
-  if (!clientId) {
-    alert("Missing client ID.");
-    return;
-  }
-  if (!from || !to) {
-    alert("Please select both start and end dates before building the submission envelope.");
-    return;
-  }
-
-  setFilingLoading(true);
-  setFilingError(null);
-  try {
-    const res = await fetch("/api/forms/generate-submission", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        periodStart: from,   // FIXED
-        periodEnd: to,       // FIXED
-      }),
-    });
-
-    const data = await res.json();
-    if (!data.success) {
-      setFilingError(data.error || "Error generating submission envelope.");
-      alert("Error generating submission envelope: " + (data.error || "Unknown error"));
+  // CT600 filing: build submission envelope
+  async function buildSubmissionEnvelope() {
+    if (!clientId) {
+      alert("Missing client ID.");
+      return;
+    }
+    if (!from || !to) {
+      alert("Please select both start and end dates before building the submission envelope.");
       return;
     }
 
-    setSubmissionEnvelope(data.submission || null);
-    alert("Submission envelope generated successfully.");
-  } catch (err) {
-    console.error(err);
-    setFilingError(err.message);
-    alert("Error generating submission envelope: " + err.message);
-  } finally {
-    setFilingLoading(false);
-  }
-}
+    setFilingLoading(true);
+    setFilingError(null);
+    try {
+      const res = await fetch("/api/forms/generate-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
 
+      const data = await res.json();
+      if (!data.success) {
+        setFilingError(data.error || "Error generating submission envelope.");
+        alert("Error generating submission envelope: " + (data.error || "Unknown error"));
+        return;
+      }
+
+      setSubmissionEnvelope(data.submission || null);
+      alert("Submission envelope generated successfully.");
+    } catch (err) {
+      console.error(err);
+      setFilingError(err.message);
+      alert("Error generating submission envelope: " + err.message);
+    } finally {
+      setFilingLoading(false);
+    }
+  }
 
   // CT600 filing: submit to HMRC (test or live)
   async function submitToHmrc(environment = "test") {
@@ -368,7 +387,6 @@ async function buildSubmissionEnvelope() {
         return;
       }
 
-      // Expecting backend to return something like:
       // { success: true, environment, response: { hmrcResponseUrl } }
       setHmrcSubmission(data.response || null);
       alert(`CT600 submitted to HMRC (${label}) successfully.`);
@@ -380,6 +398,139 @@ async function buildSubmissionEnvelope() {
       setFilingLoading(false);
     }
   }
+
+  // Load statutory accounts metadata for this client + period
+  async function loadAccountsMeta() {
+    if (!clientId || !from || !to) return;
+
+    setAccountsMetaLoading(true);
+    setAccountsMetaError(null);
+
+    try {
+      const res = await fetch("/api/accounts/meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setAccountsMetaError(data.error || "Error loading statutory accounts metadata.");
+        return;
+      }
+
+      const meta = data.meta || {};
+
+      setDirectorNameInput(
+        meta.director_name ||
+          meta.directorName ||
+          user?.contact_person ||
+          user?.business_name ||
+          ""
+      );
+      setApprovalDateInput(meta.accounts_approval_date || meta.approvalDate || to || "");
+
+      setEmployeesCurrentInput(
+        meta.employees_current_year != null ? String(meta.employees_current_year) : ""
+      );
+      setEmployeesPreviousInput(
+        meta.employees_previous_year != null ? String(meta.employees_previous_year) : ""
+      );
+
+      setDirectorsRemCurrentInput(
+        meta.directors_remuneration != null ? String(meta.directors_remuneration) : ""
+      );
+      setDirectorsRemPreviousInput(
+        meta.directors_remuneration_previous != null
+          ? String(meta.directors_remuneration_previous)
+          : ""
+      );
+
+      setRelatedPartyNotesInput(meta.related_party_notes || "");
+      setContingentLiabilitiesNotesInput(meta.contingent_liabilities_notes || "");
+      setPostBalanceSheetEventsNotesInput(meta.post_balance_sheet_events || "");
+
+      setAccountingPoliciesOverrideInput(meta.accounting_policies_override || "");
+      setSmallCompaniesRegimeOverrideInput(meta.small_companies_regime_override || "");
+
+      setAccountsMetaSavedAt(meta.updated_at || meta.created_at || null);
+    } catch (err) {
+      console.error(err);
+      setAccountsMetaError(err.message);
+    } finally {
+      setAccountsMetaLoading(false);
+    }
+  }
+
+  // Save statutory accounts metadata
+  async function saveAccountsMeta() {
+    if (!clientId || !from || !to) {
+      alert("Client and period must be selected before saving statutory accounts.");
+      return;
+    }
+    if (result?.locked) {
+      alert("This period is locked. Statutory accounts metadata is read‑only.");
+      return;
+    }
+
+    setAccountsMetaLoading(true);
+    setAccountsMetaError(null);
+
+    try {
+      const res = await fetch("/api/accounts/meta/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart: from,
+          periodEnd: to,
+          directorName: directorNameInput || null,
+          approvalDate: approvalDateInput || null,
+          employeesCurrent:
+            employeesCurrentInput !== "" ? Number(employeesCurrentInput) : null,
+          employeesPrevious:
+            employeesPreviousInput !== "" ? Number(employeesPreviousInput) : null,
+          directorsRemCurrent:
+            directorsRemCurrentInput !== "" ? Number(directorsRemCurrentInput) : null,
+          directorsRemPrevious:
+            directorsRemPreviousInput !== "" ? Number(directorsRemPreviousInput) : null,
+          relatedPartyNotes: relatedPartyNotesInput || null,
+          contingentLiabilitiesNotes: contingentLiabilitiesNotesInput || null,
+          postBalanceSheetEventsNotes: postBalanceSheetEventsNotesInput || null,
+          accountingPoliciesOverride: accountingPoliciesOverrideInput || null,
+          smallCompaniesRegimeOverride: smallCompaniesRegimeOverrideInput || null,
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) {
+        setAccountsMetaError(data.error || "Error saving statutory accounts metadata.");
+        alert("Error saving statutory accounts: " + (data.error || "Unknown error"));
+        return;
+      }
+
+      setAccountsMetaSavedAt(data.meta?.updated_at || new Date().toISOString());
+      alert("Statutory accounts details saved.");
+    } catch (err) {
+      console.error(err);
+      setAccountsMetaError(err.message);
+      alert("Error saving statutory accounts: " + err.message);
+    } finally {
+      setAccountsMetaLoading(false);
+    }
+  }
+
+  // Auto-load statutory metadata once CT summary + period are in place
+  useEffect(() => {
+    if (clientId && from && to && result) {
+      loadAccountsMeta();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, from, to, !!result]);
 
   const hasResult = !!result;
 
@@ -501,6 +652,220 @@ async function buildSubmissionEnvelope() {
                   CT rules and should be checked before filing.
                 </div>
               )}
+            </ResponsiveCard>
+
+            {/* Statutory Accounts – cockpit for FRS102‑1A / FRS105 / IFRS */}
+            <ResponsiveCard title="Statutory Accounts (FRS102‑1A / FRS105 / IFRS)">
+              <p className="text-sm text-slate-600 mb-3">
+                These details feed directly into your statutory accounts iXBRL (FRS102‑1A, FRS105 or
+                IFRS) used in the CT600 filing pack.
+              </p>
+
+              {accountsMetaError && (
+                <div className="mb-3 p-3 rounded border border-red-300 bg-red-50 text-red-800 text-sm">
+                  Statutory accounts error: {accountsMetaError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between mb-4 gap-3">
+                <p className="text-xs text-slate-500">
+                  Period: {from || "—"} to {to || "—"}{" "}
+                  {accountsMetaSavedAt && (
+                    <span className="ml-2">
+                      • Last saved:{" "}
+                      {new Date(accountsMetaSavedAt).toLocaleString(undefined, {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                  )}
+                  {result?.locked && (
+                    <span className="ml-2 text-amber-700 font-semibold">
+                      • Locked – read‑only
+                    </span>
+                  )}
+                </p>
+                <button
+                  onClick={loadAccountsMeta}
+                  className="text-xs px-3 py-1 rounded border border-slate-300 text-slate-700 bg-white hover:bg-slate-50"
+                  disabled={accountsMetaLoading || !from || !to}
+                >
+                  {accountsMetaLoading ? "Loading…" : "Reload details"}
+                </button>
+              </div>
+
+              {/* Directors & approval */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Director name (signature)
+                  </label>
+                  <input
+                    type="text"
+                    value={directorNameInput}
+                    onChange={(e) => setDirectorNameInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Accounts approval date
+                  </label>
+                  <input
+                    type="date"
+                    value={approvalDateInput}
+                    onChange={(e) => setApprovalDateInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+              </div>
+
+              {/* Employees & directors’ remuneration */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Employees – current year
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={employeesCurrentInput}
+                    onChange={(e) => setEmployeesCurrentInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Employees – previous year
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={employeesPreviousInput}
+                    onChange={(e) => setEmployeesPreviousInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Directors’ remuneration – current (£)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={directorsRemCurrentInput}
+                    onChange={(e) => setDirectorsRemCurrentInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Directors’ remuneration – previous (£)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={directorsRemPreviousInput}
+                    onChange={(e) => setDirectorsRemPreviousInput(e.target.value)}
+                    className="border p-2 rounded w-full"
+                    disabled={result?.locked}
+                  />
+                </div>
+              </div>
+
+              {/* Narrative notes */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Related party transactions (override)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={relatedPartyNotesInput}
+                    onChange={(e) => setRelatedPartyNotesInput(e.target.value)}
+                    className="border p-2 rounded w-full text-sm"
+                    disabled={result?.locked}
+                    placeholder="Leave blank to use the standard disclosure."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Contingent liabilities (override)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={contingentLiabilitiesNotesInput}
+                    onChange={(e) => setContingentLiabilitiesNotesInput(e.target.value)}
+                    className="border p-2 rounded w-full text-sm"
+                    disabled={result?.locked}
+                    placeholder="Leave blank to use the standard disclosure."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Post balance sheet events (override)
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={postBalanceSheetEventsNotesInput}
+                    onChange={(e) => setPostBalanceSheetEventsNotesInput(e.target.value)}
+                    className="border p-2 rounded w-full text-sm"
+                    disabled={result?.locked}
+                    placeholder="Leave blank to use the standard disclosure."
+                  />
+                </div>
+              </div>
+
+              {/* Overrides: accounting policies + small companies regime */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Accounting policies (HTML override)
+                  </label>
+                  <textarea
+                    rows={6}
+                    value={accountingPoliciesOverrideInput}
+                    onChange={(e) => setAccountingPoliciesOverrideInput(e.target.value)}
+                    className="border p-2 rounded w-full text-sm font-mono"
+                    disabled={result?.locked}
+                    placeholder="Optional HTML override. Leave blank to use the standard ProfitLens template."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Small companies / micro‑entity regime statement (HTML override)
+                  </label>
+                  <textarea
+                    rows={6}
+                    value={smallCompaniesRegimeOverrideInput}
+                    onChange={(e) => setSmallCompaniesRegimeOverrideInput(e.target.value)}
+                    className="border p-2 rounded w-full text-sm font-mono"
+                    disabled={result?.locked}
+                    placeholder="Optional HTML override. Leave blank to use the standard regime statement."
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-2">
+                <p className="text-xs text-slate-500 max-w-xl">
+                  These fields flow into the Directors’ report, notes, balance sheet statements and
+                  regime statements in your FRS102‑1A / FRS105 / IFRS accounts iXBRL.
+                </p>
+                <button
+                  onClick={saveAccountsMeta}
+                  className="bg-emerald-600 text-white px-4 py-2 rounded text-sm"
+                  disabled={accountsMetaLoading || !from || !to}
+                >
+                  {accountsMetaLoading ? "Saving…" : "Save statutory details"}
+                </button>
+              </div>
             </ResponsiveCard>
 
             {/* CT600 Filing – new engine */}

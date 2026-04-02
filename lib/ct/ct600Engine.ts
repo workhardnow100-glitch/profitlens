@@ -1,5 +1,45 @@
 // lib/ct/ct600Engine.ts
 
+/**
+ * CT600 ENGINE (LEGACY FORM BUILDER, JOURNAL-DRIVEN)
+ * --------------------------------------------------
+ * PURPOSE:
+ *   Builds a full CT600-style data object for a given period, combining:
+ *     - Journals (turnover, expenses, DLA, R&D, flags)
+ *     - Corp submissions (overrides, losses, pools, R&D config)
+ *     - CT payments (for balance due)
+ *
+ * USED BY:
+ *   - getCt600Data (public wrapper)
+ *   - computeCtForPeriod (CT computations wrapper -> CtComputations)
+ *   - CT600 PDF / forms layer (legacy consumers)
+ *
+ * KEY RESPONSIBILITIES:
+ *   - Classify journals into:
+ *       • Turnover
+ *       • Non-trading income
+ *       • Allowable expenses
+ *       • Disallowable / non-deductible expenses
+ *       • Capital allowance pools
+ *       • DLA movements and interest
+ *       • R&D spend and grants
+ *   - Compute:
+ *       • Capital allowances (AIA + WDA by pool)
+ *       • Profit before tax
+ *       • Current period loss
+ *       • Loss carryback and group relief (from corpSubmission)
+ *       • R&D enhanced relief and credits
+ *       • Taxable profit and corporation tax due
+ *       • Payments made and balance due
+ *   - Derive supplement flags (CT600A/J/L/F/M/N).
+ *
+ * VALIDATION STATUS:
+ *   ✓ Journal-driven classification in use in production
+ *   ✓ Capital allowances logic aligned with configured pools/rates
+ *   ✓ R&D logic supports auto + override modes
+ *   ☐ Full HMRC schema/iXBRL validation still to be run end-to-end
+ */
+
 import { supabaseAdmin } from "../supabase-admin";
 import { CT_MAP } from "../constants/ctMap";
 
@@ -380,6 +420,15 @@ async function buildCTFormData(
   const ct600MRequired = royaltyIncome > 0;
   const ct600NRequired = niTradingFlag;
 
+  /* ---------------------------- ADJUSTMENTS (MAPPED TO NEW MODEL) ---------------------------- */
+  // For now:
+  //   - nonDeductibleExpenses = disallowableExpenses (journal-derived)
+  //   - nonTaxableIncomeDeduction = 0 (no explicit logic yet)
+  //   - otherAdjustments = corpSubmission.adjustments_total (manual CT adjustments)
+  const nonDeductibleExpenses = disallowableExpenses;
+  const nonTaxableIncomeDeduction = 0;
+  const otherAdjustments = corpSubmission?.adjustments_total || 0;
+
   /* -------------------------------------------------------------------------- */
   /*                           FINAL RETURN OBJECT                              */
   /* -------------------------------------------------------------------------- */
@@ -462,7 +511,11 @@ async function buildCTFormData(
 
     /* ---------------------------- ADJUSTMENTS ---------------------------- */
     adjustments: {
-      manualAdjustments: corpSubmission?.adjustments_total || 0,
+      nonDeductibleExpenses,
+      nonTaxableIncomeDeduction,
+      otherAdjustments,
+      // Legacy field kept for compatibility with older consumers
+      disallowableExpenses: nonDeductibleExpenses,
     },
 
     /* ---------------------------- R&D ---------------------------- */

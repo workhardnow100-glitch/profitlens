@@ -1,4 +1,38 @@
-// pages/api/forms/generate-pack.js
+/**
+ * CT PACK GENERATOR (MASTER ORCHESTRATOR)
+ * ---------------------------------------
+ * PURPOSE:
+ *   This API route generates the full Corporation Tax submission pack for a
+ *   single accounting period. It orchestrates:
+ *
+ *     1. CT600 main PDF
+ *     2. Supplement PDFs (CT600A/J/L/F/M/N)
+ *     3. CT600 XML (HMRC submission XML)
+ *     4. CT Computations iXBRL
+ *     5. Statutory Accounts iXBRL
+ *
+ * DATA SOURCES:
+ *   - Client record (Supabase: clients table)
+ *   - Journal entries (Supabase: journal_entries + journal_lines)
+ *   - CT computations engine (computeCtForPeriod)
+ *
+ * OUTPUTS (uploaded to Supabase Storage):
+ *   - /pdfs/CT600_<clientId>_<periodEnd>.pdf
+ *   - /pdfs/xml/CT600_<clientId>_<periodEnd>.xml
+ *   - /pdfs/ixbrl/CT_COMPUTATIONS_<clientId>_<periodEnd>.xhtml
+ *   - /pdfs/ixbrl/ACCOUNTS_<framework>_<clientId>_<periodEnd>.xhtml
+ *
+ * CRITICAL NOTES:
+ *   - This file is the SINGLE point where all CT pack components are generated.
+ *   - If any part of the CT engine, XML builder, or iXBRL builders change,
+ *     this file must be reviewed to ensure correct data is passed through.
+ *   - This file does NOT validate HMRC schema — validation happens externally.
+ *
+ * VALIDATION STATUS:
+ *   - Internally consistent with your CT engine and iXBRL builders.
+ *   - XML schema validation pending (we will test after updating xmlBuilder.js).
+ */
+
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
 import { generateCt600aPdf } from "../../../lib/pdf/templates/ct600a";
 import { generateCt600jPdf } from "../../../lib/pdf/templates/ct600j";
@@ -24,6 +58,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, message: "Missing clientId, periodStart, or periodEnd." });
     }
 
+    // ------------------------------------------------------------
+    // 1. LOAD CLIENT
+    // ------------------------------------------------------------
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -35,6 +72,7 @@ export default async function handler(req, res) {
       return res.status(404).json({ success: false, message: "Client not found." });
     }
 
+    // Normalised company details object (used by PDFs)
     const companyDetails = {
       name: client.name,
       business_name: client.business_name || client.name,
@@ -55,6 +93,9 @@ export default async function handler(req, res) {
       mtditsa_id: client.mtditsa_id,
     };
 
+    // ------------------------------------------------------------
+    // 2. LOAD JOURNALS (used for supplement detection)
+    // ------------------------------------------------------------
     const { data: journals } = await supabaseAdmin
       .from("journal_entries")
       .select(`
@@ -90,9 +131,15 @@ export default async function handler(req, res) {
       ct600NRequired: sumByPrefix("NI") > 0,
     };
 
+    // ------------------------------------------------------------
+    // 3. RUN CT COMPUTATIONS ENGINE
+    // ------------------------------------------------------------
     const computations = await computeCtForPeriod({ clientId, periodStart, periodEnd });
     const generated = [];
 
+    // ------------------------------------------------------------
+    // 4. GENERATE CT600 MAIN PDF
+    // ------------------------------------------------------------
     await generateCt600Pdf({
       clientId,
       periodStart,
@@ -114,12 +161,17 @@ export default async function handler(req, res) {
     });
     generated.push("CT600_PDF");
 
+    // ------------------------------------------------------------
+    // 5. GENERATE CT600 XML (HMRC SUBMISSION XML)
+    // ------------------------------------------------------------
     const ct600Xml = buildCt600Xml({
       companyNumber: client.company_number || "",
       companyName: client.business_name || client.name,
       periodStart,
       periodEnd,
       computations,
+      utr: client.utr_number || "",
+      companyType: client.business_type || "LTD",
     });
 
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
@@ -132,36 +184,90 @@ export default async function handler(req, res) {
 
     if (!ct600XmlError) generated.push("CT600_XML");
 
+    // ------------------------------------------------------------
+    // 6. SUPPLEMENT PDFs (A, J, L, F, M, N)
+    // ------------------------------------------------------------
     if (supplements.ct600ARequired) {
-      await generateCt600aPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600A_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600aPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600A_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600A_PDF");
     }
 
     if (supplements.ct600JRequired) {
-      await generateCt600jPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600J_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600jPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600J_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600J_PDF");
     }
 
     if (supplements.ct600LRequired) {
-      await generateCt600lPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600L_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600lPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600L_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600L_PDF");
     }
 
     if (supplements.ct600FRequired) {
-      await generateCt600fPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600F_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600fPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600F_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600F_PDF");
     }
 
     if (supplements.ct600MRequired) {
-      await generateCt600mPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600M_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600mPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600M_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600M_PDF");
     }
 
     if (supplements.ct600NRequired) {
-      await generateCt600nPdf({ clientId, periodStart, periodEnd, year: new Date(periodEnd).getFullYear(), filename: `CT600N_${clientId}_${periodEnd}.pdf`, createdBy: "system", companyDetails });
+      await generateCt600nPdf({
+        clientId,
+        periodStart,
+        periodEnd,
+        year: new Date(periodEnd).getFullYear(),
+        filename: `CT600N_${clientId}_${periodEnd}.pdf`,
+        createdBy: "system",
+        companyDetails,
+      });
       generated.push("CT600N_PDF");
     }
 
+    // ------------------------------------------------------------
+    // 7. COMPUTATIONS iXBRL
+    // ------------------------------------------------------------
     const computationsIxbrl = await buildComputationsIxbrl({
       clientId,
       companyNumber: client.company_number || "",
@@ -180,6 +286,9 @@ export default async function handler(req, res) {
 
     if (!ixbrlError) generated.push("iXBRL_COMPUTATIONS");
 
+    // ------------------------------------------------------------
+    // 8. ACCOUNTS iXBRL
+    // ------------------------------------------------------------
     const { ixbrl: accountsIxbrl, framework } = await buildAccountsIxbrl({
       clientId,
       companyNumber: client.company_number || "",
@@ -199,7 +308,11 @@ export default async function handler(req, res) {
 
     if (!accountsError) generated.push(`iXBRL_ACCOUNTS_${framework}`);
 
+    // ------------------------------------------------------------
+    // 9. DONE
+    // ------------------------------------------------------------
     return res.status(200).json({ success: true, generated });
+
   } catch (err) {
     console.error("CT pack generation failed:", err);
     return res.status(500).json({

@@ -1,3 +1,5 @@
+// /api/profile.js
+
 import { supabaseAdmin } from "../../lib/supabase-admin";
 import { CT_MAP } from "../../lib/constants/ctMap";
 import { SYSTEM_CATEGORIES } from "../../lib/constants/systemCategories";
@@ -215,13 +217,20 @@ export default async function handler(req, res) {
 
       if (clientError) throw clientError;
 
-      const businessType = client?.business_type || "sole_trader";
+      // ⭐ 3.5) Fetch latest statutory accounts metadata
+      const { data: accountsMeta } = await supabaseAdmin
+        .from("client_accounts_periods")
+        .select("*")
+        .eq("client_id", clientId)
+        .order("period_end", { ascending: false })
+        .limit(1)
+        .single();
 
       // ⭐ 4) CT_MAP + COA-driven totals (MATCHES DASHBOARD)
       let totalIncome = 0;
       let totalExpenses = 0;
 
-      const categoryTotals = {}; // CT_MAP categories
+      const categoryTotals = {};
       const byMonth = {};
 
       for (const tx of txs) {
@@ -235,10 +244,8 @@ export default async function handler(req, res) {
 
         const category = (tx.business_category || "Uncategorised").trim();
 
-        // 1. Ignore CT_MAP.ignore
         if (IGNORE_SET.has(category)) continue;
 
-        // 2. COA guardrails
         const coa = coaMap.get(tx.coa_id);
         if (!coa) continue;
 
@@ -256,35 +263,28 @@ export default async function handler(req, res) {
 
         if (isControl) continue;
 
-        // 3. Respect CT toggle
         if (tx.includedinct === false) continue;
 
         const absAmount = Math.abs(amount);
 
-        // 4. Revenue (CT_MAP.income + COA INCOME + positive)
         if (INCOME_SET.has(category) && accType === "INCOME" && amount > 0) {
           totalIncome += amount;
           byMonth[monthKey].income += amount;
-
           categoryTotals[category] =
             (categoryTotals[category] || 0) + absAmount;
           continue;
         }
 
-        // 5. Expenses (CT_MAP.allowable + disallowable + COA EXPENSE + negative)
         const isExpenseCategory =
           ALLOWABLE_SET.has(category) || DISALLOWABLE_SET.has(category);
 
         if (isExpenseCategory && accType === "EXPENSE" && amount < 0) {
           totalExpenses += absAmount;
           byMonth[monthKey].expenses += absAmount;
-
           categoryTotals[category] =
             (categoryTotals[category] || 0) + absAmount;
           continue;
         }
-
-        // 6. Everything else ignored
       }
 
       const netProfit = totalIncome - totalExpenses;
@@ -299,7 +299,8 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         client,
-        transactions: txs, // UI categories preserved
+        accountsMeta: accountsMeta || null,
+        transactions: txs,
         summary: {
           totalIncome,
           totalExpenses,
@@ -309,8 +310,8 @@ export default async function handler(req, res) {
             limited_company: limitedCompanyOwed,
           },
         },
-        categoryTotals, // CT_MAP category totals
-        byMonth, // CT_MAP monthly breakdown
+        categoryTotals,
+        byMonth,
       });
     }
 

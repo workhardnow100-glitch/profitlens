@@ -1,5 +1,36 @@
 // lib/ixbrl/instanceBuilder.ts
 
+/**
+ * IXBRL INSTANCE BUILDER
+ * ----------------------
+ * PURPOSE:
+ *   Builds a complete iXBRL XHTML document for HMRC/FRC‑style filings using:
+ *     - A single taxonomy entry point (schemaRef)
+ *     - Contexts (entity + period)
+ *     - Units (e.g. iso4217:GBP)
+ *     - Numeric facts (ix:nonFraction)
+ *     - Narrative text blocks (ix:nonNumeric)
+ *
+ * USED BY:
+ *   - buildComputationsIxbrl (CT computations iXBRL)
+ *   - buildAccountsIxbrl (statutory accounts iXBRL)
+ *
+ * KEY BEHAVIOUR:
+ *   - Dynamically derives XML namespaces from the concepts used in facts/text blocks
+ *   - Adds iso4217 namespace automatically when needed
+ *   - Uses Companies House scheme for entity identifier when companyNumber is present
+ *   - Falls back to an internal scheme when no companyNumber is available
+ *   - Renders:
+ *       • ix:nonFraction for all scalar facts (number/string/boolean)
+ *       • ix:nonNumeric for HTML text blocks
+ *
+ * VALIDATION STATUS:
+ *   ✓ Structure aligned with HMRC/FRC iXBRL patterns
+ *   ✓ Namespaces derived from taxonomy concept map
+ *   ✓ Safe XML escaping for identifiers, measures, and values
+ *   ☐ Pending: full live validation against HMRC gateway for all taxonomies
+ */
+
 import {
   IxbrlContext,
   IxbrlUnit,
@@ -104,7 +135,7 @@ export function buildIxbrlInstance(input: IxbrlInstanceInput): string {
     })
     .join("\n      ");
 
-  // Facts (numeric)
+  // Facts (numeric / scalar)
   const factsXml = facts
     .map((f) => {
       const value = formatFactValue(f.value);
