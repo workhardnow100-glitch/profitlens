@@ -1,4 +1,4 @@
-
+//lib/ixbrl/conceptMap.ts
 /**
  * TAXONOMY CONCEPT MAP
  * ---------------------
@@ -35,6 +35,16 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
     dataType: "monetary",
     balanceType: "credit",
   },
+  {
+  id: "ct-group-relief",
+  taxonomyId: "hmrc-ct-2024",
+  internalKey: "ct.group_relief",
+  xbrlName: "uk-corp-tax:GroupReliefAmount",
+  xbrlNamespace: "http://www.gov.uk/taxonomy/uk-corp-tax",
+  dataType: "monetary",
+  balanceType: "debit"
+},
+
   {
     id: "ct-allowable-expenses",
     taxonomyId: "hmrc-ct-2024",
