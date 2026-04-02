@@ -80,38 +80,41 @@ export default function CorpPage() {
   }, [isLoading, isAuthenticated, router]);
 
   // ⭐ FIXED DRILLDOWN GROUPS — NOW DEPEND ON result.drilldown
-  const { incomeRows, allowableRows, disallowableRows} = useMemo(() => {
-    if (!result || !Array.isArray(result.drilldown)) {
-      return {
-        incomeRows: [],
-        allowableRows: [],
-        disallowableRows: [],
-      
-      };
+const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+  if (!result || !Array.isArray(result.drilldown)) {
+    return {
+      incomeRows: [],
+      allowableRows: [],
+      disallowableRows: [],
+      reviewRows: [],
+    };
+  }
+
+  const incomeRows = [];
+  const allowableRows = [];
+  const disallowableRows = [];
+  const reviewRows = [];
+
+  for (const line of result.drilldown) {
+    switch (line.ctType) {
+      case "income":
+        incomeRows.push(line);
+        break;
+      case "allowable":
+        allowableRows.push(line);
+        break;
+      case "disallowable":
+        disallowableRows.push(line);
+        break;
+      default:
+        reviewRows.push(line);
+        break;
     }
+  }
 
-    const incomeRows = [];
-    const allowableRows = [];
-    const disallowableRows = [];
-    
+  return { incomeRows, allowableRows, disallowableRows, reviewRows };
+}, [result?.drilldown]);
 
-    for (const line of result.drilldown) {
-      switch (line.ctType) {
-        case "income":
-          incomeRows.push(line);
-          break;
-        case "allowable":
-          allowableRows.push(line);
-          break;
-        case "disallowable":
-          disallowableRows.push(line);
-          break;
-        
-      }
-    }
-
-    return { incomeRows, allowableRows, disallowableRows };
-  }, [result?.drilldown]);
 
   // Auto-load statutory metadata once CT summary + period are in place
   useEffect(() => {
