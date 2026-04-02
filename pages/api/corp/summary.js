@@ -10,7 +10,7 @@
  *     - Adjusted profit (profit + disallowables)
  *     - Corporation Tax due (marginal relief aware)
  *     - Breakdown rows (journal lines classified by COA)
- *     - Drilldown = same breakdown, for UI tables
+ *     - Drilldown rows built from journal_entries + journal_lines + COA
  * ============================================================
  */
 
@@ -95,7 +95,7 @@ export default async function handler(req, res) {
     const pl = await getUnifiedProfitAndLoss(clientId);
     const tb = await getUnifiedTrialBalance(clientId);
 
-    // 2. Classify journal lines with correct CT amounts
+    // 2. Classify trial-balance lines with correct CT amounts (for summary tiles)
     const breakdown = (tb.lines || []).map((line) => {
       const debit = Number(line.debit || 0);
       const credit = Number(line.credit || 0);
@@ -134,7 +134,97 @@ export default async function handler(req, res) {
       };
     });
 
-    // 3. Totals
+    // 2.5 Journal-based drilldown: journal_entries + journal_lines + COA
+    // Step 1: journal entries in period for this client
+    const { data: jeRows, error: jeErr } = await supabaseAdmin
+      .from("journal_entries")
+      .select("id, client_id, date, description")
+      .eq("client_id", clientId)
+      .gte("date", periodStart)
+      .lte("date", periodEnd);
+
+    if (jeErr) throw jeErr;
+
+    const journalIds = (jeRows || []).map((j) => j.id);
+    let drilldown = [];
+
+    if (journalIds.length > 0) {
+      // Step 2: journal lines for those entries
+      const { data: jlRows, error: jlErr } = await supabaseAdmin
+        .from("journal_lines")
+        .select("id, journal_id, account_id, debit, credit")
+        .in("journal_id", journalIds);
+
+      if (jlErr) throw jlErr;
+
+      const accountIds = Array.from(
+        new Set((jlRows || []).map((l) => l.account_id).filter(Boolean))
+      );
+
+      // Step 3: COA rows for those accounts
+      let coaMap = {};
+      if (accountIds.length > 0) {
+        const { data: coaRows, error: coaErr } = await supabaseAdmin
+          .from("chart_of_account_entries")
+          .select("id, account_code, account_name, account_type, hmrc_bucket")
+          .in("id", accountIds);
+
+        if (coaErr) throw coaErr;
+
+        coaMap =
+          (coaRows || []).length > 0
+            ? Object.fromEntries(coaRows.map((c) => [c.id, c]))
+            : {};
+      }
+
+      const jeMap =
+        (jeRows || []).length > 0
+          ? Object.fromEntries(jeRows.map((j) => [j.id, j]))
+          : {};
+
+      // Step 4: build drilldown rows with CT classification
+      drilldown = (jlRows || []).map((row) => {
+        const je = jeMap[row.journal_id] || {};
+        const coa = coaMap[row.account_id] || {};
+
+        const debit = Number(row.debit || 0);
+        const credit = Number(row.credit || 0);
+
+        let ctType = "ignore";
+        let amount = 0;
+
+        if (coa.account_type === "INCOME") {
+          ctType = "income";
+          amount = credit;
+        } else if (coa.account_type === "EXPENSE") {
+          const netExpense = debit - credit;
+          if (coa.hmrc_bucket === "allowable") {
+            ctType = "allowable";
+            amount = netExpense > 0 ? netExpense : 0;
+          } else if (coa.hmrc_bucket === "disallowable") {
+            ctType = "disallowable";
+            amount = netExpense > 0 ? netExpense : 0;
+          } else {
+            ctType = "review";
+            amount = netExpense > 0 ? netExpense : 0;
+          }
+        }
+
+        return {
+          id: row.id,
+          date: je.date,
+          description: je.description,
+          account_code: coa.account_code,
+          account_name: coa.account_name,
+          hmrc_bucket: coa.hmrc_bucket,
+          account_type: coa.account_type,
+          ctType,
+          amount,
+        };
+      });
+    }
+
+    // 3. Totals (from breakdown)
     const income = breakdown
       .filter((b) => b.ctType === "income")
       .reduce((sum, b) => sum + b.amount, 0);
@@ -170,7 +260,7 @@ export default async function handler(req, res) {
       corpTaxDue,
       effectiveRate,
       breakdown,
-      drilldown: breakdown, // <-- single source for tables + banner
+      drilldown, // journal-based rows with date/description/account/ctType/amount
     });
   } catch (err) {
     console.error("CT summary error:", err);

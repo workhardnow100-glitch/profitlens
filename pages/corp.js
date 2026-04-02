@@ -1082,44 +1082,46 @@ export default function CorpPage() {
 
             {/* Drilldown: Income */}
             <ResponsiveCard title="Trading income breakdown">
-              <ResponsiveTable
+   <ResponsiveTable
   columns={[
-    { header: "Account code", accessor: "account_code" },
-    { header: "Account name", accessor: "account_name" },
-    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Date", accessor: "date" },
+    { header: "Description", accessor: "description" },
+    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
     { header: "Amount (£)", accessor: "amount" },
   ]}
   data={incomeRows}
 />
+
 
             </ResponsiveCard>
 
             {/* Drilldown: Allowable */}
             <ResponsiveCard title="Allowable expenses breakdown">
-              <ResponsiveTable
+      <ResponsiveTable
   columns={[
-    { header: "Account code", accessor: "account_code" },
-    { header: "Account name", accessor: "account_name" },
-    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Date", accessor: "date" },
+    { header: "Description", accessor: "description" },
+    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
     { header: "Amount (£)", accessor: "amount" },
   ]}
   data={incomeRows}
 />
+
 
             </ResponsiveCard>
 
             {/* Drilldown: Disallowable */}
             <ResponsiveCard title="Disallowable expenses (add‑backs)">
-              <ResponsiveTable
-             
+     <ResponsiveTable
   columns={[
-    { header: "Account code", accessor: "account_code" },
-    { header: "Account name", accessor: "account_name" },
-    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Date", accessor: "date" },
+    { header: "Description", accessor: "description" },
+    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
     { header: "Amount (£)", accessor: "amount" },
   ]}
   data={incomeRows}
 />
+
 
             </ResponsiveCard>
 
