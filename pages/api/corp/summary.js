@@ -146,7 +146,7 @@ const { data: jlJoined, error: jlJoinedErr } = await supabaseAdmin
     credit,
     journal_id,
     account_id,
-    journal_entries!inner (
+    journal_entries:journal_id (
       id,
       client_id,
       date,
@@ -164,7 +164,10 @@ const { data: jlJoined, error: jlJoinedErr } = await supabaseAdmin
   .gte("journal_entries.date", periodStart)
   .lte("journal_entries.date", periodEnd);
 
+console.log("JL JOINED COUNT:", jlJoined?.length || 0);
+
 if (jlJoinedErr) throw jlJoinedErr;
+
 
 const drilldown = (jlJoined || []).map((row) => {
   const je = row.journal_entries || {};
