@@ -76,7 +76,6 @@ export default function CorpPage() {
 
   // ⭐ FIXED DRILLDOWN GROUPS — SAFE + CORRECT + ABOVE RETURNS
 const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-  // SAFETY GUARD: prevents React crash
   if (
     !result ||
     !Array.isArray(result.transactions) ||
@@ -100,7 +99,7 @@ const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() =
     if (!tx || tx.includedinct === false) continue;
 
     const category =
-      (tx.business_category && tx.business_category.trim()) ||
+      (typeof tx.business_category === "string" && tx.business_category.trim()) ||
       "Uncategorised";
 
     const amount = Number(tx.amount || 0);
