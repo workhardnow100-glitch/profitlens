@@ -1,6 +1,5 @@
 // pages/corp.js
 
-
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
 
@@ -61,11 +60,15 @@ export default function CorpPage() {
   const [directorsRemPreviousInput, setDirectorsRemPreviousInput] = useState("");
 
   const [relatedPartyNotesInput, setRelatedPartyNotesInput] = useState("");
-  const [contingentLiabilitiesNotesInput, setContingentLiabilitiesNotesInput] = useState("");
-  const [postBalanceSheetEventsNotesInput, setPostBalanceSheetEventsNotesInput] = useState("");
+  const [contingentLiabilitiesNotesInput, setContingentLiabilitiesNotesInput] =
+    useState("");
+  const [postBalanceSheetEventsNotesInput, setPostBalanceSheetEventsNotesInput] =
+    useState("");
 
-  const [accountingPoliciesOverrideInput, setAccountingPoliciesOverrideInput] = useState("");
-  const [smallCompaniesRegimeOverrideInput, setSmallCompaniesRegimeOverrideInput] = useState("");
+  const [accountingPoliciesOverrideInput, setAccountingPoliciesOverrideInput] =
+    useState("");
+  const [smallCompaniesRegimeOverrideInput, setSmallCompaniesRegimeOverrideInput] =
+    useState("");
 
   // Unified client resolution
   const clientId = user?.actingAsClientId ?? user?.clientId;
@@ -76,44 +79,42 @@ export default function CorpPage() {
     if (!isAuthenticated) router.replace("/login");
   }, [isLoading, isAuthenticated, router]);
 
-  // ⭐ FIXED DRILLDOWN GROUPS — SAFE + CORRECT + ABOVE RETURNS
- const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-  if (!result || !Array.isArray(result.drilldown)) {
-    return {
-      incomeRows: [],
-      allowableRows: [],
-      disallowableRows: [],
-      reviewRows: [],
-    };
-  }
-
-  const incomeRows = [];
-  const allowableRows = [];
-  const disallowableRows = [];
-  const reviewRows = [];
-
-  for (const line of result.drilldown) {
-    switch (line.ctType) {
-      case "income":
-        incomeRows.push(line);
-        break;
-      case "allowable":
-        allowableRows.push(line);
-        break;
-      case "disallowable":
-        disallowableRows.push(line);
-        break;
-      case "review":
-      default:
-        reviewRows.push(line);
-        break;
+  // ⭐ FIXED DRILLDOWN GROUPS — NOW DEPEND ON result.drilldown
+  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+    if (!result || !Array.isArray(result.drilldown)) {
+      return {
+        incomeRows: [],
+        allowableRows: [],
+        disallowableRows: [],
+        reviewRows: [],
+      };
     }
-  }
 
-  return { incomeRows, allowableRows, disallowableRows, reviewRows };
-}, [result]);
+    const incomeRows = [];
+    const allowableRows = [];
+    const disallowableRows = [];
+    const reviewRows = [];
 
+    for (const line of result.drilldown) {
+      switch (line.ctType) {
+        case "income":
+          incomeRows.push(line);
+          break;
+        case "allowable":
+          allowableRows.push(line);
+          break;
+        case "disallowable":
+          disallowableRows.push(line);
+          break;
+        case "review":
+        default:
+          reviewRows.push(line);
+          break;
+      }
+    }
 
+    return { incomeRows, allowableRows, disallowableRows, reviewRows };
+  }, [result?.drilldown]);
 
   // Auto-load statutory metadata once CT summary + period are in place
   useEffect(() => {
@@ -152,7 +153,9 @@ export default function CorpPage() {
 
       const data = await res.json();
       if (!data.success) {
-        alert("Error fetching Corporation Tax summary: " + (data.error || "Unknown error"));
+        alert(
+          "Error fetching Corporation Tax summary: " + (data.error || "Unknown error")
+        );
         return;
       }
 
@@ -171,7 +174,12 @@ export default function CorpPage() {
       alert("Please select both start and end dates.");
       return;
     }
-    if (!confirm("Lock this Corporation Tax period? This will prevent further edits.")) return;
+    if (
+      !confirm(
+        "Lock this Corporation Tax period? This will prevent further edits."
+      )
+    )
+      return;
 
     setLoading(true);
     try {
@@ -254,28 +262,40 @@ export default function CorpPage() {
     setCtError(null);
 
     try {
-      const [statusRes, obligationsRes, returnsRes, liabilitiesRes, paymentsRes] =
-        await Promise.all([
-          fetch("/api/mtd/ct/status"),
-          fetch("/api/mtd/ct/obligations"),
-          fetch("/api/mtd/ct/returns"),
-          fetch("/api/mtd/ct/liabilities"),
-          fetch("/api/mtd/ct/payments"),
-        ]);
+      const [
+        statusRes,
+        obligationsRes,
+        returnsRes,
+        liabilitiesRes,
+        paymentsRes,
+      ] = await Promise.all([
+        fetch("/api/mtd/ct/status"),
+        fetch("/api/mtd/ct/obligations"),
+        fetch("/api/mtd/ct/returns"),
+        fetch("/api/mtd/ct/liabilities"),
+        fetch("/api/mtd/ct/payments"),
+      ]);
 
-      const [statusData, obligationsData, returnsData, liabilitiesData, paymentsData] =
-        await Promise.all([
-          statusRes.json(),
-          obligationsRes.json(),
-          returnsRes.json(),
-          liabilitiesRes.json(),
-          paymentsRes.json(),
-        ]);
+      const [
+        statusData,
+        obligationsData,
+        returnsData,
+        liabilitiesData,
+        paymentsData,
+      ] = await Promise.all([
+        statusRes.json(),
+        obligationsRes.json(),
+        returnsRes.json(),
+        liabilitiesRes.json(),
+        paymentsRes.json(),
+      ]);
 
-      if (!statusRes.ok) throw new Error(statusData.error || "Error fetching CT MTD status");
+      if (!statusRes.ok)
+        throw new Error(statusData.error || "Error fetching CT MTD status");
       if (!obligationsRes.ok)
         throw new Error(obligationsData.error || "Error fetching CT obligations");
-      if (!returnsRes.ok) throw new Error(returnsData.error || "Error fetching CT returns");
+      if (!returnsRes.ok)
+        throw new Error(returnsData.error || "Error fetching CT returns");
       if (!liabilitiesRes.ok)
         throw new Error(liabilitiesData.error || "Error fetching CT liabilities");
       if (!paymentsRes.ok)
@@ -325,7 +345,6 @@ export default function CorpPage() {
         return;
       }
 
-      // { success: true, pack: { ct600PdfUrl, accountsIxbrlUrl, computationsIxbrlUrl, ct600XmlUrl } }
       setFilingPack(data.pack || null);
       alert("Filing pack generated successfully.");
     } catch (err) {
@@ -344,7 +363,9 @@ export default function CorpPage() {
       return;
     }
     if (!from || !to) {
-      alert("Please select both start and end dates before building the submission envelope.");
+      alert(
+        "Please select both start and end dates before building the submission envelope."
+      );
       return;
     }
 
@@ -364,7 +385,9 @@ export default function CorpPage() {
       const data = await res.json();
       if (!data.success) {
         setFilingError(data.error || "Error generating submission envelope.");
-        alert("Error generating submission envelope: " + (data.error || "Unknown error"));
+        alert(
+          "Error generating submission envelope: " + (data.error || "Unknown error")
+        );
         return;
       }
 
@@ -413,12 +436,13 @@ export default function CorpPage() {
 
       const data = await res.json();
       if (!data.success) {
-        setFilingError(data.error || `Error submitting CT600 to HMRC (${label}).`);
+        setFilingError(
+          data.error || `Error submitting CT600 to HMRC (${label}).`
+        );
         alert("Error submitting CT600 to HMRC: " + (data.error || "Unknown error"));
         return;
       }
 
-      // { success: true, environment, response: { hmrcResponseUrl } }
       setHmrcSubmission(data.response || null);
       alert(`CT600 submitted to HMRC (${label}) successfully.`);
     } catch (err) {
@@ -450,7 +474,9 @@ export default function CorpPage() {
 
       const data = await res.json();
       if (!data.success) {
-        setAccountsMetaError(data.error || "Error loading statutory accounts metadata.");
+        setAccountsMetaError(
+          data.error || "Error loading statutory accounts metadata."
+        );
         return;
       }
 
@@ -463,17 +489,25 @@ export default function CorpPage() {
           user?.business_name ||
           ""
       );
-      setApprovalDateInput(meta.accounts_approval_date || meta.approvalDate || to || "");
+      setApprovalDateInput(
+        meta.accounts_approval_date || meta.approvalDate || to || ""
+      );
 
       setEmployeesCurrentInput(
-        meta.employees_current_year != null ? String(meta.employees_current_year) : ""
+        meta.employees_current_year != null
+          ? String(meta.employees_current_year)
+          : ""
       );
       setEmployeesPreviousInput(
-        meta.employees_previous_year != null ? String(meta.employees_previous_year) : ""
+        meta.employees_previous_year != null
+          ? String(meta.employees_previous_year)
+          : ""
       );
 
       setDirectorsRemCurrentInput(
-        meta.directors_remuneration != null ? String(meta.directors_remuneration) : ""
+        meta.directors_remuneration != null
+          ? String(meta.directors_remuneration)
+          : ""
       );
       setDirectorsRemPreviousInput(
         meta.directors_remuneration_previous != null
@@ -482,11 +516,19 @@ export default function CorpPage() {
       );
 
       setRelatedPartyNotesInput(meta.related_party_notes || "");
-      setContingentLiabilitiesNotesInput(meta.contingent_liabilities_notes || "");
-      setPostBalanceSheetEventsNotesInput(meta.post_balance_sheet_events || "");
+      setContingentLiabilitiesNotesInput(
+        meta.contingent_liabilities_notes || ""
+      );
+      setPostBalanceSheetEventsNotesInput(
+        meta.post_balance_sheet_events || ""
+      );
 
-      setAccountingPoliciesOverrideInput(meta.accounting_policies_override || "");
-      setSmallCompaniesRegimeOverrideInput(meta.small_companies_regime_override || "");
+      setAccountingPoliciesOverrideInput(
+        meta.accounting_policies_override || ""
+      );
+      setSmallCompaniesRegimeOverrideInput(
+        meta.small_companies_regime_override || ""
+      );
 
       setAccountsMetaSavedAt(meta.updated_at || meta.created_at || null);
     } catch (err) {
@@ -500,7 +542,9 @@ export default function CorpPage() {
   // Save statutory accounts metadata
   async function saveAccountsMeta() {
     if (!clientId || !from || !to) {
-      alert("Client and period must be selected before saving statutory accounts.");
+      alert(
+        "Client and period must be selected before saving statutory accounts."
+      );
       return;
     }
     if (result?.locked) {
@@ -522,29 +566,48 @@ export default function CorpPage() {
           directorName: directorNameInput || null,
           approvalDate: approvalDateInput || null,
           employeesCurrent:
-            employeesCurrentInput !== "" ? Number(employeesCurrentInput) : null,
+            employeesCurrentInput !== ""
+              ? Number(employeesCurrentInput)
+              : null,
           employeesPrevious:
-            employeesPreviousInput !== "" ? Number(employeesPreviousInput) : null,
+            employeesPreviousInput !== ""
+              ? Number(employeesPreviousInput)
+              : null,
           directorsRemCurrent:
-            directorsRemCurrentInput !== "" ? Number(directorsRemCurrentInput) : null,
+            directorsRemCurrentInput !== ""
+              ? Number(directorsRemCurrentInput)
+              : null,
           directorsRemPrevious:
-            directorsRemPreviousInput !== "" ? Number(directorsRemPreviousInput) : null,
+            directorsRemPreviousInput !== ""
+              ? Number(directorsRemPreviousInput)
+              : null,
           relatedPartyNotes: relatedPartyNotesInput || null,
-          contingentLiabilitiesNotes: contingentLiabilitiesNotesInput || null,
-          postBalanceSheetEventsNotes: postBalanceSheetEventsNotesInput || null,
-          accountingPoliciesOverride: accountingPoliciesOverrideInput || null,
-          smallCompaniesRegimeOverride: smallCompaniesRegimeOverrideInput || null,
+          contingentLiabilitiesNotes:
+            contingentLiabilitiesNotesInput || null,
+          postBalanceSheetEventsNotes:
+            postBalanceSheetEventsNotesInput || null,
+          accountingPoliciesOverride:
+            accountingPoliciesOverrideInput || null,
+          smallCompaniesRegimeOverride:
+            smallCompaniesRegimeOverrideInput || null,
         }),
       });
 
       const data = await res.json();
       if (!data.success) {
-        setAccountsMetaError(data.error || "Error saving statutory accounts metadata.");
-        alert("Error saving statutory accounts: " + (data.error || "Unknown error"));
+        setAccountsMetaError(
+          data.error || "Error saving statutory accounts metadata."
+        );
+        alert(
+          "Error saving statutory accounts: " +
+            (data.error || "Unknown error")
+        );
         return;
       }
 
-      setAccountsMetaSavedAt(data.meta?.updated_at || new Date().toISOString());
+      setAccountsMetaSavedAt(
+        data.meta?.updated_at || new Date().toISOString()
+      );
       alert("Statutory accounts details saved.");
     } catch (err) {
       console.error(err);
@@ -563,8 +626,8 @@ export default function CorpPage() {
       <div className="p-6 space-y-6">
         <h1 className="text-3xl font-bold text-slate-900">Corporation Tax</h1>
         <p className="text-slate-600">
-          Cockpit view of trading income, allowable expenses, add‑backs, and Corporation Tax
-          liability for your chosen accounting year.
+          Cockpit view of trading income, allowable expenses, add‑backs, and
+          Corporation Tax liability for your chosen accounting year.
         </p>
 
         {/* Period controls */}
@@ -621,23 +684,31 @@ export default function CorpPage() {
         {hasResult && (
           <>
             <ResponsiveCard
-              title={`Corporation Tax Summary ${result.locked ? "(Locked)" : ""}`}
+              title={`Corporation Tax Summary ${
+                result.locked ? "(Locked)" : ""
+              }`}
             >
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Trading income</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Trading income
+                  </p>
                   <p className="text-xl font-semibold text-emerald-700">
                     £{result.income.toFixed(2)}
                   </p>
                 </div>
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Allowable expenses</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Allowable expenses
+                  </p>
                   <p className="text-xl font-semibold text-red-600">
                     £{result.allowable.toFixed(2)}
                   </p>
                 </div>
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Add‑backs (disallowable)</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Add‑backs (disallowable)
+                  </p>
                   <p className="text-xl font-semibold text-amber-600">
                     £{result.disallowable.toFixed(2)}
                   </p>
@@ -652,13 +723,17 @@ export default function CorpPage() {
                   </p>
                 </div>
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Adjusted profit</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Adjusted profit
+                  </p>
                   <p className="text-xl font-semibold text-slate-900">
                     £{result.adjustedProfit.toFixed(2)}
                   </p>
                 </div>
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Corporation Tax due</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Corporation Tax due
+                  </p>
                   <p className="text-xl font-semibold text-indigo-700">
                     £{result.corpTaxDue.toFixed(2)}
                   </p>
@@ -668,20 +743,32 @@ export default function CorpPage() {
                 </div>
               </div>
 
-              {reviewRows.length > 0 && (
-                <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
-                  There are <strong>{reviewRows.length}</strong> transactions marked as{" "}
-                  <strong>review/uncategorised</strong>. These do not slot cleanly into HMRC‑aligned
-                  CT rules and should be checked before filing.
-                </div>
-              )}
+              {result?.transactions &&
+                result.transactions.filter(
+                  (t) => t.ctType === "review"
+                ).length > 0 && (
+                  <div className="mt-4 p-3 rounded border border-amber-300 bg-amber-50 text-amber-900 text-sm">
+                    There are{" "}
+                    <strong>
+                      {
+                        result.transactions.filter(
+                          (t) => t.ctType === "review"
+                        ).length
+                      }
+                    </strong>{" "}
+                    transactions marked as{" "}
+                    <strong>review/uncategorised</strong>. These do not slot
+                    cleanly into HMRC‑aligned CT rules and should be checked
+                    before filing.
+                  </div>
+                )}
             </ResponsiveCard>
 
             {/* Statutory Accounts – cockpit for FRS102‑1A / FRS105 / IFRS */}
             <ResponsiveCard title="Statutory Accounts (FRS102‑1A / FRS105 / IFRS)">
               <p className="text-sm text-slate-600 mb-3">
-                These details feed directly into your statutory accounts iXBRL (FRS102‑1A, FRS105 or
-                IFRS) used in the CT600 filing pack.
+                These details feed directly into your statutory accounts iXBRL
+                (FRS102‑1A, FRS105 or IFRS) used in the CT600 filing pack.
               </p>
 
               {accountsMetaError && (
@@ -696,7 +783,9 @@ export default function CorpPage() {
                   {accountsMetaSavedAt && (
                     <span className="ml-2">
                       • Last saved:{" "}
-                      {new Date(accountsMetaSavedAt).toLocaleString(undefined, {
+                      {new Date(
+                        accountsMetaSavedAt
+                      ).toLocaleString(undefined, {
                         dateStyle: "short",
                         timeStyle: "short",
                       })}
@@ -726,7 +815,9 @@ export default function CorpPage() {
                   <input
                     type="text"
                     value={directorNameInput}
-                    onChange={(e) => setDirectorNameInput(e.target.value)}
+                    onChange={(e) =>
+                      setDirectorNameInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -738,7 +829,9 @@ export default function CorpPage() {
                   <input
                     type="date"
                     value={approvalDateInput}
-                    onChange={(e) => setApprovalDateInput(e.target.value)}
+                    onChange={(e) =>
+                      setApprovalDateInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -755,7 +848,9 @@ export default function CorpPage() {
                     type="number"
                     min="0"
                     value={employeesCurrentInput}
-                    onChange={(e) => setEmployeesCurrentInput(e.target.value)}
+                    onChange={(e) =>
+                      setEmployeesCurrentInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -768,7 +863,9 @@ export default function CorpPage() {
                     type="number"
                     min="0"
                     value={employeesPreviousInput}
-                    onChange={(e) => setEmployeesPreviousInput(e.target.value)}
+                    onChange={(e) =>
+                      setEmployeesPreviousInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -782,7 +879,9 @@ export default function CorpPage() {
                     min="0"
                     step="0.01"
                     value={directorsRemCurrentInput}
-                    onChange={(e) => setDirectorsRemCurrentInput(e.target.value)}
+                    onChange={(e) =>
+                      setDirectorsRemCurrentInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -796,7 +895,9 @@ export default function CorpPage() {
                     min="0"
                     step="0.01"
                     value={directorsRemPreviousInput}
-                    onChange={(e) => setDirectorsRemPreviousInput(e.target.value)}
+                    onChange={(e) =>
+                      setDirectorsRemPreviousInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full"
                     disabled={result?.locked}
                   />
@@ -812,7 +913,9 @@ export default function CorpPage() {
                   <textarea
                     rows={4}
                     value={relatedPartyNotesInput}
-                    onChange={(e) => setRelatedPartyNotesInput(e.target.value)}
+                    onChange={(e) =>
+                      setRelatedPartyNotesInput(e.target.value)
+                    }
                     className="border p-2 rounded w-full text-sm"
                     disabled={result?.locked}
                     placeholder="Leave blank to use the standard disclosure."
@@ -825,7 +928,11 @@ export default function CorpPage() {
                   <textarea
                     rows={4}
                     value={contingentLiabilitiesNotesInput}
-                    onChange={(e) => setContingentLiabilitiesNotesInput(e.target.value)}
+                    onChange={(e) =>
+                      setContingentLiabilitiesNotesInput(
+                        e.target.value
+                      )
+                    }
                     className="border p-2 rounded w-full text-sm"
                     disabled={result?.locked}
                     placeholder="Leave blank to use the standard disclosure."
@@ -838,7 +945,11 @@ export default function CorpPage() {
                   <textarea
                     rows={4}
                     value={postBalanceSheetEventsNotesInput}
-                    onChange={(e) => setPostBalanceSheetEventsNotesInput(e.target.value)}
+                    onChange={(e) =>
+                      setPostBalanceSheetEventsNotesInput(
+                        e.target.value
+                      )
+                    }
                     className="border p-2 rounded w-full text-sm"
                     disabled={result?.locked}
                     placeholder="Leave blank to use the standard disclosure."
@@ -855,7 +966,11 @@ export default function CorpPage() {
                   <textarea
                     rows={6}
                     value={accountingPoliciesOverrideInput}
-                    onChange={(e) => setAccountingPoliciesOverrideInput(e.target.value)}
+                    onChange={(e) =>
+                      setAccountingPoliciesOverrideInput(
+                        e.target.value
+                      )
+                    }
                     className="border p-2 rounded w-full text-sm font-mono"
                     disabled={result?.locked}
                     placeholder="Optional HTML override. Leave blank to use the standard ProfitLens template."
@@ -868,7 +983,11 @@ export default function CorpPage() {
                   <textarea
                     rows={6}
                     value={smallCompaniesRegimeOverrideInput}
-                    onChange={(e) => setSmallCompaniesRegimeOverrideInput(e.target.value)}
+                    onChange={(e) =>
+                      setSmallCompaniesRegimeOverrideInput(
+                        e.target.value
+                      )
+                    }
                     className="border p-2 rounded w-full text-sm font-mono"
                     disabled={result?.locked}
                     placeholder="Optional HTML override. Leave blank to use the standard regime statement."
@@ -878,15 +997,18 @@ export default function CorpPage() {
 
               <div className="flex items-center justify-between mt-2">
                 <p className="text-xs text-slate-500 max-w-xl">
-                  These fields flow into the Directors’ report, notes, balance sheet statements and
-                  regime statements in your FRS102‑1A / FRS105 / IFRS accounts iXBRL.
+                  These fields flow into the Directors’ report, notes, balance
+                  sheet statements and regime statements in your FRS102‑1A /
+                  FRS105 / IFRS accounts iXBRL.
                 </p>
                 <button
                   onClick={saveAccountsMeta}
                   className="bg-emerald-600 text-white px-4 py-2 rounded text-sm"
                   disabled={accountsMetaLoading || !from || !to}
                 >
-                  {accountsMetaLoading ? "Saving…" : "Save statutory details"}
+                  {accountsMetaLoading
+                    ? "Saving…"
+                    : "Save statutory details"}
                 </button>
               </div>
             </ResponsiveCard>
@@ -894,8 +1016,9 @@ export default function CorpPage() {
             {/* CT600 Filing – new engine */}
             <ResponsiveCard title="CT600 Filing">
               <p className="text-sm text-slate-600 mb-3">
-                Generate CT600 PDFs, iXBRL accounts and computations, build the HMRC submission
-                envelope, and submit to HMRC. Review all artefacts before filing.
+                Generate CT600 PDFs, iXBRL accounts and computations, build the
+                HMRC submission envelope, and submit to HMRC. Review all
+                artefacts before filing.
               </p>
 
               {filingError && (
@@ -917,21 +1040,27 @@ export default function CorpPage() {
                   className="bg-slate-800 text-white px-4 py-2 rounded text-sm"
                   disabled={filingLoading || !from || !to}
                 >
-                  {filingLoading ? "Working…" : "Build Submission Envelope"}
+                  {filingLoading
+                    ? "Working…"
+                    : "Build Submission Envelope"}
                 </button>
                 <button
                   onClick={() => submitToHmrc("test")}
                   className="bg-emerald-600 text-white px-4 py-2 rounded text-sm"
                   disabled={filingLoading || !from || !to}
                 >
-                  {filingLoading ? "Submitting…" : "Submit to HMRC (Test)"}
+                  {filingLoading
+                    ? "Submitting…"
+                    : "Submit to HMRC (Test)"}
                 </button>
                 <button
                   onClick={() => submitToHmrc("live")}
                   className="bg-red-600 text-white px-4 py-2 rounded text-sm"
                   disabled={filingLoading || !from || !to}
                 >
-                  {filingLoading ? "Submitting…" : "Submit to HMRC (Live)"}
+                  {filingLoading
+                    ? "Submitting…"
+                    : "Submit to HMRC (Live)"}
                 </button>
               </div>
 
@@ -1011,8 +1140,8 @@ export default function CorpPage() {
                     </a>
                   ) : (
                     <p className="text-xs text-slate-500">
-                      Submission envelope generated, but no URL returned. Check backend response
-                      shape.
+                      Submission envelope generated, but no URL returned.
+                      Check backend response shape.
                     </p>
                   )}
                 </div>
@@ -1035,7 +1164,8 @@ export default function CorpPage() {
                     </a>
                   ) : (
                     <p className="text-xs text-slate-500">
-                      HMRC response recorded, but no URL returned. Check backend response shape.
+                      HMRC response recorded, but no URL returned. Check
+                      backend response shape.
                     </p>
                   )}
                 </div>
@@ -1045,27 +1175,34 @@ export default function CorpPage() {
             {/* Corporation Tax Payments */}
             <ResponsiveCard title="Corporation Tax Payments">
               <p className="text-sm text-slate-600 mb-2">
-                Track payments to and refunds from HMRC for this client. These records are stored
-                separately from transactions and used for reconciliation.
+                Track payments to and refunds from HMRC for this client. These
+                records are stored separately from transactions and used for
+                reconciliation.
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">CT due (this period)</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    CT due (this period)
+                  </p>
                   <p className="text-lg font-semibold text-indigo-700">
                     £{result.corpTaxDue.toFixed(2)}
                   </p>
                 </div>
 
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Total paid (all time)</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Total paid (all time)
+                  </p>
                   <p className="text-lg font-semibold text-emerald-700">
                     £{paymentTotals?.totalPaid?.toFixed(2) ?? "0.00"}
                   </p>
                 </div>
 
                 <div className="border rounded p-3 bg-slate-50">
-                  <p className="text-xs uppercase text-slate-500">Net paid (payments - refunds)</p>
+                  <p className="text-xs uppercase text-slate-500">
+                    Net paid (payments - refunds)
+                  </p>
                   <p className="text-lg font-semibold text-slate-900">
                     £{paymentTotals?.netPaid?.toFixed(2) ?? "0.00"}
                   </p>
@@ -1080,69 +1217,70 @@ export default function CorpPage() {
               </button>
             </ResponsiveCard>
 
-            {/* Drilldown: Income */}
-            <ResponsiveCard title="Trading income breakdown">
-   <ResponsiveTable
-  columns={[
-    { header: "Date", accessor: "date" },
-    { header: "Description", accessor: "description" },
-    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
-    { header: "Amount (£)", accessor: "amount" },
-  ]}
-  data={incomeRows}
-/>
+            {/* Drilldowns – only once result is present */}
+            {hasResult && (
+              <>
+                {/* Drilldown: Income */}
+                <ResponsiveCard title="Trading income breakdown">
+                  <ResponsiveTable
+                    columns={[
+                      { header: "Date", accessor: "date" },
+                      { header: "Description", accessor: "description" },
+                      { header: "Category", accessor: "account_name" },
+                      { header: "Amount (£)", accessor: "amount" },
+                    ]}
+                    data={incomeRows}
+                  />
+                </ResponsiveCard>
 
+                {/* Drilldown: Allowable */}
+                <ResponsiveCard title="Allowable expenses breakdown">
+                  <ResponsiveTable
+                    columns={[
+                      { header: "Date", accessor: "date" },
+                      { header: "Description", accessor: "description" },
+                      { header: "Category", accessor: "account_name" },
+                      { header: "Amount (£)", accessor: "amount" },
+                    ]}
+                    data={allowableRows}
+                  />
+                </ResponsiveCard>
 
-            </ResponsiveCard>
+                {/* Drilldown: Disallowable */}
+                <ResponsiveCard title="Disallowable expenses (add‑backs)">
+                  <ResponsiveTable
+                    columns={[
+                      { header: "Date", accessor: "date" },
+                      { header: "Description", accessor: "description" },
+                      { header: "Category", accessor: "account_name" },
+                      { header: "Amount (£)", accessor: "amount" },
+                    ]}
+                    data={disallowableRows}
+                  />
+                </ResponsiveCard>
 
-            {/* Drilldown: Allowable */}
-            <ResponsiveCard title="Allowable expenses breakdown">
-      <ResponsiveTable
-  columns={[
-    { header: "Date", accessor: "date" },
-    { header: "Description", accessor: "description" },
-    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
-    { header: "Amount (£)", accessor: "amount" },
-  ]}
-  data={incomeRows}
-/>
-
-
-            </ResponsiveCard>
-
-            {/* Drilldown: Disallowable */}
-            <ResponsiveCard title="Disallowable expenses (add‑backs)">
-     <ResponsiveTable
-  columns={[
-    { header: "Date", accessor: "date" },
-    { header: "Description", accessor: "description" },
-    { header: "Category", accessor: "account_name" }, // or hmrc_bucket
-    { header: "Amount (£)", accessor: "amount" },
-  ]}
-  data={incomeRows}
-/>
-
-
-            </ResponsiveCard>
-
-            {/* Drilldown: Review */}
-            {reviewRows.length > 0 && (
-              <ResponsiveCard title="Review / uncategorised transactions">
-                <p className="text-sm text-slate-600 mb-2">
-                  These rows are not clearly allowable or disallowable. Adjust their categories on
-                  the Transactions page to tidy your Corporation Tax position.
-                </p>
-                <ResponsiveTable
-  columns={[
-    { header: "Account code", accessor: "account_code" },
-    { header: "Account name", accessor: "account_name" },
-    { header: "HMRC bucket", accessor: "hmrc_bucket" },
-    { header: "Amount (£)", accessor: "amount" },
-  ]}
-  data={incomeRows}
-/>
-
-              </ResponsiveCard>
+                {/* Drilldown: Review */}
+                {reviewRows.length > 0 && (
+                  <ResponsiveCard title="Review / uncategorised transactions">
+                    <p className="text-sm text-slate-600 mb-2">
+                      These rows are not clearly allowable or disallowable.
+                      Adjust their categories on the Transactions page to tidy
+                      your Corporation Tax position.
+                    </p>
+                    <ResponsiveTable
+                      columns={[
+                        { header: "Date", accessor: "date" },
+                        { header: "Description", accessor: "description" },
+                        { header: "Account code", accessor: "account_code" },
+                        { header: "Account name", accessor: "account_name" },
+                        { header: "HMRC bucket", accessor: "hmrc_bucket" },
+                        { header: "Amount (£)", accessor: "amount" },
+                      ]}
+                      data={reviewRows}
+                    />
+                  </ResponsiveCard>
+                )}
+              </>
             )}
           </>
         )}
@@ -1151,8 +1289,8 @@ export default function CorpPage() {
         <ResponsiveCard title="HMRC MTD – Corporation Tax">
           <div className="flex items-center justify-between mb-3 gap-3">
             <p className="text-sm text-slate-600">
-              Live HMRC view for Corporation Tax: obligations, returns, liabilities and payments for
-              the selected client.
+              Live HMRC view for Corporation Tax: obligations, returns,
+              liabilities and payments for the selected client.
             </p>
             <button
               onClick={fetchCtMtd}
@@ -1172,13 +1310,16 @@ export default function CorpPage() {
           {ctStatus && (
             <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="border rounded p-3 bg-slate-50">
-                <p className="text-xs uppercase text-slate-500">MTD connection</p>
+                <p className="text-xs uppercase text-slate-500">
+                  MTD connection
+                </p>
                 <p className="text-sm font-semibold text-slate-900">
                   {ctStatus.isConnected ? "Connected" : "Not connected"}
                 </p>
                 {!ctStatus.isConnected && (
                   <p className="text-xs text-slate-500 mt-1">
-                    HMRC did not return CT obligations. Check authorisation or UTR.
+                    HMRC did not return CT obligations. Check authorisation or
+                    UTR.
                   </p>
                 )}
               </div>
@@ -1189,7 +1330,9 @@ export default function CorpPage() {
                 </p>
               </div>
               <div className="border rounded p-3 bg-slate-50">
-                <p className="text-xs uppercase text-slate-500">UTR linked</p>
+                <p className="text-xs uppercase text-slate-500">
+                  UTR linked
+                </p>
                 <p className="text-sm font-semibold text-slate-900">
                   {ctStatus.utrLinked ? "Yes" : "No"}
                 </p>
@@ -1277,8 +1420,8 @@ export default function CorpPage() {
             ctLiabilities.length === 0 &&
             ctPayments.length === 0 && (
               <p className="text-xs text-slate-500 mt-2">
-                No HMRC CT data loaded yet. Use “Refresh from HMRC” to pull the latest obligations,
-                returns, liabilities and payments.
+                No HMRC CT data loaded yet. Use “Refresh from HMRC” to pull the
+                latest obligations, returns, liabilities and payments.
               </p>
             )}
         </ResponsiveCard>
@@ -1288,10 +1431,14 @@ export default function CorpPage() {
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded shadow-lg w-full max-w-md space-y-4">
-            <h2 className="text-xl font-bold">Add Corporation Tax Payment</h2>
+            <h2 className="text-xl font-bold">
+              Add Corporation Tax Payment
+            </h2>
 
             <div className="space-y-2">
-              <label className="block font-medium text-sm">Payment date</label>
+              <label className="block font-medium text-sm">
+                Payment date
+              </label>
               <input
                 type="date"
                 value={paymentDate}
@@ -1301,7 +1448,9 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium text-sm">Amount (£)</label>
+              <label className="block font-medium text-sm">
+                Amount (£)
+              </label>
               <input
                 type="number"
                 value={paymentAmount}
@@ -1311,10 +1460,14 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium text-sm">Direction</label>
+              <label className="block font-medium text-sm">
+                Direction
+              </label>
               <select
                 value={paymentDirection}
-                onChange={(e) => setPaymentDirection(e.target.value)}
+                onChange={(e) =>
+                  setPaymentDirection(e.target.value)
+                }
                 className="border p-2 rounded w-full"
               >
                 <option value="payment">Payment to HMRC</option>
@@ -1323,11 +1476,15 @@ export default function CorpPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium text-sm">Reference (optional)</label>
+              <label className="block font-medium text-sm">
+                Reference (optional)
+              </label>
               <input
                 type="text"
                 value={paymentReference}
-                onChange={(e) => setPaymentReference(e.target.value)}
+                onChange={(e) =>
+                  setPaymentReference(e.target.value)
+                }
                 className="border p-2 rounded w-full"
               />
             </div>
@@ -1352,9 +1509,9 @@ export default function CorpPage() {
 
       {/* Filing Disclaimer */}
       <p className="text-xs text-slate-500 mt-8 text-center max-w-2xl mx-auto">
-        ProfitLens does not provide tax advice. All calculations are estimates only. Users are
-        solely responsible for verifying all figures and ensuring accuracy before submitting any tax
-        filings to HMRC.
+        ProfitLens does not provide tax advice. All calculations are estimates
+        only. Users are solely responsible for verifying all figures and
+        ensuring accuracy before submitting any tax filings to HMRC.
       </p>
     </ResponsiveLayout>
   );
