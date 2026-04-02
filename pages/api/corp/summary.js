@@ -10,6 +10,7 @@
  *     - Adjusted profit (profit + disallowables)
  *     - Corporation Tax due (marginal relief aware)
  *     - Breakdown rows (journal lines classified by COA)
+ *     - Raw transactions + COA map for UI drilldowns
  * ============================================================
  */
 
@@ -95,44 +96,57 @@ export default async function handler(req, res) {
     // 1. Load unified accounting data
     const pl = await getUnifiedProfitAndLoss(clientId);
     const tb = await getUnifiedTrialBalance(clientId);
+
     // 1.5 Load raw transactions for drilldowns
-const { data: txRows, error: txErr } = await supabaseAdmin
-  .from("transactions")
-  .select(`
-    id,
-    date,
-    description,
-    amount,
-    business_category,
-    coa_id,
-    includedinct
-  `)
-  .eq("client_id", clientId)
-  .gte("date", periodStart)
-  .lte("date", periodEnd);
+    const { data: txRowsRaw, error: txErr } = await supabaseAdmin
+      .from("transactions")
+      .select(
+        `
+        id,
+        date,
+        description,
+        amount,
+        business_category,
+        coa_id,
+        includedinct
+      `
+      )
+      .eq("client_id", clientId)
+      .gte("date", periodStart)
+      .lte("date", periodEnd);
 
-if (txErr) throw txErr;
+    if (txErr) throw txErr;
 
-// Build COA map for drilldown classification
-const distinctCoaIds = Array.from(
-  new Set(txRows.map((t) => t.coa_id).filter(Boolean))
-);
+    const txRows = (txRowsRaw || [])
+      // Optional: only include rows that are not explicitly excluded from CT
+      .filter((t) => t.includedinct !== false)
+      .map((t) => ({
+        ...t,
+        amount: Number(t.amount || 0),
+      }));
 
-let coaMap = {};
-if (distinctCoaIds.length > 0) {
-  const { data: coaRows, error: coaErr } = await supabaseAdmin
-    .from("chart_of_account_entries")
-    .select("id, account_type, hmrc_bucket, account_name, account_code")
-    .in("id", distinctCoaIds);
+    // Build COA map for drilldown classification
+    const distinctCoaIds = Array.from(
+      new Set(txRows.map((t) => t.coa_id).filter(Boolean))
+    );
 
-  if (coaErr) throw coaErr;
+    let coaMap = {};
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRows, error: coaErr } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("id, account_type, hmrc_bucket, account_name, account_code")
+        .in("id", distinctCoaIds);
 
-  coaMap = Object.fromEntries(coaRows.map((c) => [c.id, c]));
-}
+      if (coaErr) throw coaErr;
 
+      coaMap =
+        (coaRows || []).length > 0
+          ? Object.fromEntries(coaRows.map((c) => [c.id, c]))
+          : {};
+    }
 
     // 2. Classify journal lines with correct CT amounts
-    const breakdown = tb.lines.map((line) => {
+    const breakdown = (tb.lines || []).map((line) => {
       const debit = Number(line.debit || 0);
       const credit = Number(line.credit || 0);
 
@@ -193,25 +207,22 @@ if (distinctCoaIds.length > 0) {
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // 7. Return summary
-   return res.status(200).json({
-  success: true,
-  periodStart,
-  periodEnd,
-  income,
-  allowable,
-  disallowable,
-  profit,
-  adjustedProfit,
-  corpTaxDue,
-  effectiveRate,
-  breakdown,
-
-  // NEW: drilldown data for the CT page
-  transactions: txRows,
-  coaMap,
-});
-
+    // 7. Return summary + drilldown payload
+    return res.status(200).json({
+      success: true,
+      periodStart,
+      periodEnd,
+      income,
+      allowable,
+      disallowable,
+      profit,
+      adjustedProfit,
+      corpTaxDue,
+      effectiveRate,
+      breakdown,
+      transactions: txRows,
+      coaMap,
+    });
   } catch (err) {
     console.error("CT summary error:", err);
     return res.status(500).json({ success: false, error: err.message });
