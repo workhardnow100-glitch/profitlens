@@ -72,25 +72,75 @@ export default function CorpPage() {
   }, [isLoading, isAuthenticated, router]);
 
   // Derived drilldown groups
-  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-    if (!result?.breakdown) {
-      return { incomeRows: [], allowableRows: [], disallowableRows: [], reviewRows: [] };
+ const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+  if (!result?.transactions || !result?.coaMap) {
+    return {
+      incomeRows: [],
+      allowableRows: [],
+      disallowableRows: [],
+      reviewRows: [],
+    };
+  }
+
+  const incomeRows = [];
+  const allowableRows = [];
+  const disallowableRows = [];
+  const reviewRows = [];
+
+  for (const tx of result.transactions) {
+    if (tx.includedinct === false) continue;
+
+    const category =
+      (tx.business_category && tx.business_category.trim()) ||
+      "Uncategorised";
+
+    const amount = Number(tx.amount || 0);
+    const coa = result.coaMap[tx.coa_id];
+
+    if (!coa) {
+      reviewRows.push({ ...tx, ctType: "review" });
+      continue;
     }
 
-    const incomeRows = [];
-    const allowableRows = [];
-    const disallowableRows = [];
-    const reviewRows = [];
+    const accType = coa.account_type;
 
-    for (const row of result.breakdown) {
-      if (row.ctType === "income") incomeRows.push(row);
-      else if (row.ctType === "allowable") allowableRows.push(row);
-      else if (row.ctType === "disallowable") disallowableRows.push(row);
-      else reviewRows.push(row);
+    // Income
+    if (
+      CT_MAP.income.includes(category) &&
+      accType === "INCOME" &&
+      amount > 0
+    ) {
+      incomeRows.push({ ...tx, ctType: "income" });
+      continue;
     }
 
-    return { incomeRows, allowableRows, disallowableRows, reviewRows };
-  }, [result]);
+    // Allowable
+    if (
+      CT_MAP.allowable.includes(category) &&
+      accType === "EXPENSE" &&
+      amount < 0
+    ) {
+      allowableRows.push({ ...tx, ctType: "allowable" });
+      continue;
+    }
+
+    // Disallowable
+    if (
+      CT_MAP.disallowable.includes(category) &&
+      accType === "EXPENSE" &&
+      amount < 0
+    ) {
+      disallowableRows.push({ ...tx, ctType: "disallowable" });
+      continue;
+    }
+
+    // Everything else → review
+    reviewRows.push({ ...tx, ctType: "review" });
+  }
+
+  return { incomeRows, allowableRows, disallowableRows, reviewRows };
+}, [result]);
+
 
   // 🔹 ONLY NOW DO WE GATE RENDERING
   if (isLoading) return null;
