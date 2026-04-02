@@ -7,6 +7,9 @@ import ResponsiveCard from "../components/ResponsiveCard";
 import ResponsiveTable from "../components/ResponsiveTable";
 import { useUser } from "../hooks/useUser";
 
+// ⭐ REQUIRED FOR DRILLDOWN CLASSIFICATION
+import { CT_MAP } from "../lib/constants/ctMap";
+
 export default function CorpPage() {
   const router = useRouter();
   const { user, isLoading, isAuthenticated } = useUser();
@@ -30,7 +33,7 @@ export default function CorpPage() {
   const [ctObligations, setCtObligations] = useState([]);
   const [ctReturns, setCtReturns] = useState([]);
   const [ctLiabilities, setCtLiabilities] = useState([]);
-  const [ctPayments, setCtPayments] = useState([]);
+  the [ctPayments, setCtPayments] = useState([]);
   const [ctLoading, setCtLoading] = useState(false);
   const [ctError, setCtError] = useState(null);
 
@@ -71,76 +74,75 @@ export default function CorpPage() {
     if (!isAuthenticated) router.replace("/login");
   }, [isLoading, isAuthenticated, router]);
 
-  // Derived drilldown groups
- const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-  if (!result?.transactions || !result?.coaMap) {
-    return {
-      incomeRows: [],
-      allowableRows: [],
-      disallowableRows: [],
-      reviewRows: [],
-    };
-  }
+  // ⭐ FIXED DRILLDOWN GROUPS — SAFE + CORRECT + ABOVE RETURNS
+  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+    if (!result?.transactions || !result?.coaMap) {
+      return {
+        incomeRows: [],
+        allowableRows: [],
+        disallowableRows: [],
+        reviewRows: [],
+      };
+    }
 
-  const incomeRows = [];
-  const allowableRows = [];
-  const disallowableRows = [];
-  const reviewRows = [];
+    const incomeRows = [];
+    const allowableRows = [];
+    const disallowableRows = [];
+    const reviewRows = [];
 
-  for (const tx of result.transactions) {
-    if (tx.includedinct === false) continue;
+    for (const tx of result.transactions) {
+      if (tx.includedinct === false) continue;
 
-    const category =
-      (tx.business_category && tx.business_category.trim()) ||
-      "Uncategorised";
+      const category =
+        (tx.business_category && tx.business_category.trim()) ||
+        "Uncategorised";
 
-    const amount = Number(tx.amount || 0);
-    const coa = result.coaMap[tx.coa_id];
+      const amount = Number(tx.amount || 0);
+      const coa = result.coaMap[tx.coa_id];
 
-    if (!coa) {
+      if (!coa) {
+        reviewRows.push({ ...tx, ctType: "review" });
+        continue;
+      }
+
+      const accType = coa.account_type;
+
+      // Income
+      if (
+        CT_MAP.income.includes(category) &&
+        accType === "INCOME" &&
+        amount > 0
+      ) {
+        incomeRows.push({ ...tx, ctType: "income" });
+        continue;
+      }
+
+      // Allowable
+      if (
+        CT_MAP.allowable.includes(category) &&
+        accType === "EXPENSE" &&
+        amount < 0
+      ) {
+        allowableRows.push({ ...tx, ctType: "allowable" });
+        continue;
+      }
+
+      // Disallowable
+      if (
+        CT_MAP.disallowable.includes(category) &&
+        accType === "EXPENSE" &&
+        amount < 0
+      ) {
+        disallowableRows.push({ ...tx, ctType: "disallowable" });
+        continue;
+      }
+
+      // Everything else → review
       reviewRows.push({ ...tx, ctType: "review" });
-      continue;
     }
 
-    const accType = coa.account_type;
-
-    // Income
-    if (
-      CT_MAP.income.includes(category) &&
-      accType === "INCOME" &&
-      amount > 0
-    ) {
-      incomeRows.push({ ...tx, ctType: "income" });
-      continue;
-    }
-
-    // Allowable
-    if (
-      CT_MAP.allowable.includes(category) &&
-      accType === "EXPENSE" &&
-      amount < 0
-    ) {
-      allowableRows.push({ ...tx, ctType: "allowable" });
-      continue;
-    }
-
-    // Disallowable
-    if (
-      CT_MAP.disallowable.includes(category) &&
-      accType === "EXPENSE" &&
-      amount < 0
-    ) {
-      disallowableRows.push({ ...tx, ctType: "disallowable" });
-      continue;
-    }
-
-    // Everything else → review
-    reviewRows.push({ ...tx, ctType: "review" });
-  }
-
-  return { incomeRows, allowableRows, disallowableRows, reviewRows };
-}, [result]);
-
+    return { incomeRows, allowableRows, disallowableRows, reviewRows };
+  }, [result]);
 
   // 🔹 ONLY NOW DO WE GATE RENDERING
   if (isLoading) return null;
@@ -245,6 +247,7 @@ export default function CorpPage() {
         alert("Error adding payment: " + (data.error || "Unknown error"));
         return;
       }
+
 
       alert("Payment added successfully.");
 
