@@ -75,65 +75,43 @@ export default function CorpPage() {
   }, [isLoading, isAuthenticated, router]);
 
   // ⭐ FIXED DRILLDOWN GROUPS — SAFE + CORRECT + ABOVE RETURNS
-  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-    if (
-      !result ||
-      !Array.isArray(result.transactions) ||
-      typeof result.coaMap !== "object" ||
-      result.coaMap === null
-    ) {
-      return {
-        incomeRows: [],
-        allowableRows: [],
-        disallowableRows: [],
-        reviewRows: [],
-      };
+ const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+  if (!result || !Array.isArray(result.transactions)) {
+    return {
+      incomeRows: [],
+      allowableRows: [],
+      disallowableRows: [],
+      reviewRows: [],
+    };
+  }
+
+  const incomeRows = [];
+  const allowableRows = [];
+  const disallowableRows = [];
+  const reviewRows = [];
+
+  for (const tx of result.transactions) {
+    if (!tx || tx.includedinct === false) continue;
+
+    switch (tx.ctType) {
+      case "income":
+        incomeRows.push(tx);
+        break;
+      case "allowable":
+        allowableRows.push(tx);
+        break;
+      case "disallowable":
+        disallowableRows.push(tx);
+        break;
+      default:
+        reviewRows.push(tx);
+        break;
     }
+  }
 
-    const incomeRows = [];
-    const allowableRows = [];
-    const disallowableRows = [];
-    const reviewRows = [];
+  return { incomeRows, allowableRows, disallowableRows, reviewRows };
+}, [result]);
 
-    for (const tx of result.transactions) {
-      if (!tx || tx.includedinct === false) continue;
-
-      const category =
-        (typeof tx.business_category === "string" && tx.business_category.trim()) ||
-        "Uncategorised";
-
-      const amount = Number(tx.amount || 0);
-
-      // SAFE ACCESS
-      const coa = result.coaMap?.[tx.coa_id];
-
-      if (!coa) {
-        reviewRows.push({ ...tx, ctType: "review" });
-        continue;
-      }
-
-      const accType = coa.account_type;
-
-      if (CT_MAP?.income?.includes(category) && accType === "INCOME" && amount > 0) {
-        incomeRows.push({ ...tx, ctType: "income" });
-        continue;
-      }
-
-      if (CT_MAP?.allowable?.includes(category) && accType === "EXPENSE" && amount < 0) {
-        allowableRows.push({ ...tx, ctType: "allowable" });
-        continue;
-      }
-
-      if (CT_MAP?.disallowable?.includes(category) && accType === "EXPENSE" && amount < 0) {
-        disallowableRows.push({ ...tx, ctType: "disallowable" });
-        continue;
-      }
-
-      reviewRows.push({ ...tx, ctType: "review" });
-    }
-
-    return { incomeRows, allowableRows, disallowableRows, reviewRows };
-  }, [result]);
 
   // Auto-load statutory metadata once CT summary + period are in place
   useEffect(() => {
