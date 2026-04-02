@@ -11,6 +11,7 @@
  *     - Corporation Tax due (marginal relief aware)
  *     - Breakdown rows (journal lines classified by COA)
  *     - Drilldown rows built from journal_entries + journal_lines + COA
+ *     - Transactions classification restored for banner count
  * ============================================================
  */
 
@@ -105,9 +106,9 @@ export default async function handler(req, res) {
 
       if (line.account_type === "INCOME") {
         ctType = "income";
-        ctAmount = credit; // income = credit
+        ctAmount = credit;
       } else if (line.account_type === "EXPENSE") {
-        const netExpense = debit - credit; // expense = debit - credit
+        const netExpense = debit - credit;
 
         if (line.hmrc_bucket === "allowable") {
           ctType = "allowable";
@@ -134,8 +135,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // 2.5 Journal-based drilldown: journal_entries + journal_lines + COA
-    // Step 1: journal entries in period for this client
+    // 2.5 Journal-based drilldown (for tables)
     const { data: jeRows, error: jeErr } = await supabaseAdmin
       .from("journal_entries")
       .select("id, client_id, date, description")
@@ -149,7 +149,6 @@ export default async function handler(req, res) {
     let drilldown = [];
 
     if (journalIds.length > 0) {
-      // Step 2: journal lines for those entries
       const { data: jlRows, error: jlErr } = await supabaseAdmin
         .from("journal_lines")
         .select("id, journal_id, account_id, debit, credit")
@@ -161,7 +160,6 @@ export default async function handler(req, res) {
         new Set((jlRows || []).map((l) => l.account_id).filter(Boolean))
       );
 
-      // Step 3: COA rows for those accounts
       let coaMap = {};
       if (accountIds.length > 0) {
         const { data: coaRows, error: coaErr } = await supabaseAdmin
@@ -182,7 +180,6 @@ export default async function handler(req, res) {
           ? Object.fromEntries(jeRows.map((j) => [j.id, j]))
           : {};
 
-      // Step 4: build drilldown rows with CT classification
       drilldown = (jlRows || []).map((row) => {
         const je = jeMap[row.journal_id] || {};
         const coa = coaMap[row.account_id] || {};
@@ -224,6 +221,75 @@ export default async function handler(req, res) {
       });
     }
 
+    // ⭐ 2.6 ADD BACK TRANSACTIONS FOR BANNER COUNT (unchanged logic)
+    const { data: txRowsRaw, error: txErr } = await supabaseAdmin
+      .from("transactions")
+      .select(`
+        id,
+        date,
+        description,
+        amount,
+        business_category,
+        coa_id,
+        includedinct
+      `)
+      .eq("client_id", clientId)
+      .gte("date", periodStart)
+      .lte("date", periodEnd);
+
+    if (txErr) throw txErr;
+
+    const txRows = (txRowsRaw || [])
+      .filter((t) => t.includedinct !== false)
+      .map((t) => ({
+        ...t,
+        amount: Number(t.amount || 0),
+      }));
+
+    const distinctCoaIds = Array.from(
+      new Set(txRows.map((t) => t.coa_id).filter(Boolean))
+    );
+
+    let coaMapTx = {};
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRowsTx, error: coaErrTx } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("id, account_type, hmrc_bucket, account_name, account_code")
+        .in("id", distinctCoaIds);
+
+      if (coaErrTx) throw coaErrTx;
+
+      coaMapTx =
+        (coaRowsTx || []).length > 0
+          ? Object.fromEntries(coaRowsTx.map((c) => [c.id, c]))
+          : {};
+    }
+
+    const transactions = txRows.map((t) => {
+      const coa = t.coa_id ? coaMapTx[t.coa_id] || {} : {};
+      const accountType = coa.account_type;
+      const hmrcBucket = coa.hmrc_bucket;
+
+      let ctType = "ignore";
+
+      if (accountType === "INCOME") {
+        ctType = "income";
+      } else if (accountType === "EXPENSE") {
+        if (hmrcBucket === "allowable") {
+          ctType = "allowable";
+        } else if (hmrcBucket === "disallowable") {
+          ctType = "disallowable";
+        } else {
+          ctType = "review";
+        }
+      }
+
+      return {
+        ...t,
+        ctType,
+      };
+    });
+
     // 3. Totals (from breakdown)
     const income = breakdown
       .filter((b) => b.ctType === "income")
@@ -247,7 +313,7 @@ export default async function handler(req, res) {
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // 7. Return summary + journal-based drilldown
+    // 7. Return summary + journal drilldown + transaction classification
     return res.status(200).json({
       success: true,
       periodStart,
@@ -260,7 +326,8 @@ export default async function handler(req, res) {
       corpTaxDue,
       effectiveRate,
       breakdown,
-      drilldown, // journal-based rows with date/description/account/ctType/amount
+      drilldown,     // journal-based rows for tables
+      transactions,  // transaction-based rows for banner count
     });
   } catch (err) {
     console.error("CT summary error:", err);
