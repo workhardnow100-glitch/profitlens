@@ -136,90 +136,77 @@ export default async function handler(req, res) {
     });
 
     // 2.5 Journal-based drilldown (for tables)
-    const { data: jeRows, error: jeErr } = await supabaseAdmin
-      .from("journal_entries")
-      .select("id, client_id, date, description")
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd);
+   // 2.5 Journal-based drilldown (for tables) — unified-style join
+// 2.5 Journal-based drilldown (unified engine style)
+const { data: jlJoined, error: jlJoinedErr } = await supabaseAdmin
+  .from("journal_lines")
+  .select(`
+    id,
+    debit,
+    credit,
+    journal_id,
+    account_id,
+    journal_entries!inner (
+      id,
+      client_id,
+      date,
+      description
+    ),
+    chart_of_account_entries:account_id (
+      id,
+      account_code,
+      account_name,
+      account_type,
+      hmrc_bucket
+    )
+  `)
+  .eq("journal_entries.client_id", clientId)
+  .gte("journal_entries.date", periodStart)
+  .lte("journal_entries.date", periodEnd);
 
-    if (jeErr) throw jeErr;
+if (jlJoinedErr) throw jlJoinedErr;
 
-    const journalIds = (jeRows || []).map((j) => j.id);
-    let drilldown = [];
+const drilldown = (jlJoined || []).map((row) => {
+  const je = row.journal_entries || {};
+  const coa = row.chart_of_account_entries || {};
 
-    if (journalIds.length > 0) {
-      const { data: jlRows, error: jlErr } = await supabaseAdmin
-        .from("journal_lines")
-        .select("id, journal_id, account_id, debit, credit")
-        .in("journal_id", journalIds);
+  const debit = Number(row.debit || 0);
+  const credit = Number(row.credit || 0);
 
-      if (jlErr) throw jlErr;
+  let ctType = "ignore";
+  let amount = 0;
 
-      const accountIds = Array.from(
-        new Set((jlRows || []).map((l) => l.account_id).filter(Boolean))
-      );
-
-      let coaMap = {};
-      if (accountIds.length > 0) {
-        const { data: coaRows, error: coaErr } = await supabaseAdmin
-          .from("chart_of_account_entries")
-          .select("id, account_code, account_name, account_type, hmrc_bucket")
-          .in("id", accountIds);
-
-        if (coaErr) throw coaErr;
-
-        coaMap =
-          (coaRows || []).length > 0
-            ? Object.fromEntries(coaRows.map((c) => [c.id, c]))
-            : {};
-      }
-
-      const jeMap =
-        (jeRows || []).length > 0
-          ? Object.fromEntries(jeRows.map((j) => [j.id, j]))
-          : {};
-
-      drilldown = (jlRows || []).map((row) => {
-        const je = jeMap[row.journal_id] || {};
-        const coa = coaMap[row.account_id] || {};
-
-        const debit = Number(row.debit || 0);
-        const credit = Number(row.credit || 0);
-
-        let ctType = "ignore";
-        let amount = 0;
-
-        if (coa.account_type === "INCOME") {
-          ctType = "income";
-          amount = credit;
-        } else if (coa.account_type === "EXPENSE") {
-          const netExpense = debit - credit;
-          if (coa.hmrc_bucket === "allowable") {
-            ctType = "allowable";
-            amount = netExpense > 0 ? netExpense : 0;
-          } else if (coa.hmrc_bucket === "disallowable") {
-            ctType = "disallowable";
-            amount = netExpense > 0 ? netExpense : 0;
-          } else {
-            ctType = "review";
-            amount = netExpense > 0 ? netExpense : 0;
-          }
-        }
-
-        return {
-          id: row.id,
-          date: je.date,
-          description: je.description,
-          account_code: coa.account_code,
-          account_name: coa.account_name,
-          hmrc_bucket: coa.hmrc_bucket,
-          account_type: coa.account_type,
-          ctType,
-          amount,
-        };
-      });
+  if (coa.account_type === "INCOME") {
+    ctType = "income";
+    amount = credit;
+  } else if (coa.account_type === "EXPENSE") {
+    const netExpense = debit - credit;
+    if (coa.hmrc_bucket === "allowable") {
+      ctType = "allowable";
+      amount = netExpense > 0 ? netExpense : 0;
+    } else if (coa.hmrc_bucket === "disallowable") {
+      ctType = "disallowable";
+      amount = netExpense > 0 ? netExpense : 0;
+    } else {
+      ctType = "review";
+      amount = netExpense > 0 ? netExpense : 0;
     }
+  }
+
+  return {
+    id: row.id,
+    date: je.date,
+    description: je.description,
+    account_code: coa.account_code,
+    account_name: coa.account_name,
+    hmrc_bucket: coa.hmrc_bucket,
+    account_type: coa.account_type,
+    ctType,
+    amount,
+  };
+});
+
+
 
     // ⭐ 2.6 ADD BACK TRANSACTIONS FOR BANNER COUNT (unchanged logic)
     const { data: txRowsRaw, error: txErr } = await supabaseAdmin
