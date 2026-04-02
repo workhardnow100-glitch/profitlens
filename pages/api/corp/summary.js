@@ -10,7 +10,7 @@
  *     - Adjusted profit (profit + disallowables)
  *     - Corporation Tax due (marginal relief aware)
  *     - Breakdown rows (journal lines classified by COA)
- *     - Raw transactions + COA map for UI drilldowns
+ *     - Drilldown = same breakdown, for UI tables
  * ============================================================
  */
 
@@ -52,7 +52,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Session validation
   const session = await getServerSession(req, res, authOptions);
   if (!session?.user) {
     return res.status(401).json({ error: "Unauthorized" });
@@ -82,7 +81,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Audit log
     await supabaseAdmin.from("audit").insert([
       {
         client_id: clientId,
@@ -93,83 +91,9 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Load unified accounting data
+    // 1. Unified accounting data
     const pl = await getUnifiedProfitAndLoss(clientId);
     const tb = await getUnifiedTrialBalance(clientId);
-
-    // 1.5 Load raw transactions for drilldowns
-    const { data: txRowsRaw, error: txErr } = await supabaseAdmin
-      .from("transactions")
-      .select(
-        `
-        id,
-        date,
-        description,
-        amount,
-        business_category,
-        coa_id,
-        includedinct
-      `
-      )
-      .eq("client_id", clientId)
-      .gte("date", periodStart)
-      .lte("date", periodEnd);
-
-    if (txErr) throw txErr;
-
-    const txRows = (txRowsRaw || [])
-      // Optional: only include rows that are not explicitly excluded from CT
-      .filter((t) => t.includedinct !== false)
-      .map((t) => ({
-        ...t,
-        amount: Number(t.amount || 0),
-      }));
-
-    // Build COA map for drilldown classification
-    const distinctCoaIds = Array.from(
-      new Set(txRows.map((t) => t.coa_id).filter(Boolean))
-    );
-
-    let coaMap = {};
-    if (distinctCoaIds.length > 0) {
-      const { data: coaRows, error: coaErr } = await supabaseAdmin
-        .from("chart_of_account_entries")
-        .select("id, account_type, hmrc_bucket, account_name, account_code")
-        .in("id", distinctCoaIds);
-
-      if (coaErr) throw coaErr;
-
-      coaMap =
-        (coaRows || []).length > 0
-          ? Object.fromEntries(coaRows.map((c) => [c.id, c]))
-          : {};
-    }
-
-    // 🔹 NEW: classify transactions into CT drilldown buckets using COA
-    const classifiedTxRows = txRows.map((t) => {
-      const coa = t.coa_id ? coaMap[t.coa_id] || {} : {};
-      const accountType = coa.account_type;
-      const hmrcBucket = coa.hmrc_bucket;
-
-      let ctType = "ignore";
-
-      if (accountType === "INCOME") {
-        ctType = "income";
-      } else if (accountType === "EXPENSE") {
-        if (hmrcBucket === "allowable") {
-          ctType = "allowable";
-        } else if (hmrcBucket === "disallowable") {
-          ctType = "disallowable";
-        } else {
-          ctType = "review";
-        }
-      }
-
-      return {
-        ...t,
-        ctType,
-      };
-    });
 
     // 2. Classify journal lines with correct CT amounts
     const breakdown = (tb.lines || []).map((line) => {
@@ -210,7 +134,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // 3. Totals (correct sign logic)
+    // 3. Totals
     const income = breakdown
       .filter((b) => b.ctType === "income")
       .reduce((sum, b) => sum + b.amount, 0);
@@ -223,7 +147,7 @@ export default async function handler(req, res) {
       .filter((b) => b.ctType === "disallowable")
       .reduce((sum, b) => sum + b.amount, 0);
 
-    // 4. Profit from unified P&L (correct)
+    // 4. Profit from unified P&L
     const profit = pl.summary.net_profit;
 
     // 5. Adjusted profit
@@ -233,7 +157,7 @@ export default async function handler(req, res) {
     const { tax: corpTaxDue, rate: effectiveRate } =
       calculateCorporationTax(adjustedProfit);
 
-    // 7. Return summary + drilldown payload
+    // 7. Return summary + journal-based drilldown
     return res.status(200).json({
       success: true,
       periodStart,
@@ -246,9 +170,7 @@ export default async function handler(req, res) {
       corpTaxDue,
       effectiveRate,
       breakdown,
-      // drilldowns now classified for the UI
-      transactions: classifiedTxRows,
-      coaMap,
+      drilldown: breakdown, // <-- single source for tables + banner
     });
   } catch (err) {
     console.error("CT summary error:", err);
