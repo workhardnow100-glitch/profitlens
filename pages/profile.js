@@ -733,19 +733,7 @@ export default function ProfilePage() {
             saveField={saveField}
           />
         </div>
-
-        {/* Account info */}
-        <ResponsiveCard title="Account details">
-          <p>
-            <span className="font-medium">Account number:</span>{" "}
-            {account?.account_number || "—"}
-          </p>
-          <p>
-            <span className="font-medium">Sort code:</span>{" "}
-            {account?.sort_code || "—"}
-          </p>
-        </ResponsiveCard>
-
+        
         {/* Export buttons */}
         <div className="flex flex-wrap gap-4 mt-6">
           <button
