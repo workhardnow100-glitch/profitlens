@@ -32,9 +32,7 @@ function calculateCorporationTax(profit) {
 }
 
 export default async function handler(req, res) {
-
-  // 🔥 ADD THIS — CONFIRMS WHICH VERSION OF THE API IS RUNNING
-  console.log("🔥 CT SUMMARY API VERSION: DEPLOYED-HOTFIX-1");
+  console.log("🔥 CT SUMMARY API VERSION: DEPLOYED-HOTFIX-2");
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -66,9 +64,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
-  // 🔥 FIX: Normalise dates to YYYY-MM-DD
+  // Normalise dates to YYYY-MM-DD
   const startDate = periodStart.substring(0, 10);
   const endDate = periodEnd.substring(0, 10);
+
+  console.log("CT SUMMARY PERIOD:", { clientId, startDate, endDate });
 
   try {
     await supabaseAdmin.from("audit").insert([
@@ -81,9 +81,9 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Unified accounting data
-    const pl = await getUnifiedProfitAndLoss(clientId);
-    const tb = await getUnifiedTrialBalance(clientId);
+    // 1. Unified accounting data — NOW PERIOD-AWARE
+    const pl = await getUnifiedProfitAndLoss(clientId, startDate, endDate);
+    const tb = await getUnifiedTrialBalance(clientId, startDate, endDate);
 
     // 2. Classify trial-balance lines
     const breakdown = (tb.lines || []).map((line) => {
@@ -249,9 +249,17 @@ export default async function handler(req, res) {
     });
 
     // 3. Totals
-    const income = breakdown.filter((b) => b.ctType === "income").reduce((s, b) => s + b.amount, 0);
-    const allowable = breakdown.filter((b) => b.ctType === "allowable").reduce((s, b) => s + b.amount, 0);
-    const disallowable = breakdown.filter((b) => b.ctType === "disallowable").reduce((s, b) => s + b.amount, 0);
+    const income = breakdown
+      .filter((b) => b.ctType === "income")
+      .reduce((s, b) => s + b.amount, 0);
+
+    const allowable = breakdown
+      .filter((b) => b.ctType === "allowable")
+      .reduce((s, b) => s + b.amount, 0);
+
+    const disallowable = breakdown
+      .filter((b) => b.ctType === "disallowable")
+      .reduce((s, b) => s + b.amount, 0);
 
     const profit = pl.summary.net_profit;
     const adjustedProfit = profit + disallowable;
