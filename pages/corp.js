@@ -1256,7 +1256,7 @@ export default function CorpPage() {
                   />
                 </ResponsiveCard>
 
-                )
+                
               </>
             )}
           </>
