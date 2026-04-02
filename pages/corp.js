@@ -86,14 +86,14 @@ export default function CorpPage() {
         incomeRows: [],
         allowableRows: [],
         disallowableRows: [],
-        reviewRows: [],
+      
       };
     }
 
     const incomeRows = [];
     const allowableRows = [];
     const disallowableRows = [];
-    const reviewRows = [];
+    
 
     for (const line of result.drilldown) {
       switch (line.ctType) {
@@ -106,10 +106,7 @@ export default function CorpPage() {
         case "disallowable":
           disallowableRows.push(line);
           break;
-        case "review":
-        default:
-          reviewRows.push(line);
-          break;
+        
       }
     }
 
@@ -1259,27 +1256,7 @@ export default function CorpPage() {
                   />
                 </ResponsiveCard>
 
-                {/* Drilldown: Review */}
-                {reviewRows.length > 0 && (
-                  <ResponsiveCard title="Review / uncategorised transactions">
-                    <p className="text-sm text-slate-600 mb-2">
-                      These rows are not clearly allowable or disallowable.
-                      Adjust their categories on the Transactions page to tidy
-                      your Corporation Tax position.
-                    </p>
-                    <ResponsiveTable
-                      columns={[
-                        { header: "Date", accessor: "date" },
-                        { header: "Description", accessor: "description" },
-                        { header: "Account code", accessor: "account_code" },
-                        { header: "Account name", accessor: "account_name" },
-                        { header: "HMRC bucket", accessor: "hmrc_bucket" },
-                        { header: "Amount (£)", accessor: "amount" },
-                      ]}
-                      data={reviewRows}
-                    />
-                  </ResponsiveCard>
-                )}
+                )
               </>
             )}
           </>
