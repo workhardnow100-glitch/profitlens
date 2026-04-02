@@ -1083,40 +1083,44 @@ export default function CorpPage() {
             {/* Drilldown: Income */}
             <ResponsiveCard title="Trading income breakdown">
               <ResponsiveTable
-                columns={[
-                  { header: "Date", accessor: "date" },
-                  { header: "Description", accessor: "description" },
-                  { header: "Category", accessor: "business_category" },
-                  { header: "Amount (£)", accessor: "amount" },
-                ]}
-                data={incomeRows}
-              />
+  columns={[
+    { header: "Account code", accessor: "account_code" },
+    { header: "Account name", accessor: "account_name" },
+    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Amount (£)", accessor: "amount" },
+  ]}
+  data={incomeRows}
+/>
+
             </ResponsiveCard>
 
             {/* Drilldown: Allowable */}
             <ResponsiveCard title="Allowable expenses breakdown">
               <ResponsiveTable
-                columns={[
-                  { header: "Date", accessor: "date" },
-                  { header: "Description", accessor: "description" },
-                  { header: "Category", accessor: "business_category" },
-                  { header: "Amount (£)", accessor: "amount" },
-                ]}
-                data={allowableRows}
-              />
+  columns={[
+    { header: "Account code", accessor: "account_code" },
+    { header: "Account name", accessor: "account_name" },
+    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Amount (£)", accessor: "amount" },
+  ]}
+  data={incomeRows}
+/>
+
             </ResponsiveCard>
 
             {/* Drilldown: Disallowable */}
             <ResponsiveCard title="Disallowable expenses (add‑backs)">
               <ResponsiveTable
-                columns={[
-                  { header: "Date", accessor: "date" },
-                  { header: "Description", accessor: "description" },
-                  { header: "Category", accessor: "business_category" },
-                  { header: "Amount (£)", accessor: "amount" },
-                ]}
-                data={disallowableRows}
-              />
+             
+  columns={[
+    { header: "Account code", accessor: "account_code" },
+    { header: "Account name", accessor: "account_name" },
+    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Amount (£)", accessor: "amount" },
+  ]}
+  data={incomeRows}
+/>
+
             </ResponsiveCard>
 
             {/* Drilldown: Review */}
@@ -1127,15 +1131,15 @@ export default function CorpPage() {
                   the Transactions page to tidy your Corporation Tax position.
                 </p>
                 <ResponsiveTable
-                  columns={[
-                    { header: "Date", accessor: "date" },
-                    { header: "Description", accessor: "description" },
-                    { header: "Category", accessor: "business_category" },
-                    { header: "CT Type", accessor: "ctType" },
-                    { header: "Amount (£)", accessor: "amount" },
-                  ]}
-                  data={reviewRows}
-                />
+  columns={[
+    { header: "Account code", accessor: "account_code" },
+    { header: "Account name", accessor: "account_name" },
+    { header: "HMRC bucket", accessor: "hmrc_bucket" },
+    { header: "Amount (£)", accessor: "amount" },
+  ]}
+  data={incomeRows}
+/>
+
               </ResponsiveCard>
             )}
           </>
