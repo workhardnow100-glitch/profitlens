@@ -33,7 +33,7 @@ export default function CorpPage() {
   const [ctObligations, setCtObligations] = useState([]);
   const [ctReturns, setCtReturns] = useState([]);
   const [ctLiabilities, setCtLiabilities] = useState([]);
-  the [ctPayments, setCtPayments] = useState([]);
+  const [ctPayments, setCtPayments] = useState([]);
   const [ctLoading, setCtLoading] = useState(false);
   const [ctError, setCtError] = useState(null);
 
