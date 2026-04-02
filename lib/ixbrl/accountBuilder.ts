@@ -463,7 +463,7 @@ export async function buildAccountsIxbrl(params: {
         <p>Current tax is provided at amounts expected to be paid (or recovered) using the tax rates and laws that have been enacted or substantively enacted by the balance sheet date. Deferred tax is recognised in respect of timing differences between the carrying amount of assets and liabilities for financial reporting purposes and the amounts used for taxation purposes, where it is probable that a liability or asset will crystallise.</p>
     `;
 
-  const smallCompaniesRegimeHtml =
+  const smallCompaniesRegimeHtmlFrs102 =
     smallCompaniesRegimeOverride?.trim() ||
     `
         <h2>5. Small companies regime</h2>
@@ -473,9 +473,23 @@ export async function buildAccountsIxbrl(params: {
         <p>The members have not required the company to obtain an audit of its financial statements for the year in accordance with section 476 of the Companies Act 2006.</p>
     `;
 
-  const textBlocks: IxbrlTextBlock[] = [
-    // 9.1 Directors’ report
-    {
+  const microEntityRegimeHtmlFrs105 =
+    smallCompaniesRegimeOverride?.trim() ||
+    `
+        <h2>5. Micro-entity regime</h2>
+
+        <p>These financial statements have been prepared in accordance with the micro-entity provisions of the Companies Act 2006 and Financial Reporting Standard 105, “The Financial Reporting Standard applicable to the Micro-entities Regime”.</p>
+
+        <p>The company has taken advantage of the exemptions available to micro-entities in respect of the preparation and filing of certain information, including the omission of a profit and loss account from the public record.</p>
+
+        <p>The members have not required the company to obtain an audit of its financial statements for the year in accordance with section 476 of the Companies Act 2006.</p>
+    `;
+
+  const textBlocks: IxbrlTextBlock[] = [];
+
+  // 9.1 Directors’ report (FRS102 + FRS105 only)
+  if (gaapFramework !== "IFRS") {
+    textBlocks.push({
       concept: getConceptByInternalKey(
         accountsTaxonomy.id,
         "accounts.directors_report"
@@ -486,26 +500,27 @@ export async function buildAccountsIxbrl(params: {
         <p>Statutory accounts for the year ended ${periodEnd}.</p>
         <p>These financial statements have been generated automatically by ProfitLens based on the company’s accounting records.</p>
       `,
-    },
+    });
+  }
 
-    // 9.2 Accounting policies
-    {
-      concept: getConceptByInternalKey(
-        accountsTaxonomy.id,
-        "accounts.accounting_policies"
-      ),
-      contextId: mainContext.id,
-      html: accountingPoliciesHtml,
-    },
+  // 9.2 Accounting policies (all frameworks)
+  textBlocks.push({
+    concept: getConceptByInternalKey(
+      accountsTaxonomy.id,
+      "accounts.accounting_policies"
+    ),
+    contextId: mainContext.id,
+    html: accountingPoliciesHtml,
+  });
 
-    // 9.3 Notes to the financial statements
-    {
-      concept: getConceptByInternalKey(
-        accountsTaxonomy.id,
-        "accounts.notes"
-      ),
-      contextId: mainContext.id,
-      html: `
+  // 9.3 Notes to the financial statements (all frameworks)
+  textBlocks.push({
+    concept: getConceptByInternalKey(
+      accountsTaxonomy.id,
+      "accounts.notes"
+    ),
+    contextId: mainContext.id,
+    html: `
         <h2>2. Notes to the financial statements</h2>
 
         <h3>2.1 Employees</h3>
@@ -523,16 +538,37 @@ export async function buildAccountsIxbrl(params: {
         <h3>2.5 Post balance sheet events</h3>
         <p>${postBalanceSheetEventsHtml}</p>
       `,
-    },
+  });
 
-    // 9.5 Directors’ responsibilities and approval
-    {
+  // 9.4 Balance sheet statements
+  // FRS102-1A only (no concept in FRS105, no mapping for IFRS)
+  if (gaapFramework === "FRS102-1A") {
+    textBlocks.push({
       concept: getConceptByInternalKey(
         accountsTaxonomy.id,
-        "accounts.directors_approval"
+        "accounts.balance_sheet_statements"
       ),
       contextId: mainContext.id,
       html: `
+        <h2>3. Balance sheet statements</h2>
+
+        <p>These financial statements have been prepared in accordance with the provisions applicable to companies subject to the small companies regime of the Companies Act 2006, where relevant.</p>
+
+        <p>The company has taken advantage of the exemptions available in respect of the preparation of a strategic report and, where applicable, the filing of a profit and loss account.</p>
+
+        <p>The financial statements were approved and authorised for issue by the board of directors on ${approvalDate}.</p>
+      `,
+    });
+  }
+
+  // 9.5 Directors’ responsibilities and approval (all frameworks)
+  textBlocks.push({
+    concept: getConceptByInternalKey(
+      accountsTaxonomy.id,
+      "accounts.directors_approval"
+    ),
+    contextId: mainContext.id,
+    html: `
         <h2>4. Directors’ responsibilities and approval</h2>
 
         <p>The directors are responsible for preparing the financial statements in accordance with applicable law and regulations. Company law requires the directors to prepare financial statements for each financial year which give a true and fair view of the state of affairs of the company and of the profit or loss of the company for that period.</p>
@@ -552,36 +588,30 @@ export async function buildAccountsIxbrl(params: {
         ${directorName}<br/>
         Director</p>
       `,
-    },
+  });
 
-    // 9.6 Small companies regime statement
-    {
+  // 9.6 Small companies / micro-entity regime statement
+  // FRS102-1A: small companies regime
+  if (gaapFramework === "FRS102-1A") {
+    textBlocks.push({
       concept: getConceptByInternalKey(
         accountsTaxonomy.id,
         "accounts.small_companies_regime"
       ),
       contextId: mainContext.id,
-      html: smallCompaniesRegimeHtml,
-    },
-  ];
+      html: smallCompaniesRegimeHtmlFrs102,
+    });
+  }
 
-  // 9.4 Balance sheet statements (FRS102 + IFRS only)
-  if (gaapFramework !== "FRS105") {
+  // FRS105: micro-entity regime (mapped via accounts.small_companies_regime → MicroEntityRegimeStatement)
+  if (gaapFramework === "FRS105") {
     textBlocks.push({
       concept: getConceptByInternalKey(
         accountsTaxonomy.id,
-        "accounts.balance_sheet_statements"
+        "accounts.small_companies_regime"
       ),
       contextId: mainContext.id,
-      html: `
-        <h2>3. Balance sheet statements</h2>
-
-        <p>These financial statements have been prepared in accordance with the provisions applicable to companies subject to the small companies regime of the Companies Act 2006, where relevant.</p>
-
-        <p>The company has taken advantage of the exemptions available in respect of the preparation of a strategic report and, where applicable, the filing of a profit and loss account.</p>
-
-        <p>The financial statements were approved and authorised for issue by the board of directors on ${approvalDate}.</p>
-      `,
+      html: microEntityRegimeHtmlFrs105,
     });
   }
 
