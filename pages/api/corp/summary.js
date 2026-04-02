@@ -145,6 +145,32 @@ export default async function handler(req, res) {
           : {};
     }
 
+    // 🔹 NEW: classify transactions into CT drilldown buckets using COA
+    const classifiedTxRows = txRows.map((t) => {
+      const coa = t.coa_id ? coaMap[t.coa_id] || {} : {};
+      const accountType = coa.account_type;
+      const hmrcBucket = coa.hmrc_bucket;
+
+      let ctType = "ignore";
+
+      if (accountType === "INCOME") {
+        ctType = "income";
+      } else if (accountType === "EXPENSE") {
+        if (hmrcBucket === "allowable") {
+          ctType = "allowable";
+        } else if (hmrcBucket === "disallowable") {
+          ctType = "disallowable";
+        } else {
+          ctType = "review";
+        }
+      }
+
+      return {
+        ...t,
+        ctType,
+      };
+    });
+
     // 2. Classify journal lines with correct CT amounts
     const breakdown = (tb.lines || []).map((line) => {
       const debit = Number(line.debit || 0);
@@ -220,7 +246,8 @@ export default async function handler(req, res) {
       corpTaxDue,
       effectiveRate,
       breakdown,
-      transactions: txRows,
+      // drilldowns now classified for the UI
+      transactions: classifiedTxRows,
       coaMap,
     });
   } catch (err) {
