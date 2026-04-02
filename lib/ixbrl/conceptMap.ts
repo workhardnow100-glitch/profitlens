@@ -80,6 +80,16 @@ export const TAXONOMY_CONCEPT_MAP: TaxonomyConceptMapEntry[] = [
     xbrlNamespace: "http://www.gov.uk/taxonomy/uk-corp-tax",
     dataType: "monetary",
   },
+  {
+  id: "ct-disallowable-expenses",
+  taxonomyId: "hmrc-ct-2024",
+  internalKey: "ct.disallowable_expenses",
+  xbrlName: "uk-corp-tax:DisallowableExpenses",
+  xbrlNamespace: "http://www.gov.uk/taxonomy/uk-corp-tax",
+  dataType: "monetary",
+  balanceType: "debit"
+},
+
 
   {
     id: "ct-taxable-profit",
