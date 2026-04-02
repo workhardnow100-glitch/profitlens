@@ -71,17 +71,17 @@ export const TAXONOMY_REGISTRY: TaxonomyRegistryEntry[] = [
   // HMRC CT COMPUTATIONS TAXONOMY
   // ────────────────────────────────────────────────
   {
-    id: "hmrc-ct-2024",
-    type: "computations",
-    version: "2024",
-    label: "HMRC CT Computational 2024",
-    validFrom: "2024-01-01",
-    validTo: null,
+  id: "hmrc-ct-2024",
+  type: "computations",
+  version: "2024",
+  label: "HMRC CT Computational 2024",
+  validFrom: "2024-01-01",
+  validTo: null,
 
-    // ⚠️ Placeholder — replace with official HMRC entry point when available
-    entryPointUrl:
-      "https://example.com/hmrc/ct/2024/entrypoint.xsd",
-  },
+  entryPointUrl:
+    "https://xbrl.frc.org.uk/hmrc/ct/2024-01-01/uk-corp-tax-full.xsd",
+},
+
 ];
 
 /**
