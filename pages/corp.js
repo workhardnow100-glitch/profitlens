@@ -1,6 +1,5 @@
 // pages/corp.js
 
-console.table(result.transactions);
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/router";
