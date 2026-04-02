@@ -78,7 +78,7 @@ export default function CorpPage() {
 
   // ⭐ FIXED DRILLDOWN GROUPS — SAFE + CORRECT + ABOVE RETURNS
  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
-  if (!result || !Array.isArray(result.transactions)) {
+  if (!result || !Array.isArray(result.drilldown)) {
     return {
       incomeRows: [],
       allowableRows: [],
@@ -92,27 +92,27 @@ export default function CorpPage() {
   const disallowableRows = [];
   const reviewRows = [];
 
-  for (const tx of result.transactions) {
-    if (!tx || tx.includedinct === false) continue;
-
-    switch (tx.ctType) {
+  for (const line of result.drilldown) {
+    switch (line.ctType) {
       case "income":
-        incomeRows.push(tx);
+        incomeRows.push(line);
         break;
       case "allowable":
-        allowableRows.push(tx);
+        allowableRows.push(line);
         break;
       case "disallowable":
-        disallowableRows.push(tx);
+        disallowableRows.push(line);
         break;
+      case "review":
       default:
-        reviewRows.push(tx);
+        reviewRows.push(line);
         break;
     }
   }
 
   return { incomeRows, allowableRows, disallowableRows, reviewRows };
 }, [result]);
+
 
 
   // Auto-load statutory metadata once CT summary + period are in place
