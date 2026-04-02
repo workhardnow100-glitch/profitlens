@@ -80,7 +80,7 @@ export default function CorpPage() {
   }, [isLoading, isAuthenticated, router]);
 
   // ⭐ FIXED DRILLDOWN GROUPS — NOW DEPEND ON result.drilldown
-  const { incomeRows, allowableRows, disallowableRows, reviewRows } = useMemo(() => {
+  const { incomeRows, allowableRows, disallowableRows} = useMemo(() => {
     if (!result || !Array.isArray(result.drilldown)) {
       return {
         incomeRows: [],
@@ -110,7 +110,7 @@ export default function CorpPage() {
       }
     }
 
-    return { incomeRows, allowableRows, disallowableRows, reviewRows };
+    return { incomeRows, allowableRows, disallowableRows };
   }, [result?.drilldown]);
 
   // Auto-load statutory metadata once CT summary + period are in place
