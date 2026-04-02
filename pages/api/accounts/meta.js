@@ -1,5 +1,5 @@
 // pages/api/accounts/meta.js
-import { supabaseAdmin } from "../../../lib/supabase-admin";
+import { supabaseAdmin } from "../../../supabase-admin";
 
 export default async function handler(req, res) {
   try {
