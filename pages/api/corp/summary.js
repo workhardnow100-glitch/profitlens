@@ -33,7 +33,8 @@ function calculateCorporationTax(profit) {
 
 export default async function handler(req, res) {
 
-  console.log("🔥 CT SUMMARY API VERSION: ORIGINAL");
+  // 🔥 ADD THIS — CONFIRMS WHICH VERSION OF THE API IS RUNNING
+  console.log("🔥 CT SUMMARY API VERSION: DEPLOYED-HOTFIX-1");
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -65,6 +66,7 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Missing required parameters" });
   }
 
+  // 🔥 FIX: Normalise dates to YYYY-MM-DD
   const startDate = periodStart.substring(0, 10);
   const endDate = periodEnd.substring(0, 10);
 
@@ -79,7 +81,7 @@ export default async function handler(req, res) {
       },
     ]);
 
-    // 1. Unified accounting data (NO DATE FILTERING)
+    // 1. Unified accounting data
     const pl = await getUnifiedProfitAndLoss(clientId);
     const tb = await getUnifiedTrialBalance(clientId);
 
@@ -122,7 +124,7 @@ export default async function handler(req, res) {
       };
     });
 
-    // 2.5 Journal-based drilldown (DATE FILTERED)
+    // 2.5 Journal-based drilldown
     const { data: jlJoined, error: jlJoinedErr } = await supabaseAdmin
       .from("journal_lines")
       .select(`
@@ -148,6 +150,8 @@ export default async function handler(req, res) {
       .eq("journal_entries.client_id", clientId)
       .gte("journal_entries.date", startDate)
       .lte("journal_entries.date", endDate);
+
+    console.log("JL JOINED COUNT:", jlJoined?.length || 0);
 
     if (jlJoinedErr) throw jlJoinedErr;
 
@@ -192,9 +196,61 @@ export default async function handler(req, res) {
       };
     });
 
-    // 3. Totals (ALWAYS FULL-YEAR)
+    // 2.6 Transaction classification
+    const { data: txRowsRaw, error: txErr } = await supabaseAdmin
+      .from("transactions")
+      .select(`
+        id,
+        date,
+        description,
+        amount,
+        business_category,
+        coa_id,
+        includedinct
+      `)
+      .eq("client_id", clientId)
+      .gte("date", startDate)
+      .lte("date", endDate);
+
+    if (txErr) throw txErr;
+
+    const txRows = (txRowsRaw || [])
+      .filter((t) => t.includedinct !== false)
+      .map((t) => ({ ...t, amount: Number(t.amount || 0) }));
+
+    const distinctCoaIds = [...new Set(txRows.map((t) => t.coa_id).filter(Boolean))];
+
+    let coaMapTx = {};
+    if (distinctCoaIds.length > 0) {
+      const { data: coaRowsTx, error: coaErrTx } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("id, account_type, hmrc_bucket, account_name, account_code")
+        .in("id", distinctCoaIds);
+
+      if (coaErrTx) throw coaErrTx;
+
+      coaMapTx = Object.fromEntries((coaRowsTx || []).map((c) => [c.id, c]));
+    }
+
+    const transactions = txRows.map((t) => {
+      const coa = t.coa_id ? coaMapTx[t.coa_id] || {} : {};
+      const accountType = coa.account_type;
+      const hmrcBucket = coa.hmrc_bucket;
+
+      let ctType = "ignore";
+      if (accountType === "INCOME") ctType = "income";
+      else if (accountType === "EXPENSE") {
+        if (hmrcBucket === "allowable") ctType = "allowable";
+        else if (hmrcBucket === "disallowable") ctType = "disallowable";
+        else ctType = "review";
+      }
+
+      return { ...t, ctType };
+    });
+
+    // 3. Totals
     const income = breakdown.filter((b) => b.ctType === "income").reduce((s, b) => s + b.amount, 0);
-    const allowable = breakdown.filter((b) => b.ctType === "allowable").reduce((s, b) => s + b.amount, 0);
+    const allowable = breakdown.filter((b) => b.ctType === "allowallowable").reduce((s, b) => s + b.amount, 0);
     const disallowable = breakdown.filter((b) => b.ctType === "disallowable").reduce((s, b) => s + b.amount, 0);
 
     const profit = pl.summary.net_profit;
@@ -216,6 +272,7 @@ export default async function handler(req, res) {
       effectiveRate,
       breakdown,
       drilldown,
+      transactions,
     });
   } catch (err) {
     console.error("CT summary error:", err);
