@@ -525,24 +525,6 @@ export async function buildAccountsIxbrl(params: {
       `,
     },
 
-    // 9.4 Balance sheet statements
-    {
-      concept: getConceptByInternalKey(
-        accountsTaxonomy.id,
-        "accounts.balance_sheet_statements"
-      ),
-      contextId: mainContext.id,
-      html: `
-        <h2>3. Balance sheet statements</h2>
-
-        <p>These financial statements have been prepared in accordance with the provisions applicable to companies subject to the small companies regime of the Companies Act 2006, where relevant.</p>
-
-        <p>The company has taken advantage of the exemptions available in respect of the preparation of a strategic report and, where applicable, the filing of a profit and loss account.</p>
-
-        <p>The financial statements were approved and authorised for issue by the board of directors on ${approvalDate}.</p>
-      `,
-    },
-
     // 9.5 Directors’ responsibilities and approval
     {
       concept: getConceptByInternalKey(
@@ -582,6 +564,26 @@ export async function buildAccountsIxbrl(params: {
       html: smallCompaniesRegimeHtml,
     },
   ];
+
+  // 9.4 Balance sheet statements (FRS102 + IFRS only)
+  if (gaapFramework !== "FRS105") {
+    textBlocks.push({
+      concept: getConceptByInternalKey(
+        accountsTaxonomy.id,
+        "accounts.balance_sheet_statements"
+      ),
+      contextId: mainContext.id,
+      html: `
+        <h2>3. Balance sheet statements</h2>
+
+        <p>These financial statements have been prepared in accordance with the provisions applicable to companies subject to the small companies regime of the Companies Act 2006, where relevant.</p>
+
+        <p>The company has taken advantage of the exemptions available in respect of the preparation of a strategic report and, where applicable, the filing of a profit and loss account.</p>
+
+        <p>The financial statements were approved and authorised for issue by the board of directors on ${approvalDate}.</p>
+      `,
+    });
+  }
 
   // ------------------------------------------------------------
   // 10. BUILD XHTML INSTANCE
