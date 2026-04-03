@@ -1,239 +1,305 @@
-import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
-import { supabase } from "../../lib/supabase-client";
-import { toast } from "react-hot-toast";
+// setting/account.tsx
+"use client";
 
-export default function AccountSettingsPage() {
-  const { data: session } = useSession();
-  const user = session?.user as any;
+import { useState } from "react";
 
-  const [loading, setLoading] = useState(true);
-  const [client, setClient] = useState<any>(null);
+type Client = {
+  id: string;
+  business_name: string | null;
+  trading_name: string | null;
+  company_number: string | null;
+  utr_number: string | null;
+  registered_address: string | null;
+  website: string | null;
+  industry: string | null;
+  business_type: string | null;
+  contact_person: string | null;
+  contact_email: string | null;
+  contact_phone: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  postcode: string | null;
+  hmrc_sender_id: string | null;
+  hmrc_password: string | null;
+  self_assessment_utr: string | null;
+  nino: string | null;
+  mtditsa_id: string | null;
+  vat_number: string | null;
+  eori_number: string | null;
+  employer_reference: string | null;
+  lisa_manager_reference: string | null;
+  pension_scheme_admin_id: string | null;
+  excise_number: string | null;
+  set_reference: string | null;
+  pillar2_id: string | null;
+  group_identifier: string | null;
+  director_name: string | null;
+  director_signature_name: string | null;
+};
 
-  useEffect(() => {
-    if (!user?.clientId) return;
+type Props = {
+  initialClient: Client;
+  onSaved?: (client: Client) => void;
+};
 
-    async function loadClient() {
-      const { data, error } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("id", user.clientId)
-        .single();
+export function ClientSettingsForm({ initialClient, onSaved }: Props) {
+  const [client, setClient] = useState<Client>(initialClient);
+  const [saving, setSaving] = useState(false);
 
-      if (error) console.error(error);
+  function update<K extends keyof Client>(key: K, value: Client[K]) {
+    setClient((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      const res = await fetch(`//api/settings/account`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(client),
+      });
+      if (!res.ok) throw new Error("Failed to save client");
+      const data = (await res.json()) as Client;
       setClient(data);
-      setLoading(false);
+      onSaved?.(data);
+    } finally {
+      setSaving(false);
     }
-
-    loadClient();
-  }, [user]);
-
-  async function handleSave() {
-    setLoading(true);
-
-    const response = await fetch("/api/settings/account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(client),
-    });
-
-    const result = await response.json();
-    setLoading(false);
-
-    if (!response.ok) {
-      toast.error(result.error || "Failed to save changes");
-      return;
-    }
-
-    toast.success("Account details updated");
-  }
-
-  if (loading) {
-    return <div className="p-6">Loading account settings…</div>;
-  }
-
-  if (!client) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold mb-2">Account Settings</h1>
-        <p className="text-gray-600">
-          No client record is linked to this account yet.
-        </p>
-      </div>
-    );
   }
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8">
-
-      {/* HEADER */}
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold">Account Settings</h1>
-        <p className="text-gray-600 leading-relaxed">
-          This is your business identity cockpit. Everything you enter here
-          powers your invoices, payments, tax submissions, accountant access,
-          and the overall experience inside ProfitLens.
-        </p>
-      </div>
-
-      {/* USER INFO */}
-      <div className="bg-white shadow rounded-lg p-6 space-y-6">
-        <h2 className="text-xl font-semibold">User Information</h2>
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-3xl">
+      {/* SECTION 1 — Business Identity */}
+      <section className="rounded-lg border bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-600 mb-3">
+          Business identity
+        </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[
-            { label: "Name", value: user?.name },
-            { label: "Email", value: user?.email },
-            { label: "Role", value: user?.role },
-            { label: "Subscription", value: user?.subscriptionStatus },
-            { label: "Client ID", value: user?.clientId },
-          ].map(({ label, value }) => (
-            <div key={label} className="border rounded-md p-3 bg-gray-50">
-              <div className="text-sm text-gray-600">{label}</div>
-              <div className="font-medium text-gray-800">{value || "—"}</div>
-            </div>
-          ))}
+          <Field
+            label="Business name"
+            value={client.business_name ?? ""}
+            onChange={(v) => update("business_name", v)}
+          />
+          <Field
+            label="Trading name"
+            value={client.trading_name ?? ""}
+            onChange={(v) => update("trading_name", v)}
+          />
+          <Field
+            label="Company number"
+            value={client.company_number ?? ""}
+            onChange={(v) => update("company_number", v)}
+          />
+          <Field
+            label="UTR number"
+            value={client.utr_number ?? ""}
+            onChange={(v) => update("utr_number", v)}
+          />
+          <Field
+            label="Registered address"
+            value={client.registered_address ?? ""}
+            onChange={(v) => update("registered_address", v)}
+          />
+          <Field
+            label="Website"
+            value={client.website ?? ""}
+            onChange={(v) => update("website", v)}
+          />
+          <Field
+            label="Industry"
+            value={client.industry ?? ""}
+            onChange={(v) => update("industry", v)}
+          />
+          <Field
+            label="Business type"
+            value={client.business_type ?? ""}
+            onChange={(v) => update("business_type", v)}
+          />
         </div>
-      </div>
+      </section>
 
-      {/* BUSINESS INFO */}
-      <Section title="Business Information">
-        {[
-          "business_name",
-          "trading_name",
-          "industry",
-          "business_type",
-          "website",
-        ].map((field) => (
-          <FieldBox
-            key={field}
-            label={formatLabel(field)}
-            value={client[field]}
-            onChange={(val) => setClient({ ...client, [field]: val })}
+      {/* SECTION 2 — Contact Details */}
+      <details className="rounded-lg border bg-white p-4 shadow-sm" open>
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-gray-600 mb-3">
+          Contact details
+        </summary>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field
+            label="Contact person"
+            value={client.contact_person ?? ""}
+            onChange={(v) => update("contact_person", v)}
           />
-        ))}
-        <FieldBox
-          label="Notes"
-          value={client.notes}
-          onChange={(val) => setClient({ ...client, notes: val })}
-          textarea
-          full
-        />
-      </Section>
-
-      {/* CONTACT */}
-      <Section title="Contact Details">
-        {[
-          "email",
-          "phone",
-          "contact_person",
-          "contact_phone",
-          "contact_email",
-        ].map((field) => (
-          <FieldBox
-            key={field}
-            label={formatLabel(field)}
-            value={client[field]}
-            onChange={(val) => setClient({ ...client, [field]: val })}
+          <Field
+            label="Contact email"
+            type="email"
+            value={client.contact_email ?? ""}
+            onChange={(v) => update("contact_email", v)}
           />
-        ))}
-      </Section>
-
-      {/* ADDRESS */}
-      <Section title="Address">
-        {[
-          "address",
-          "postcode",
-          "registered_address",
-        ].map((field) => (
-          <FieldBox
-            key={field}
-            label={formatLabel(field)}
-            value={client[field]}
-            onChange={(val) => setClient({ ...client, [field]: val })}
-            full={field !== "postcode"}
+          <Field
+            label="Contact phone"
+            value={client.contact_phone ?? ""}
+            onChange={(v) => update("contact_phone", v)}
           />
-        ))}
-      </Section>
-
-      {/* LEGAL */}
-      <Section title="Legal Details">
-        {[
-          "company_number",
-          "utr_number",
-          "vat_number",
-          "nino",
-          "mtditsa_id",
-        ].map((field) => (
-          <FieldBox
-            key={field}
-            label={formatLabel(field)}
-            value={client[field]}
-            onChange={(val) => setClient({ ...client, [field]: val })}
+          <Field
+            label="Business email"
+            type="email"
+            value={client.email ?? ""}
+            onChange={(v) => update("email", v)}
           />
-        ))}
-      </Section>
+          <Field
+            label="Business phone"
+            value={client.phone ?? ""}
+            onChange={(v) => update("phone", v)}
+          />
+          <Field
+            label="Address"
+            value={client.address ?? ""}
+            onChange={(v) => update("address", v)}
+          />
+          <Field
+            label="Postcode"
+            value={client.postcode ?? ""}
+            onChange={(v) => update("postcode", v)}
+          />
+        </div>
+      </details>
 
-      {/* SAVE */}
+      {/* SECTION 3 — HMRC Credentials */}
+      <details className="rounded-lg border bg-white p-4 shadow-sm border-blue-500">
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-blue-700 mb-3">
+          HMRC credentials
+        </summary>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field
+            label="Government Gateway ID"
+            value={client.hmrc_sender_id ?? ""}
+            onChange={(v) => update("hmrc_sender_id", v)}
+          />
+          <Field
+            label="Government Gateway password"
+            type="password"
+            value={client.hmrc_password ?? ""}
+            onChange={(v) => update("hmrc_password", v)}
+          />
+          <Field
+            label="Corporation Tax UTR"
+            value={client.utr_number ?? ""}
+            onChange={(v) => update("utr_number", v)}
+          />
+          <Field
+            label="Self Assessment UTR"
+            value={client.self_assessment_utr ?? ""}
+            onChange={(v) => update("self_assessment_utr", v)}
+          />
+          <Field
+            label="NINO"
+            value={client.nino ?? ""}
+            onChange={(v) => update("nino", v)}
+          />
+          <Field
+            label="MTD ITSA ID"
+            value={client.mtditsa_id ?? ""}
+            onChange={(v) => update("mtditsa_id", v)}
+          />
+          <Field
+            label="VAT number"
+            value={client.vat_number ?? ""}
+            onChange={(v) => update("vat_number", v)}
+          />
+          <Field
+            label="EORI number"
+            value={client.eori_number ?? ""}
+            onChange={(v) => update("eori_number", v)}
+          />
+          <Field
+            label="Employer reference"
+            value={client.employer_reference ?? ""}
+            onChange={(v) => update("employer_reference", v)}
+          />
+          <Field
+            label="LISA manager reference"
+            value={client.lisa_manager_reference ?? ""}
+            onChange={(v) => update("lisa_manager_reference", v)}
+          />
+          <Field
+            label="Pension scheme admin ID"
+            value={client.pension_scheme_admin_id ?? ""}
+            onChange={(v) => update("pension_scheme_admin_id", v)}
+          />
+          <Field
+            label="Excise number"
+            value={client.excise_number ?? ""}
+            onChange={(v) => update("excise_number", v)}
+          />
+          <Field
+            label="SET reference"
+            value={client.set_reference ?? ""}
+            onChange={(v) => update("set_reference", v)}
+          />
+          <Field
+            label="Pillar 2 ID"
+            value={client.pillar2_id ?? ""}
+            onChange={(v) => update("pillar2_id", v)}
+          />
+          <Field
+            label="Group identifier"
+            value={client.group_identifier ?? ""}
+            onChange={(v) => update("group_identifier", v)}
+          />
+        </div>
+      </details>
+
+      {/* SECTION 4 — Director Details */}
+      <details className="rounded-lg border bg-white p-4 shadow-sm">
+        <summary className="cursor-pointer text-sm font-semibold uppercase tracking-wide text-gray-600 mb-3">
+          Director details
+        </summary>
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Field
+            label="Director name"
+            value={client.director_name ?? ""}
+            onChange={(v) => update("director_name", v)}
+          />
+          <Field
+            label="Director signature name"
+            value={client.director_signature_name ?? ""}
+            onChange={(v) => update("director_signature_name", v)}
+          />
+        </div>
+      </details>
+
       <div className="flex justify-end">
         <button
-          onClick={handleSave}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700 transition"
+          type="submit"
+          disabled={saving}
+          className="inline-flex items-center rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
         >
-          Save Changes
+          {saving ? "Saving…" : "Save settings"}
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 
-// 🔹 Utility Components
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="bg-white shadow rounded-lg p-6 space-y-6">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">{children}</div>
-    </div>
-  );
-}
-
-function FieldBox({
-  label,
-  value,
-  onChange,
-  textarea = false,
-  full = false,
-}: {
+type FieldProps = {
   label: string;
   value: string;
-  onChange: (val: string) => void;
-  textarea?: boolean;
-  full?: boolean;
-}) {
-  return (
-    <div className={`${full ? "md:col-span-2" : ""}`}>
-      <div className="border rounded-md p-3 bg-gray-50 space-y-1">
-        <div className="text-sm text-gray-600">{label}</div>
-        {textarea ? (
-          <textarea
-            className="w-full bg-white border border-gray-300 rounded-md p-2 text-sm"
-            value={value || ""}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        ) : (
-          <input
-            className="w-full bg-white border border-gray-300 rounded-md p-2 text-sm"
-            value={value || ""}
-            onChange={(e) => onChange(e.target.value)}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
+  type?: "text" | "email" | "password";
+  onChange: (value: string) => void;
+};
 
-function formatLabel(field: string) {
-  return field
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+function Field({ label, value, type = "text", onChange }: FieldProps) {
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-gray-700">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-md border border-gray-300 px-2 py-1 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+      />
+    </label>
+  );
 }
