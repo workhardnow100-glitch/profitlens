@@ -1,5 +1,6 @@
-// FORCE-REBUILD-V6
+// FORCE-REBUILD-V7
 
+import crypto from "crypto";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { buildHmrcSubmissionEnvelope } from "../../../lib/ct/submissionEnvelope";
 
@@ -13,16 +14,14 @@ export default async function handler(req, res) {
 
     const { clientId, periodStart, periodEnd } = req.body || {};
 
-    console.log("🟩 Incoming BODY:", req.body);
-
     if (!clientId || !periodEnd) {
-      console.log("🟥 Missing required fields:", { clientId, periodStart, periodEnd });
       return res.status(400).json({
         success: false,
         message: "Missing clientId or periodEnd.",
       });
     }
 
+    // Load client
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -39,6 +38,10 @@ export default async function handler(req, res) {
       client.accounting_period_start ||
       periodEnd;
 
+    // HMRC‑VALID 32‑CHAR HEX ID (NO HYPHENS, UPPERCASE)
+    const hmrcId = crypto.randomBytes(16).toString("hex").toUpperCase();
+
+    // Artefact paths
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
     const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
 
@@ -52,11 +55,15 @@ export default async function handler(req, res) {
     )?.name;
 
     if (!accountsFileName) {
-      return res.status(500).json({ success: false, message: "Accounts iXBRL file not found." });
+      return res.status(500).json({
+        success: false,
+        message: "Accounts iXBRL file not found.",
+      });
     }
 
     const accountsPath = `ixbrl/${accountsFileName}`;
 
+    // Download artefacts
     const [ct600XmlFile, computationsFile, accountsFile] = await Promise.all([
       supabaseAdmin.storage.from("pdfs").download(ct600XmlPath),
       supabaseAdmin.storage.from("pdfs").download(computationsPath),
@@ -64,17 +71,22 @@ export default async function handler(req, res) {
     ]);
 
     if (!ct600XmlFile.data || !computationsFile.data || !accountsFile.data) {
-      return res.status(500).json({ success: false, message: "Missing one or more CT artefacts." });
+      return res.status(500).json({
+        success: false,
+        message: "Missing one or more CT artefacts.",
+      });
     }
 
     const ct600Xml = await ct600XmlFile.data.text();
     const computationsIxbrl = await computationsFile.data.text();
     const accountsIxbrl = await accountsFile.data.text();
 
+    // Envelope input (NOW USING HMRC‑VALID ID)
     const envelopeInput = {
-      correlationId: `corr-${clientId}-${periodEnd}`,
+      correlationId: hmrcId,
       senderId: "YOUR_SENDER_ID",
       password: "YOUR_PASSWORD",
+
       client,
       companyNumber: client.companyNumber || client.company_number || "",
       companyName: client.business_name || client.name,
@@ -90,9 +102,13 @@ export default async function handler(req, res) {
       envelope = buildHmrcSubmissionEnvelope(envelopeInput);
     } catch (err) {
       console.log("🟥 Envelope builder crashed:", err);
-      return res.status(500).json({ success: false, message: "Envelope builder crashed." });
+      return res.status(500).json({
+        success: false,
+        message: "Envelope builder crashed.",
+      });
     }
 
+    // Upload final XML
     const submissionPath = `hmrc/CT600_SUBMISSION_${clientId}_${periodEnd}.xml`;
     const envelopeBlob = new Blob([envelope], { type: "application/xml" });
 
@@ -104,12 +120,19 @@ export default async function handler(req, res) {
       });
 
     if (uploadError) {
-      return res.status(500).json({ success: false, message: "Failed to upload submission envelope." });
+      return res.status(500).json({
+        success: false,
+        message: "Failed to upload submission envelope.",
+      });
     }
 
     return res.status(200).json({ success: true, submissionPath });
+
   } catch (err) {
     console.log("🟥 TOP-LEVEL ERROR:", err);
-    return res.status(500).json({ success: false, message: "Internal server error generating submission envelope." });
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error generating submission envelope.",
+    });
   }
 }
