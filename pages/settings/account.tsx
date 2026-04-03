@@ -55,8 +55,10 @@ export function ClientSettingsForm({ initialClient, onSaved }: Props) {
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await fetch(`//api/settings/account`, {
-        method: "PUT",
+      const res = await fetch("/api/settings/account", {
+
+      method: "POST",
+
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(client),
       });
