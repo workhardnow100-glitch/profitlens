@@ -1,4 +1,4 @@
-// setting/account.tsx
+// page/setting/account.tsx
 "use client";
 
 import { useState } from "react";
