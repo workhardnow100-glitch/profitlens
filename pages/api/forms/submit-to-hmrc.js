@@ -1,5 +1,6 @@
-// pages/api/forms/submit-to-hmrc.js
+// FORCE-REBUILD-V8-HMRC-ID-FIX
 
+import crypto from "crypto";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { sendToHmrcGateway } from "../../../lib/ct/gatewayClient";
 import { buildHmrcSubmissionEnvelope } from "../../../lib/ct/xmlBuilder";
@@ -16,7 +17,6 @@ export default async function handler(req, res) {
     const { clientId, periodEnd, environment = "test" } = req.body;
 
     if (!clientId || !periodEnd) {
-      console.log("🟥 [HMRC] Missing required fields:", { clientId, periodEnd });
       return res.status(400).json({
         success: false,
         message: "Missing clientId or periodEnd.",
@@ -24,7 +24,6 @@ export default async function handler(req, res) {
     }
 
     // Load client
-    console.log("🟦 [HMRC] Loading client:", clientId);
     const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
       .select("*")
@@ -32,7 +31,6 @@ export default async function handler(req, res) {
       .single();
 
     if (clientError || !client) {
-      console.log("🟥 [HMRC] Client not found:", clientError);
       return res.status(404).json({ success: false, message: "Client not found." });
     }
 
@@ -40,7 +38,6 @@ export default async function handler(req, res) {
     const ct600XmlPath = `xml/CT600_${clientId}_${periodEnd}.xml`;
     const computationsPath = `ixbrl/CT_COMPUTATIONS_${clientId}_${periodEnd}.xhtml`;
 
-    // Detect accounts file
     const { data: list } = await supabaseAdmin.storage
       .from("pdfs")
       .list("ixbrl");
@@ -77,9 +74,11 @@ export default async function handler(req, res) {
     const computationsIxbrl = await computationsFile.data.text();
     const accountsIxbrl = await accountsFile.data.text();
 
-    // Build GovTalk envelope
-    const correlationId = crypto.randomUUID();
+    // ✅ HMRC‑VALID 32‑CHAR HEX ID (NO HYPHENS, UPPERCASE)
+    const correlationId = crypto.randomBytes(16).toString("hex").toUpperCase();
+    console.log("🟦 [HMRC] Using correlationId:", correlationId);
 
+    // Build GovTalk envelope
     const envelopeXml = buildHmrcSubmissionEnvelope({
       correlationId,
       senderId: process.env.HMRC_SENDER_ID,
@@ -93,7 +92,7 @@ export default async function handler(req, res) {
       accountsIxbrl,
     });
 
-    // Save submission XML for debugging
+    // Save submission XML
     const submissionPath = `hmrc/CT600_SUBMISSION_${clientId}_${periodEnd}.xml`;
 
     await supabaseAdmin.storage
