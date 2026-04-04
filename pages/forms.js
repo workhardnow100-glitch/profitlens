@@ -49,6 +49,10 @@ export default function FormsPage() {
   const [selectedCTForm, setSelectedCTForm] = useState("");
   const [selectedSAForm, setSelectedSAForm] = useState("");
   const [selectedCISForm, setSelectedCISForm] = useState("");
+
+  // ⭐ NEW — Accounts form state
+  const [selectedAccountsForm, setSelectedAccountsForm] = useState("");
+
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -91,6 +95,12 @@ export default function FormsPage() {
   const CIS_FORMS = [
     { code: "CIS300", label: "CIS300 — Monthly contractor return" },
     { code: "CIS_STATEMENT", label: "CIS Subcontractor Statement" },
+  ];
+
+  // ⭐ NEW — Accounts frameworks
+  const ACCOUNTS_FORMS = [
+    { code: "FRS105", label: "FRS 105 — Micro‑entity Accounts" },
+    { code: "FRS102_1A", label: "FRS 102 1A — Small Company Accounts" },
   ];
 
   // ⭐ Helper: non‑negative numeric input
@@ -137,32 +147,24 @@ export default function FormsPage() {
 
         const a = data.adjustments;
 
-        const lc = a.loss_carryback ?? "";
-        const gr = a.group_relief ?? "";
-        const aia = a.ca_aia_claimed ?? "";
-        const rd = a.r_and_d_multiplier ?? "";
-        const mp = a.ca_main_pool_bf ?? "";
-        const sp = a.ca_special_pool_bf ?? "";
-        const cp = a.ca_cars_pool_bf ?? "";
-
-        setLossCarryback(lc === null ? "" : String(lc));
-        setGroupRelief(gr === null ? "" : String(gr));
-        setAiaClaimed(aia === null ? "" : String(aia));
-        setRAndDMultiplier(rd === null ? "" : String(rd));
-        setMainPoolBF(mp === null ? "" : String(mp));
-        setSpecialPoolBF(sp === null ? "" : String(sp));
-        setCarsPoolBF(cp === null ? "" : String(cp));
+        setLossCarryback(a.loss_carryback ?? "");
+        setGroupRelief(a.group_relief ?? "");
+        setAiaClaimed(a.ca_aia_claimed ?? "");
+        setRAndDMultiplier(a.r_and_d_multiplier ?? "");
+        setMainPoolBF(a.ca_main_pool_bf ?? "");
+        setSpecialPoolBF(a.ca_special_pool_bf ?? "");
+        setCarsPoolBF(a.ca_cars_pool_bf ?? "");
 
         const anyLoaded =
-          lc !== "" ||
-          gr !== "" ||
-          aia !== "" ||
-          rd !== "" ||
-          mp !== "" ||
-          sp !== "" ||
-          cp !== "";
+          a.loss_carryback ||
+          a.group_relief ||
+          a.ca_aia_claimed ||
+          a.r_and_d_multiplier ||
+          a.ca_main_pool_bf ||
+          a.ca_special_pool_bf ||
+          a.ca_cars_pool_bf;
 
-        setCtAdjustmentsLoaded(anyLoaded);
+        setCtAdjustmentsLoaded(Boolean(anyLoaded));
       } catch (err) {
         console.error("Failed to load CT adjustments", err);
         setCtAdjustmentsLoaded(false);
@@ -172,7 +174,7 @@ export default function FormsPage() {
     loadAdjustments();
   }, [selectedCTForm, clientId, periodStart, periodEnd]);
 
-  // ⭐ AUTO‑LOAD CT600 SUPPLEMENTS (period + client)
+  // ⭐ AUTO‑LOAD CT600 SUPPLEMENTS
   useEffect(() => {
     if (!clientId || !periodStart || !periodEnd) {
       setSupplements(null);
@@ -248,8 +250,7 @@ export default function FormsPage() {
       setIsLoading(false);
     }
   };
-
-  // ⭐ Generate single form
+  // ⭐ Generate single form (CT, SA, CIS, ACCOUNTS)
   const handleGenerate = async (category) => {
     setResultMessage(null);
     setErrorMessage(null);
@@ -259,7 +260,9 @@ export default function FormsPage() {
         ? selectedCTForm
         : category === "SA"
         ? selectedSAForm
-        : selectedCISForm;
+        : category === "CIS"
+        ? selectedCISForm
+        : selectedAccountsForm;
 
     if (!clientId) {
       setErrorMessage("No client selected.");
@@ -349,7 +352,7 @@ export default function FormsPage() {
         <header className="space-y-2">
           <h1 className="text-2xl font-bold">Forms &amp; Returns</h1>
           <p className="text-sm text-gray-600">
-            Generate Corporation Tax (CT600), Self Assessment, and CIS forms automatically from your
+            Generate Corporation Tax (CT600), Self Assessment, CIS, and Statutory Accounts automatically from your
             transaction data.
           </p>
 
@@ -440,13 +443,7 @@ export default function FormsPage() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    Loss Carryback{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Losses carried back to offset previous year’s profits."
-                    >
-                      ⓘ
-                    </span>
+                    Loss Carryback ⓘ
                   </label>
                   <input
                     type="number"
@@ -458,13 +455,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    Group Relief{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Losses surrendered to or claimed from group companies."
-                    >
-                      ⓘ
-                    </span>
+                    Group Relief ⓘ
                   </label>
                   <input
                     type="number"
@@ -476,13 +467,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    AIA Claimed{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Annual Investment Allowance claimed in this period."
-                    >
-                      ⓘ
-                    </span>
+                    AIA Claimed ⓘ
                   </label>
                   <input
                     type="number"
@@ -494,13 +479,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    R&amp;D Multiplier{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Enhancement factor applied to qualifying R&amp;D expenditure."
-                    >
-                      ⓘ
-                    </span>
+                    R&D Multiplier ⓘ
                   </label>
                   <input
                     type="number"
@@ -513,13 +492,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    Main Pool B/F{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Unrelieved main pool balance brought forward."
-                    >
-                      ⓘ
-                    </span>
+                    Main Pool B/F ⓘ
                   </label>
                   <input
                     type="number"
@@ -531,13 +504,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    Special Pool B/F{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Unrelieved special rate pool balance brought forward."
-                    >
-                      ⓘ
-                    </span>
+                    Special Pool B/F ⓘ
                   </label>
                   <input
                     type="number"
@@ -549,13 +516,7 @@ export default function FormsPage() {
 
                 <div>
                   <label className="block text-xs text-gray-600 mb-1">
-                    Cars Pool B/F{" "}
-                    <span
-                      className="text-gray-400 cursor-help"
-                      title="Unrelieved car pool balance brought forward."
-                    >
-                      ⓘ
-                    </span>
+                    Cars Pool B/F ⓘ
                   </label>
                   <input
                     type="number"
@@ -595,7 +556,7 @@ export default function FormsPage() {
                     <strong>{supplements.ct600JRequired ? "Yes" : "No"}</strong>
                   </li>
                   <li>
-                    CT600L — R&amp;D Supplement:{" "}
+                    CT600L — R&D Supplement:{" "}
                     <strong>{supplements.ct600LRequired ? "Yes" : "No"}</strong>
                   </li>
                   <li>
@@ -623,6 +584,31 @@ export default function FormsPage() {
               </button>
             </section>
           )}
+
+          {/* ⭐ ACCOUNTS SECTION */}
+          <div className="border rounded-md p-4 space-y-3">
+            <h2 className="font-semibold text-sm">Statutory Accounts</h2>
+            <select
+              value={selectedAccountsForm}
+              onChange={(e) => setSelectedAccountsForm(e.target.value)}
+              className="border rounded px-2 py-2 text-sm w-full"
+            >
+              <option value="">Select accounts framework…</option>
+              {ACCOUNTS_FORMS.map((form) => (
+                <option key={form.code} value={form.code}>
+                  {form.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => handleGenerate("ACCOUNTS")}
+              disabled={isLoading}
+              className="w-full bg-purple-600 text-white text-sm font-medium py-2 rounded disabled:opacity-50"
+            >
+              {isLoading ? "Generating…" : "Generate Accounts PDF"}
+            </button>
+          </div>
 
           {/* SA */}
           <div className="border rounded-md p-4 space-y-3">
