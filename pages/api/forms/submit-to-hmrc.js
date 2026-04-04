@@ -79,10 +79,10 @@ export default async function handler(req, res) {
     console.log("🟦 [HMRC] Using correlationId:", correlationId);
 
     // Build GovTalk envelope
-   const envelopeXml = buildHmrcSubmissionEnvelope({
+  const envelopeXml = buildHmrcSubmissionEnvelope({
   correlationId,
-  senderId: client.hmrc_sender_id,
-  password: client.hmrc_password,
+  senderId: process.env.HMRC_CT600_SENDER_ID,
+  password: process.env.HMRC_CT600_PASSWORD,
   companyNumber: client.company_number,
   companyName: client.business_name || client.name,
   periodStart: client.period_start,
@@ -90,8 +90,9 @@ export default async function handler(req, res) {
   ct600Xml,
   computationsIxbrl,
   accountsIxbrl,
-  environment, // ⭐ ADD THIS
+  environment,
 });
+
 
 
     // Save submission XML
