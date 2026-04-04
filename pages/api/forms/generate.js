@@ -1667,6 +1667,50 @@ if (formCode === "CIS_STATEMENT") {
   });
 }
 
+// ---------------- ACCOUNTS FAMILY ----------------
+
+if (formCode === "FRS105") {
+  return await generateFrs105AccountsPdf({
+    clientId,
+    year,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    companyDetails,
+
+    // You will pass these from your accounts engine
+    balanceSheetCurrent: formData.balanceSheetCurrent || {},
+    balanceSheetPrior: formData.balanceSheetPrior || {},
+    pAndlCurrent: formData.pAndlCurrent || {},
+    pAndlPrior: formData.pAndlPrior || {},
+    notes: formData.notes || {},
+    directorApproval: formData.directorApproval || {},
+    framework: "FRS105",
+  });
+}
+
+if (formCode === "FRS102_1A") {
+  return await generateFrs1021aAccountsPdf({
+    clientId,
+    year,
+    periodStart,
+    periodEnd,
+    filename,
+    createdBy,
+    companyDetails,
+
+    balanceSheetCurrent: formData.balanceSheetCurrent || {},
+    balanceSheetPrior: formData.balanceSheetPrior || {},
+    pAndlCurrent: formData.pAndlCurrent || {},
+    pAndlPrior: formData.pAndlPrior || {},
+    notes: formData.notes || {},
+    directorApproval: formData.directorApproval || {},
+    framework: "FRS102_1A",
+  });
+}
+
+
 throw new Error("No PDF template configured for formCode: " + formCode);
 
 }
