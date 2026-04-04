@@ -36,6 +36,9 @@ import { generateSa105Pdf } from "../../../lib/pdf/templates/sa105";
 import { generateSa110Pdf } from "../../../lib/pdf/templates/sa110";
 import { generateCis300Pdf } from "../../../lib/pdf/templates/cis300";
 import { generateCisStatementPdf } from "../../../lib/pdf/templates/cis_statement";
+import { generateFrs105AccountsPdf } from "../../../lib/pdf/templates/generateFrs105AccountsPdf";
+import { generateFrs1021aAccountsPdf } from "../../../lib/pdf/templates/generateFrs1021aAccountsPdf";
+
 
 // CT category map
 import { CT_MAP } from "../../../lib/constants/ctMap";
@@ -136,36 +139,41 @@ export default async function handler(req, res) {
 
     let formData = {};
 
-    if (formCode.startsWith("CT")) {
-      formData = await buildCTFormData(
-        formCode,
-        client,
-        resolvedClientId,
-        periodStart,
-        periodEnd
-      );
-    } else if (formCode.startsWith("SA")) {
-      formData = await buildSAFormData(
-        formCode,
-        client,
-        resolvedClientId,
-        periodStart,
-        periodEnd,
-        taxYear
-      );
-    } else if (formCode.startsWith("CIS")) {
-      formData = await buildCISFormData(
-        formCode,
-        client,
-        resolvedClientId,
-        periodStart,
-        periodEnd
-      );
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: "Unsupported form code." });
-    }
+   if (formCode.startsWith("CT")) {
+  formData = await buildCTFormData(
+    formCode,
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd
+  );
+} else if (formCode.startsWith("SA")) {
+  formData = await buildSAFormData(
+    formCode,
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd,
+    taxYear
+  );
+} else if (formCode.startsWith("CIS")) {
+  formData = await buildCISFormData(
+    formCode,
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd
+  );
+} else if (formCode.startsWith("FRS")) {
+  // For now, Accounts formData comes directly from the request body
+  // or defaults to an empty object.
+  formData = req.body.formData || {};
+} else {
+  return res
+    .status(400)
+    .json({ success: false, message: "Unsupported form code." });
+}
+
 
     const submissionId = uuidv4();
     const filename = `${submissionId}.pdf`;
