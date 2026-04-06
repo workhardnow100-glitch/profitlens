@@ -110,7 +110,8 @@ if (!validCodes.includes(formCode)) {
         client_id: resolvedClientId,
         actor_email: session.user.email,
         action: isAccountant ? "ACCOUNTANT_GENERATE_FORM" : "GENERATE_FORM",
-        details: `Generated form ${formCode} for ${periodStart} → ${periodEnd}`,
+        details: `Generated form ${formCode} for ${periodStart} → ${periodEnd} (submission ${submissionId})`,
+
         timestamp: new Date().toISOString(),
       },
     ]);
