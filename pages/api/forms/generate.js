@@ -83,14 +83,15 @@ export default async function handler(req, res) {
         message: "Missing client, formCode, or period range.",
       });
     }
-    const validCodes = [
-  "CT600","CT600N","SA100","SA103","SA105","SA110",
-  "CIS300","CIS_STATEMENT","FRS105","FRS102_1A"
-];
-if (!validCodes.includes(formCode)) {
-  return res.status(400).json({ success: false, message: "Unsupported form code." });
-}
 
+    // ✅ Whitelist check
+    const validCodes = [
+      "CT600","CT600N","SA100","SA103","SA105","SA110",
+      "CIS300","CIS_STATEMENT","FRS105","FRS102_1A"
+    ];
+    if (!validCodes.includes(formCode)) {
+      return res.status(400).json({ success: false, message: "Unsupported form code." });
+    }
 
     const periodStartDate = new Date(periodStart);
     const periodEndDate = new Date(periodEnd);
@@ -105,13 +106,15 @@ if (!validCodes.includes(formCode)) {
         .json({ success: false, message: "Invalid period start or end date." });
     }
 
+    // ✅ Generate submissionId before audit
+    const submissionId = uuidv4();
+
     await supabaseAdmin.from("audit").insert([
       {
         client_id: resolvedClientId,
         actor_email: session.user.email,
         action: isAccountant ? "ACCOUNTANT_GENERATE_FORM" : "GENERATE_FORM",
         details: `Generated form ${formCode} for ${periodStart} → ${periodEnd} (submission ${submissionId})`,
-
         timestamp: new Date().toISOString(),
       },
     ]);
@@ -123,6 +126,7 @@ if (!validCodes.includes(formCode)) {
       .single();
 
     if (clientError || !client) {
+      console.error("Error loading client:", clientError);
       return res
         .status(404)
         .json({ success: false, message: "Client not found." });
@@ -148,48 +152,40 @@ if (!validCodes.includes(formCode)) {
 
     let formData = {};
 
-   if (formCode.startsWith("CT")) {
-  formData = await buildCTFormData(
-    formCode,
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd
-  );
-} else if (formCode.startsWith("SA")) {
-  formData = await buildSAFormData(
-    formCode,
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd,
-    taxYear
-  );
-} else if (formCode.startsWith("CIS")) {
-  formData = await buildCISFormData(
-    formCode,
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd
-  );
-} else if (formCode.startsWith("FRS")) {
-  formData = await buildAccountsFormData(
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd
-  );
-}
+    if (formCode.startsWith("CT")) {
+      formData = await buildCTFormData(
+        formCode,
+        client,
+        resolvedClientId,
+        periodStart,
+        periodEnd
+      );
+    } else if (formCode.startsWith("SA")) {
+      formData = await buildSAFormData(
+        formCode,
+        client,
+        resolvedClientId,
+        periodStart,
+        periodEnd,
+        taxYear
+      );
+    } else if (formCode.startsWith("CIS")) {
+      formData = await buildCISFormData(
+        formCode,
+        client,
+        resolvedClientId,
+        periodStart,
+        periodEnd
+      );
+    } else if (formCode.startsWith("FRS")) {
+      formData = await buildAccountsFormData(
+        client,
+        resolvedClientId,
+        periodStart,
+        periodEnd
+      );
+    }
 
-else {
-  return res
-    .status(400)
-    .json({ success: false, message: "Unsupported form code." });
-}
-
-
-    const submissionId = uuidv4();
     const filename = `${submissionId}.pdf`;
 
     const record = await generatePdfForForm({
@@ -225,6 +221,7 @@ else {
     });
   }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                               CT600 CONFIG                                 */
@@ -466,7 +463,10 @@ async function buildCTFormData(
     (j.journal_lines || []).forEach((line) => {
       const accountName =
         line.chart_of_account_entries?.account_name || "";
-      const amt = amountFromLine(line);
+      function amountFromLine(line) {
+  return Number(line.debit || 0) - Number(line.credit || 0);
+}
+
 
       // --- CT600A / DLA movements & interest (always tracked, even if ignored for CT P&L) ---
       if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
@@ -528,7 +528,9 @@ async function buildCTFormData(
       }
 
       // 1. Ignore system accounts for CT profit computation
-      if (CT_MAP.ignore.includes(accountName)) return;
+      const normalizedName = accountName.trim().toLowerCase();
+if (CT_MAP.ignore.includes(normalizedName)) return;
+
 
       // 2. Trading revenue (Sales + Other Income)
       if (CT_MAP.revenue.includes(accountName)) {
@@ -1090,12 +1092,8 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   const allowableExpenses = Math.max(allowable, 0);
   const disallowableExpenses = Math.max(disallowable, 0);
 
-  const rawProfit =
-    turnover -
-    allowableExpenses -
-    disallowableExpenses +
-    capitalAllowances +
-    adjustments;
+  const rawProfit = turnover - allowableExpenses + disallowableExpenses - capitalAllowances + adjustments;
+
 
   const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
   const lossBF = (saSubmission && saSubmission.loss_bf) || 0;
@@ -1204,28 +1202,48 @@ function buildSA105FromJournals(saSubmission, journals) {
     });
   });
 
-  const propertyExpenses =
-    Math.max(propertyAllowable, 0) + Math.max(mortgageInterest, 0);
-  const propertyProfit = rentalIncome - propertyExpenses;
+  // Core property profit: allowable expenses + capital allowances + losses reduce profit
+  const propertyExpenses = Math.max(propertyAllowable, 0);
+  const propertyProfit =
+    rentalIncome -
+    propertyExpenses -
+    Math.max(propertyCapitalAllowances, 0) -
+    Math.max(propertyLosses, 0);
+
+  // FHL net profit
+  const fhlProfit = fhlIncome - Math.max(fhlExpenses, 0);
+
+  // Rent-a-Room relief: clamp at £7,500
+  let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
+  if (netRentARoom > 7500) {
+    netRentARoom -= 7500;
+  }
+
+  // Mortgage interest is not deductible — treat as 20% tax credit
+  const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
 
   return {
     property: {
       rentalIncome,
-      propertyExpenses,
-      propertyProfit,
+      allowableExpenses: propertyAllowable,
+      capitalAllowances: propertyCapitalAllowances,
+      losses: propertyLosses,
+      profit: propertyProfit,
     },
     fhl: {
       income: fhlIncome,
       expenses: Math.max(fhlExpenses, 0),
+      profit: fhlProfit,
     },
     rentARoom: {
       income: rentARoomIncome,
       expenses: Math.max(rentARoomExpenses, 0),
+      netIncome: netRentARoom,
     },
-    capitalAllowances: propertyCapitalAllowances,
-    propertyLosses: propertyLosses,
+    mortgageCredit,
   };
 }
+
 
 /* --------------------------- Other Income / Gains ------------------------- */
 
