@@ -1,4 +1,4 @@
-// pages/forms.jsx
+// pages/forms.js
 export const dynamic = "force-dynamic";
 
 export async function getServerSideProps() {

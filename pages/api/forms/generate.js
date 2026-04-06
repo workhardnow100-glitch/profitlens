@@ -1687,11 +1687,10 @@ if (formCode === "FRS105") {
     createdBy,
     companyDetails,
 
-    // You will pass these from your accounts engine
-    balanceSheetCurrent: formData.balanceSheetCurrent || {},
-    balanceSheetPrior: formData.balanceSheetPrior || {},
-    pAndlCurrent: formData.pAndlCurrent || {},
-    pAndlPrior: formData.pAndlPrior || {},
+    // Pass full API responses, not sliced balance sheets
+    overview: formData.overview,            // ✅ includes totals
+    overviewPrior: formData.overviewPrior,  // ✅ prior year JSON (or safe default)
+
     notes: formData.notes || {},
     directorApproval: formData.directorApproval || {},
     framework: "FRS105",
@@ -1708,15 +1707,17 @@ if (formCode === "FRS102_1A") {
     createdBy,
     companyDetails,
 
-    balanceSheetCurrent: formData.balanceSheetCurrent || {},
-    balanceSheetPrior: formData.balanceSheetPrior || {},
-    pAndlCurrent: formData.pAndlCurrent || {},
-    pAndlPrior: formData.pAndlPrior || {},
+    overview: formData.overview,            // ✅ includes totals
+    overviewPrior: formData.overviewPrior,  // ✅ prior year JSON (or safe default)
+
     notes: formData.notes || {},
     directorApproval: formData.directorApproval || {},
     framework: "FRS102_1A",
   });
 }
+
+throw new Error("No PDF template configured for formCode: " + formCode);
+
 
 
 throw new Error("No PDF template configured for formCode: " + formCode);
