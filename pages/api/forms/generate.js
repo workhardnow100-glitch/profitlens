@@ -391,7 +391,7 @@ function computeCorpTaxRate(profit, associatedCompanies) {
   return effectiveRate;
 }
 
-/-------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- */
 /*                               CT600 BUILDER                                */
 /* -------------------------------------------------------------------------- */
 
@@ -426,7 +426,7 @@ async function buildCTFormData(
   let disallowableExpenses = 0;
 
   // Capital allowance tracking
-  let capitalAllowances = 0;
+  let capitalAllowances;
   let mainPoolAdditions = 0;
   let specialPoolAdditions = 0;
   let carsPoolAdditions = 0;
@@ -1067,7 +1067,7 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   let turnover = 0;
   let allowable = 0;
   let disallowable = 0;
-  let capitalAllowances = 0;
+  let capitalAllowances;
   let adjustments = 0;
 
   (journals || []).forEach((j) => {
@@ -1784,9 +1784,6 @@ if (formCode === "FRS102_1A") {
 
 throw new Error("No PDF template configured for formCode: " + formCode);
 
-
-
-throw new Error("No PDF template configured for formCode: " + formCode);
 
 }
 
