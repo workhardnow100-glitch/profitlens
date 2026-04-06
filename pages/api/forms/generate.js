@@ -569,48 +569,48 @@ async function buildCTFormData(
   const lossCarryback = corpSubmission?.loss_carryback || 0;
   const groupRelief = corpSubmission?.group_relief || 0;
 
-  /* -------------------------- R&D Engine -------------------------- */
-  const autoRAndDMultiplier =
-    corpSubmission?.r_and_d_multiplier && corpSubmission.r_and_d_multiplier > 0
-      ? corpSubmission.r_and_d_multiplier
-      : DEFAULT_R_AND_D_SME_MULTIPLIER;
+ /* -------------------------- R&D Engine -------------------------- */
+const autoRAndDMultiplier =
+  corpSubmission?.r_and_d_multiplier && corpSubmission.r_and_d_multiplier > 0
+    ? corpSubmission.r_and_d_multiplier
+    : DEFAULT_R_AND_D_SME_MULTIPLIER;
 
-  const autoTotalRAndDSpend = rAndDSmeSpend;
-  const autoRAndDGrants = rAndDGrants;
+const autoTotalRAndDSpend = rAndDSmeSpend;
+const autoRAndDGrants = rAndDGrants;
 
-  if (autoRAndDGrants > autoTotalRAndDSpend) {
-    console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
-  }
-  
+if (autoRAndDGrants > autoTotalRAndDSpend) {
+  console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
+}
+
 const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
+const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
 
-  const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
+const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
+const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
-  const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
-  const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
+const autoSmePayableCredit = 0;
+const autoSurrenderedLoss = 0;
 
-  const autoSmePayableCredit = 0;
-  const autoSurrenderedLoss = 0;
+const overrideEnabled = corpSubmission?.r_and_d_override_enabled || false;
+const overrideSmeEnhancedDeduction = corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
+const overrideSmePayableCredit = corpSubmission?.r_and_d_override_sme_payable_credit || 0;
+const overrideRdecCredit = corpSubmission?.r_and_d_override_rdec_credit || 0;
+const overrideSurrenderedLoss = corpSubmission?.r_and_d_override_surrendered_loss || 0;
 
-  const overrideEnabled = corpSubmission?.r_and_d_override_enabled || false;
-  const overrideSmeEnhancedDeduction = corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
-  const overrideSmePayableCredit = corpSubmission?.r_and_d_override_sme_payable_credit || 0;
-  const overrideRdecCredit = corpSubmission?.r_and_d_override_rdec_credit || 0;
-  const overrideSurrenderedLoss = corpSubmission?.r_and_d_override_surrendered_loss || 0;
+const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
+const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
+const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
+const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
 
-  const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
-  const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
-  const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
-  const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
+const rAndDSpend = autoTotalRAndDSpend;
+const rAndDMultiplier = autoRAndDMultiplier;
+const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
 
-  const rAndDSpend = autoTotalRAndDSpend;
-  const rAndDMultiplier = autoRAndDMultiplier;
-  const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
+const taxableProfit = Math.max(
+  baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
+  0
+);
 
-  const taxableProfit = Math.max(
-    baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
-    0
-  );
 
   const associatedCompanies = corpSubmission?.associated_companies_count || 0;
   const taxRate =
@@ -1148,30 +1148,20 @@ function buildSA105FromJournals(saSubmission, journals) {
     });
   });
 
-  // Core property profit: allowable expenses + capital allowances + losses reduce profit
-const propertyExpenses = Math.max(propertyAllowable, 0);
-const propertyProfit =
-  rentalIncome - propertyExpenses - Math.max(propertyCapitalAllowances, 0) - Math.max(propertyLosses, 0);
+  // Core property profit
+  const propertyExpenses = Math.max(propertyAllowable, 0);
+  const propertyProfit =
+    rentalIncome - propertyExpenses - Math.max(propertyCapitalAllowances, 0) - Math.max(propertyLosses, 0);
 
-const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
-
-
+  // Mortgage interest is a tax credit, not an expense
+  const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
 
   // FHL net profit
   const fhlProfit = fhlIncome - Math.max(fhlExpenses, 0);
-let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
-if (netRentARoom > 7500) netRentARoom -= 7500;
 
-return {
-  // other fields...
-  rentARoom: {
-    income: rentARoomIncome,
-    expenses: Math.max(rentARoomExpenses, 0),
-    netIncome: netRentARoom,
-  },
-};
-
-
+  // Rent-a-Room relief
+  let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
+  if (netRentARoom > 7500) netRentARoom -= 7500;
 
   return {
     property: {
@@ -1194,6 +1184,7 @@ return {
     mortgageCredit,
   };
 }
+
 
 
 /* --------------------------- Other Income / Gains ------------------------- */
