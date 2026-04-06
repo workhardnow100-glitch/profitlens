@@ -581,9 +581,7 @@ async function buildCTFormData(
   if (autoRAndDGrants > autoTotalRAndDSpend) {
     console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
   }
-  if (autoRAndDGrants > autoTotalRAndDSpend) {
-  console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
-}
+  
 const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
 
   const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
@@ -1042,11 +1040,12 @@ function buildSA103FromJournals(saSubmission, client, journals) {
     adjustments;
 
   const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
-  const lossBF = (saSubmission && saSubmission.loss_bf) || 0;
-  const lossCF =
-    saSubmission && saSubmission.loss_cf != null
-      ? saSubmission.loss_cf
-      : lossBF + currentPeriodLoss;
+const lossBF = saSubmission?.loss_bf || 0;
+
+// If loss_cf is explicitly provided, use it.
+// Otherwise, carry forward = brought forward + current period loss.
+const lossCF = saSubmission?.loss_cf ?? (lossBF + currentPeriodLoss);
+
 
   const usingSimplifiedExpenses =
     (saSubmission && saSubmission.using_simplified_expenses) || false;
@@ -1157,14 +1156,20 @@ const propertyProfit =
 const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
 
 
+
   // FHL net profit
   const fhlProfit = fhlIncome - Math.max(fhlExpenses, 0);
+let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
+if (netRentARoom > 7500) netRentARoom -= 7500;
 
-  // Rent-a-Room relief: clamp at £7,500
-  let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
-  if (netRentARoom > 7500) {
-    netRentARoom -= 7500;
-  }
+return {
+  // other fields...
+  rentARoom: {
+    income: rentARoomIncome,
+    expenses: Math.max(rentARoomExpenses, 0),
+    netIncome: netRentARoom,
+  },
+};
 
 
 
