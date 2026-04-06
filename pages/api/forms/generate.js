@@ -407,6 +407,11 @@ function computeCorpTaxRate(profit, associatedCompanies) {
 /*                               CT600 BUILDER                                */
 /* -------------------------------------------------------------------------- */
 
+// Utility: define once at top, not inside loop
+function amountFromLine(line) {
+  return Number(line.debit || 0) - Number(line.credit || 0);
+}
+
 async function buildCTFormData(
   formCode,
   client,
@@ -432,8 +437,8 @@ async function buildCTFormData(
   // CT is journal‑driven, filtered by CT toggle on transactions
   const ctJournals = await loadCTJournals(clientId, periodStart, periodEnd);
 
-  let turnover = 0; // Trading income only (Sales + Other Income)
-  let nonTradingIncome = 0; // Asset sales, grants, refunds, etc.
+  let turnover = 0;
+  let nonTradingIncome = 0;
   let allowableExpenses = 0;
   let disallowableExpenses = 0;
 
@@ -443,17 +448,17 @@ async function buildCTFormData(
   let specialPoolAdditions = 0;
   let carsPoolAdditions = 0;
 
-  // Loans to participators (CT600A) tracking
+  // Loans to participators (CT600A)
   let dlaLoansAdvanced = 0;
   let dlaLoansRepaid = 0;
   let dlaInterestCharged = 0;
   let dlaInterestPaid = 0;
 
-  // R&D tracking (journal-driven)
+  // R&D tracking
   let rAndDSmeSpend = 0;
   let rAndDGrants = 0;
 
-  // Simple placeholders for other supplements (can be refined later)
+  // Supplements
   let dotasFlag = false;
   let charityIncome = 0;
   let royaltyIncome = 0;
@@ -461,90 +466,50 @@ async function buildCTFormData(
 
   (ctJournals || []).forEach((j) => {
     (j.journal_lines || []).forEach((line) => {
-      const accountName =
-        line.chart_of_account_entries?.account_name || "";
-      function amountFromLine(line) {
-  return Number(line.debit || 0) - Number(line.credit || 0);
-}
+      const accountName = line.chart_of_account_entries?.account_name || "";
+      const amt = amountFromLine(line);
+      const normalizedName = accountName.trim().toLowerCase();
 
-
-      // --- CT600A / DLA movements & interest (always tracked, even if ignored for CT P&L) ---
+      // --- CT600A / DLA ---
       if (DLA_MOVEMENT_ACCOUNTS.includes(accountName)) {
         if (amt > 0) {
-          // Debit to DLA-related asset account → loan advanced / overdrawn
           dlaLoansAdvanced += amt;
         } else if (amt < 0) {
-          // Credit to DLA-related asset account → repayment / reduction
           dlaLoansRepaid += Math.abs(amt);
         }
       }
-
-      if (accountName === DLA_INTEREST_INCOME_ACCOUNT) {
-        if (amt > 0) {
-          dlaInterestCharged += amt;
-        }
+      if (accountName === DLA_INTEREST_INCOME_ACCOUNT && amt > 0) {
+        dlaInterestCharged += amt;
+      }
+      if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT && amt > 0) {
+        dlaInterestPaid += amt;
       }
 
-      if (accountName === DLA_INTEREST_EXPENSE_ACCOUNT) {
-        if (amt > 0) {
-          dlaInterestPaid += amt;
-        }
+      // --- CT600L / R&D ---
+      if (R_AND_D_SME_ACCOUNTS.includes(accountName) && amt > 0) {
+        rAndDSmeSpend += amt;
+      }
+      if (accountName === R_AND_D_GRANTS_ACCOUNT && amt > 0) {
+        rAndDGrants += amt;
       }
 
-      // --- CT600L / R&D detection (journal-driven) ---
-      if (R_AND_D_SME_ACCOUNTS.includes(accountName)) {
-        if (amt > 0) {
-          rAndDSmeSpend += amt;
-        }
-      }
+      // --- Supplements ---
+      if (normalizedName.includes("dotas")) dotasFlag = true;
+      if (normalizedName.includes("charity") && amt > 0) charityIncome += amt;
+      if (normalizedName.includes("royalty") && amt > 0) royaltyIncome += amt;
+      if (normalizedName.includes("northern ireland")) niTradingFlag = true;
 
-      if (accountName === R_AND_D_GRANTS_ACCOUNT) {
-        if (amt > 0) {
-          rAndDGrants += amt;
-        }
-      }
+      // --- CT profit classification ---
+      if (CT_MAP.ignore.includes(normalizedName)) return;
 
-      // --- Other supplements (simple, conservative detection) ---
-      const lowerName = accountName.toLowerCase();
-
-      // CT600J — DOTAS (placeholder: any account explicitly named DOTAS)
-      if (lowerName.includes("dotas")) {
-        dotasFlag = true;
-      }
-
-      // CT600F — Charity (placeholder: any account containing "charity")
-      if (lowerName.includes("charity")) {
-        if (amt > 0) charityIncome += amt;
-      }
-
-      // CT600M — Royalties (placeholder: any account containing "royalty")
-      if (lowerName.includes("royalty")) {
-        if (amt > 0) royaltyIncome += amt;
-      }
-
-      // CT600N — NI trading (placeholder: any account containing "northern ireland")
-      if (lowerName.includes("northern ireland")) {
-        niTradingFlag = true;
-      }
-
-      // 1. Ignore system accounts for CT profit computation
-      const normalizedName = accountName.trim().toLowerCase();
-if (CT_MAP.ignore.includes(normalizedName)) return;
-
-
-      // 2. Trading revenue (Sales + Other Income)
-      if (CT_MAP.revenue.includes(accountName)) {
+      if (CT_MAP.revenue.includes(normalizedName)) {
         turnover += amt;
         return;
       }
-
-      // 3. Non‑trading income (Asset Sale Proceeds, Grants, Refunds)
-      if (CT_MAP.other_income.includes(accountName)) {
+      if (CT_MAP.other_income.includes(normalizedName)) {
         nonTradingIncome += amt;
         return;
       }
-
-      // 4. Capital allowances (qualifying asset purchases → pools)
       const pool = CAPITAL_ALLOWANCE_POOLS[accountName];
       if (pool) {
         const debit = Math.max(amt, 0);
@@ -553,25 +518,18 @@ if (CT_MAP.ignore.includes(normalizedName)) return;
         if (pool === "cars") carsPoolAdditions += debit;
         return;
       }
-
-      // 5. Allowable expenses
-      if (CT_MAP.allowable.includes(accountName)) {
+      if (CT_MAP.allowable.includes(normalizedName)) {
         allowableExpenses += Math.max(amt, 0);
         return;
       }
-
-      // 6. Disallowable expenses
-      if (CT_MAP.disallowable.includes(accountName)) {
+      if (CT_MAP.disallowable.includes(normalizedName)) {
         disallowableExpenses += Math.max(amt, 0);
         return;
       }
-
-      // 7. Everything else is ignored for CT
-      return;
     });
   });
 
-  // Capital allowance pools from DB
+  // Capital allowance pools
   const mainPoolBF = corpSubmission?.ca_main_pool_bf || 0;
   const specialPoolBF = corpSubmission?.ca_special_pool_bf || 0;
   const carsPoolBF = corpSubmission?.ca_cars_pool_bf || 0;
@@ -581,107 +539,82 @@ if (CT_MAP.ignore.includes(normalizedName)) return;
   const specialPoolBeforeWDA = specialPoolBF + specialPoolAdditions;
   const carsPoolBeforeWDA = carsPoolBF + carsPoolAdditions;
 
-  const mainWDA =
-    mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
-  const specialWDA =
-    specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
-  const carsWDA =
-    carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
+  const mainWDA = mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
+  const specialWDA = specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
+  const carsWDA = carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
 
-  const totalCapitalAllowances =
-    aiaClaimed + mainWDA + specialWDA + carsWDA;
-
-  const mainPoolCF = mainPoolBeforeWDA - mainWDA;
-  const specialPoolCF = specialPoolBeforeWDA - specialWDA;
-  const carsPoolCF = carsPoolBeforeWDA - carsWDA;
+  const totalCapitalAllowances = aiaClaimed + mainWDA + specialWDA + carsWDA;
 
   capitalAllowances = totalCapitalAllowances;
-// Engine profit BEFORE tax capital allowances
-const computedProfitBeforeCA =
-  turnover +
-  nonTradingIncome -
-  allowableExpenses +
-  disallowableExpenses;
 
-// Apply tax capital allowances
-const computedProfit =
-  computedProfitBeforeCA - capitalAllowances;
+  // Profit before capital allowances
+  const computedProfitBeforeCA =
+    turnover + nonTradingIncome - allowableExpenses + disallowableExpenses;
 
-// Base profit (can be overridden by corpSubmission)
-const baseProfit =
-  corpSubmission && corpSubmission.profit_before_tax != null
-    ? corpSubmission.profit_before_tax
-    : computedProfit;
+  // Apply capital allowances
+  const computedProfit = computedProfitBeforeCA - capitalAllowances;
 
-// Clamp current period loss
-const currentPeriodLoss =
-  baseProfit < 0 ? Math.abs(baseProfit) : 0;
+  const baseProfit =
+    corpSubmission?.profit_before_tax != null
+      ? corpSubmission.profit_before_tax
+      : computedProfit;
 
-// Manual tax adjustments
-const lossCarryback = corpSubmission && corpSubmission.loss_carryback ? corpSubmission.loss_carryback : 0;
-const groupRelief = corpSubmission && corpSubmission.group_relief ? corpSubmission.group_relief : 0;
+  const currentPeriodLoss = baseProfit < 0 ? Math.abs(baseProfit) : 0;
+  const lossCarryback = corpSubmission?.loss_carryback || 0;
+  const groupRelief = corpSubmission?.group_relief || 0;
 
-/* ---------------------------------------------------------------------- */
-/*                         CT600L / R&D ENGINE                            */
-/* ---------------------------------------------------------------------- */
+  /* -------------------------- R&D Engine -------------------------- */
+  const autoRAndDMultiplier =
+    corpSubmission?.r_and_d_multiplier && corpSubmission.r_and_d_multiplier > 0
+      ? corpSubmission.r_and_d_multiplier
+      : DEFAULT_R_AND_D_SME_MULTIPLIER;
 
-// Automatic SME multiplier (fallback to default if not set)
-const autoRAndDMultiplier =
-  corpSubmission && corpSubmission.r_and_d_multiplier != null && corpSubmission.r_and_d_multiplier > 0
-    ? corpSubmission.r_and_d_multiplier
-    : DEFAULT_R_AND_D_SME_MULTIPLIER;
+  const autoTotalRAndDSpend = rAndDSmeSpend;
+  const autoRAndDGrants = rAndDGrants;
 
-// Journal-driven R&D totals
-const autoTotalRAndDSpend = rAndDSmeSpend;
-const autoRAndDGrants = rAndDGrants;
+  if (autoRAndDGrants > autoTotalRAndDSpend) {
+    console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
+  }
 
-// SME qualifying spend = R&D spend minus grants (cannot go below zero)
-const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
-const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
+  const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
+  const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
 
-// Simple RDEC: treat grants as RDEC-qualifying base
-const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
-const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
+  const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
+  const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
-// For now, we keep SME payable credit and surrendered loss at 0
-const autoSmePayableCredit = 0;
-const autoSurrenderedLoss = 0;
+  const autoSmePayableCredit = 0;
+  const autoSurrenderedLoss = 0;
 
-// Manual override flags and values from corp_submissions
-const overrideEnabled = corpSubmission && corpSubmission.r_and_d_override_enabled ? corpSubmission.r_and_d_override_enabled : false;
-const overrideSmeEnhancedDeduction = corpSubmission && corpSubmission.r_and_d_override_sme_enhanced_deduction ? corpSubmission.r_and_d_override_sme_enhanced_deduction : 0;
-const overrideSmePayableCredit = corpSubmission && corpSubmission.r_and_d_override_sme_payable_credit ? corpSubmission.r_and_d_override_sme_payable_credit : 0;
-const overrideRdecCredit = corpSubmission && corpSubmission.r_and_d_override_rdec_credit ? corpSubmission.r_and_d_override_rdec_credit : 0;
-const overrideSurrenderedLoss = corpSubmission && corpSubmission.r_and_d_override_surrendered_loss ? corpSubmission.r_and_d_override_surrendered_loss : 0;
+  const overrideEnabled = corpSubmission?.r_and_d_override_enabled || false;
+  const overrideSmeEnhancedDeduction = corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
+  const overrideSmePayableCredit = corpSubmission?.r_and_d_override_sme_payable_credit || 0;
+  const overrideRdecCredit = corpSubmission?.r_and_d_override_rdec_credit || 0;
+  const overrideSurrenderedLoss = corpSubmission?.r_and_d_override_surrendered_loss || 0;
 
-// Final R&D values after considering overrides
-const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
-const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
-const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
-const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
+  const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
+  const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
+  const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
+  const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
 
-// For backward compatibility with existing fields
-const rAndDSpend = autoTotalRAndDSpend;
-const rAndDMultiplier = autoRAndDMultiplier;
-const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
+  const rAndDSpend = autoTotalRAndDSpend;
+  const rAndDMultiplier = autoRAndDMultiplier;
+  const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
 
-// Taxable profit (clamped to >= 0)
-const taxableProfit = Math.max(
-  baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
-  0
-);
+  const taxableProfit = Math.max(
+    baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
+    0
+  );
 
-const associatedCompanies = corpSubmission && corpSubmission.associated_companies_count
-  ? corpSubmission.associated_companies_count
-  : 0;
+  const associatedCompanies = corpSubmission?.associated_companies_count || 0;
+  const taxRate =
+    corpSubmission?.corp_tax_rate != null
+      ? corpSubmission.corp_tax_rate
+      : computeCorpTaxRate(taxableProfit, associatedCompanies);
 
-const taxRate = corpSubmission && corpSubmission.corp_tax_rate != null
-  ? corpSubmission.corp_tax_rate
-  : computeCorpTaxRate(taxableProfit, associatedCompanies);
-
-const corpTaxDue = corpSubmission && corpSubmission.corp_tax_due != null
-  ? corpSubmission.corp_tax_due
-  : taxableProfit * taxRate;
+  const corpTaxDue =
+    corpSubmission?.corp_tax_due != null
+      ? corpSubmission.corp_tax_due
+      : taxableProfit * taxRate;
 
 const paymentsMade = sumBy(ctPayments || [], "amount");
 const balanceDue = corpTaxDue - paymentsMade;
