@@ -971,26 +971,6 @@ async function loadCISJournals(clientId, periodStart, periodEnd) {
   return data || [];
 }
 
-/* --------------------------- Shared helpers ------------------------------- */
-
-function amountFromLine(line) {
-  const type =
-    (line.chart_of_account_entries &&
-      line.chart_of_account_entries.account_type) ||
-    null;
-  const debit = Number(line.debit || 0);
-  const credit = Number(line.credit || 0);
-
-  if (type === "INCOME") {
-    return credit - debit;
-  }
-
-  if (type === "EXPENSE") {
-    return debit - credit;
-  }
-
-  return debit - credit;
-}
 
 //* -------------------------- SA103 (Self-Employment) ----------------------- */
 
