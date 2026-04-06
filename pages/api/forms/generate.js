@@ -83,6 +83,14 @@ export default async function handler(req, res) {
         message: "Missing client, formCode, or period range.",
       });
     }
+    const validCodes = [
+  "CT600","CT600N","SA100","SA103","SA105","SA110",
+  "CIS300","CIS_STATEMENT","FRS105","FRS102_1A"
+];
+if (!validCodes.includes(formCode)) {
+  return res.status(400).json({ success: false, message: "Unsupported form code." });
+}
+
 
     const periodStartDate = new Date(periodStart);
     const periodEndDate = new Date(periodEnd);
@@ -1685,6 +1693,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       const debit = Number(line.debit || 0);
       const credit = Number(line.credit || 0);
       const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
+
 
       if (type === "asset") totalAssets += debit - credit;
       if (type === "liability") totalLiabilities += credit - debit;
