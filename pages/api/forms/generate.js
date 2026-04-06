@@ -165,10 +165,15 @@ export default async function handler(req, res) {
     periodEnd
   );
 } else if (formCode.startsWith("FRS")) {
-  // For now, Accounts formData comes directly from the request body
-  // or defaults to an empty object.
-  formData = req.body.formData || {};
-} else {
+  formData = await buildAccountsFormData(
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd
+  );
+}
+
+else {
   return res
     .status(400)
     .json({ success: false, message: "Unsupported form code." });
@@ -427,7 +432,7 @@ async function buildCTFormData(
   let disallowableExpenses = 0;
 
   // Capital allowance tracking
-  let capitalAllowances;
+  let capitalAllowances = 0;
   let mainPoolAdditions = 0;
   let specialPoolAdditions = 0;
   let carsPoolAdditions = 0;
@@ -580,141 +585,110 @@ async function buildCTFormData(
   const carsPoolCF = carsPoolBeforeWDA - carsWDA;
 
   capitalAllowances = totalCapitalAllowances;
+// Engine profit BEFORE tax capital allowances
+const computedProfitBeforeCA =
+  turnover +
+  nonTradingIncome -
+  allowableExpenses +
+  disallowableExpenses;
 
-  // Engine profit BEFORE tax capital allowances
-  const computedProfitBeforeCA =
-    turnover +
-    nonTradingIncome -
-    allowableExpenses -
-    disallowableExpenses;
+// Apply tax capital allowances
+const computedProfit =
+  computedProfitBeforeCA - capitalAllowances;
 
-  // Apply tax capital allowances
-  const computedProfit =
-    computedProfitBeforeCA - capitalAllowances;
+// Base profit (can be overridden by corpSubmission)
+const baseProfit =
+  corpSubmission && corpSubmission.profit_before_tax != null
+    ? corpSubmission.profit_before_tax
+    : computedProfit;
 
-  // Base profit (can be overridden by corpSubmission)
-  const baseProfit =
-    corpSubmission?.profit_before_tax != null
-      ? corpSubmission.profit_before_tax
-      : computedProfit;
+// Clamp current period loss
+const currentPeriodLoss =
+  baseProfit < 0 ? Math.abs(baseProfit) : 0;
 
-  const currentPeriodLoss =
-    baseProfit < 0 ? Math.abs(baseProfit) : 0;
+// Manual tax adjustments
+const lossCarryback = corpSubmission && corpSubmission.loss_carryback ? corpSubmission.loss_carryback : 0;
+const groupRelief = corpSubmission && corpSubmission.group_relief ? corpSubmission.group_relief : 0;
 
-  // Manual tax adjustments
-  const lossCarryback = corpSubmission?.loss_carryback || 0;
-  const groupRelief = corpSubmission?.group_relief || 0;
+/* ---------------------------------------------------------------------- */
+/*                         CT600L / R&D ENGINE                            */
+/* ---------------------------------------------------------------------- */
 
-  /* ---------------------------------------------------------------------- */
-  /*                         CT600L / R&D ENGINE                            */
-  /* ---------------------------------------------------------------------- */
+// Automatic SME multiplier (fallback to default if not set)
+const autoRAndDMultiplier =
+  corpSubmission && corpSubmission.r_and_d_multiplier != null && corpSubmission.r_and_d_multiplier > 0
+    ? corpSubmission.r_and_d_multiplier
+    : DEFAULT_R_AND_D_SME_MULTIPLIER;
 
-  // Automatic SME multiplier (fallback to default if not set)
-  const autoRAndDMultiplier =
-    corpSubmission?.r_and_d_multiplier != null &&
-    corpSubmission.r_and_d_multiplier > 0
-      ? corpSubmission.r_and_d_multiplier
-      : DEFAULT_R_AND_D_SME_MULTIPLIER;
+// Journal-driven R&D totals
+const autoTotalRAndDSpend = rAndDSmeSpend;
+const autoRAndDGrants = rAndDGrants;
 
-  // Journal-driven R&D totals
-  const autoTotalRAndDSpend = rAndDSmeSpend;
-  const autoRAndDGrants = rAndDGrants;
+// SME qualifying spend = R&D spend minus grants (cannot go below zero)
+const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
+const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
 
-  // SME qualifying spend = R&D spend minus grants (cannot go below zero)
-  const autoSmeQualifyingSpend = Math.max(
-    autoTotalRAndDSpend - autoRAndDGrants,
-    0
-  );
+// Simple RDEC: treat grants as RDEC-qualifying base
+const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
+const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
-  const autoSmeEnhancedDeduction =
-    autoSmeQualifyingSpend * autoRAndDMultiplier;
+// For now, we keep SME payable credit and surrendered loss at 0
+const autoSmePayableCredit = 0;
+const autoSurrenderedLoss = 0;
 
-  // Simple RDEC: treat grants as RDEC-qualifying base
-  const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
-  const autoRdecCredit =
-    autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
+// Manual override flags and values from corp_submissions
+const overrideEnabled = corpSubmission && corpSubmission.r_and_d_override_enabled ? corpSubmission.r_and_d_override_enabled : false;
+const overrideSmeEnhancedDeduction = corpSubmission && corpSubmission.r_and_d_override_sme_enhanced_deduction ? corpSubmission.r_and_d_override_sme_enhanced_deduction : 0;
+const overrideSmePayableCredit = corpSubmission && corpSubmission.r_and_d_override_sme_payable_credit ? corpSubmission.r_and_d_override_sme_payable_credit : 0;
+const overrideRdecCredit = corpSubmission && corpSubmission.r_and_d_override_rdec_credit ? corpSubmission.r_and_d_override_rdec_credit : 0;
+const overrideSurrenderedLoss = corpSubmission && corpSubmission.r_and_d_override_surrendered_loss ? corpSubmission.r_and_d_override_surrendered_loss : 0;
 
-  // For now, we keep SME payable credit and surrendered loss at 0
-  const autoSmePayableCredit = 0;
-  const autoSurrenderedLoss = 0;
+// Final R&D values after considering overrides
+const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
+const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
+const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
+const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
 
-  // Manual override flags and values from corp_submissions
-  const overrideEnabled =
-    corpSubmission?.r_and_d_override_enabled || false;
+// For backward compatibility with existing fields
+const rAndDSpend = autoTotalRAndDSpend;
+const rAndDMultiplier = autoRAndDMultiplier;
+const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
 
-  const overrideSmeEnhancedDeduction =
-    corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
+// Taxable profit (clamped to >= 0)
+const taxableProfit = Math.max(
+  baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
+  0
+);
 
-  const overrideSmePayableCredit =
-    corpSubmission?.r_and_d_override_sme_payable_credit || 0;
+const associatedCompanies = corpSubmission && corpSubmission.associated_companies_count
+  ? corpSubmission.associated_companies_count
+  : 0;
 
-  const overrideRdecCredit =
-    corpSubmission?.r_and_d_override_rdec_credit || 0;
+const taxRate = corpSubmission && corpSubmission.corp_tax_rate != null
+  ? corpSubmission.corp_tax_rate
+  : computeCorpTaxRate(taxableProfit, associatedCompanies);
 
-  const overrideSurrenderedLoss =
-    corpSubmission?.r_and_d_override_surrendered_loss || 0;
+const corpTaxDue = corpSubmission && corpSubmission.corp_tax_due != null
+  ? corpSubmission.corp_tax_due
+  : taxableProfit * taxRate;
 
-  // Final R&D values after considering overrides
-  const finalSmeEnhancedDeduction = overrideEnabled
-    ? overrideSmeEnhancedDeduction
-    : autoSmeEnhancedDeduction;
+const paymentsMade = sumBy(ctPayments || [], "amount");
+const balanceDue = corpTaxDue - paymentsMade;
 
-  const finalSmePayableCredit = overrideEnabled
-    ? overrideSmePayableCredit
-    : autoSmePayableCredit;
+// Derived total loans to participators from journals if not explicitly stored
+const derivedTotalLoans = dlaLoansAdvanced - dlaLoansRepaid;
 
-  const finalRdecCredit = overrideEnabled
-    ? overrideRdecCredit
-    : autoRdecCredit;
+// Supplement detection (engine-wide, journal-driven)
+const ct600ARequired =
+  (corpSubmission && corpSubmission.loans_to_participators != null
+    ? corpSubmission.loans_to_participators
+    : derivedTotalLoans) !== 0;
 
-  const finalSurrenderedLoss = overrideEnabled
-    ? overrideSurrenderedLoss
-    : autoSurrenderedLoss;
-
-  // For backward compatibility with existing fields
-  const rAndDSpend = autoTotalRAndDSpend;
-  const rAndDMultiplier = autoRAndDMultiplier;
-  const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
-
-  // Taxable profit after adjustments (R&D enhanced deduction only)
-  const taxableProfit =
-    baseProfit -
-    lossCarryback -
-    groupRelief -
-    rAndDEnhancedRelief;
-
-  const associatedCompanies =
-    corpSubmission?.associated_companies_count || 0;
-
-  const taxRate =
-    corpSubmission?.corp_tax_rate != null
-      ? corpSubmission.corp_tax_rate
-      : computeCorpTaxRate(taxableProfit, associatedCompanies);
-
-  const corpTaxDue =
-    corpSubmission?.corp_tax_due != null
-      ? corpSubmission.corp_tax_due
-      : taxableProfit * taxRate;
-
-  const paymentsMade = sumBy(ctPayments || [], "amount");
-  const balanceDue = corpTaxDue - paymentsMade;
-
-  // Derived total loans to participators from journals if not explicitly stored
-  const derivedTotalLoans =
-    dlaLoansAdvanced - dlaLoansRepaid;
-
-  // Supplement detection (engine-wide, journal-driven)
-  const ct600ARequired =
-    (corpSubmission?.loans_to_participators != null
-      ? corpSubmission.loans_to_participators
-      : derivedTotalLoans) !== 0;
-
-  const ct600LRequired = rAndDSpend > 0;
-
-  const ct600JRequired = dotasFlag;
-  const ct600FRequired = charityIncome > 0;
-  const ct600MRequired = royaltyIncome > 0;
-  const ct600NRequired = niTradingFlag;
+const ct600LRequired = rAndDSpend > 0;
+const ct600JRequired = dotasFlag;
+const ct600FRequired = charityIncome > 0;
+const ct600MRequired = royaltyIncome > 0;
+const ct600NRequired = niTradingFlag;
 
   return {
   summary: {
@@ -1710,7 +1684,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     (j.journal_lines || []).forEach(line => {
       const debit = Number(line.debit || 0);
       const credit = Number(line.credit || 0);
-      const type = line.chart_of_account_entries?.account_type || "";
+      const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
 
       if (type === "asset") totalAssets += debit - credit;
       if (type === "liability") totalLiabilities += credit - debit;
