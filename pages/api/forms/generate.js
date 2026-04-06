@@ -550,6 +550,11 @@ async function buildCTFormData(
   const carsWDA = carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
 
   const totalCapitalAllowances = aiaClaimed + mainWDA + specialWDA + carsWDA;
+  // Define carried forward balances for each pool
+const mainPoolCF = mainPoolBeforeWDA - mainWDA;
+const specialPoolCF = specialPoolBeforeWDA - specialWDA;
+const carsPoolCF = carsPoolBeforeWDA - carsWDA;
+
 
   capitalAllowances = totalCapitalAllowances;
 
