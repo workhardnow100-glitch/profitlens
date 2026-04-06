@@ -391,7 +391,7 @@ function computeCorpTaxRate(profit, associatedCompanies) {
   return effectiveRate;
 }
 
-/* -------------------------------------------------------------------------- */
+/-------------------------------------------------------------------------- */
 /*                               CT600 BUILDER                                */
 /* -------------------------------------------------------------------------- */
 
@@ -400,7 +400,7 @@ async function buildCTFormData(
   client,
   clientId,
   periodStart,
-  periodEnd
+  periodEnd,
 ) {
   const { data: corpSubmission } = await supabaseAdmin
     .from("corp_submissions")
@@ -1675,22 +1675,89 @@ if (formCode === "CIS_STATEMENT") {
   });
 }
 
-// ---------------- ACCOUNTS FAMILY ----------------
+// ---------------- ACCOUNTS BUILDER ----------------
+async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
+  const { data: journals, error } = await supabaseAdmin
+    .from("journal_entries")
+    .select(`
+      id,
+      date,
+      journal_lines (
+        debit,
+        credit,
+        chart_of_account_entries (
+          account_name,
+          account_type
+        )
+      )
+    `)
+    .eq("client_id", clientId)
+    .gte("date", periodStart)
+    .lte("date", periodEnd);
 
+  if (error) {
+    console.error("Error loading Accounts journals:", error);
+    return { overview: { totals: {} }, overviewPrior: { totals: {} } };
+  }
+
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let totalEquity = 0;
+
+  (journals || []).forEach(j => {
+    (j.journal_lines || []).forEach(line => {
+      const debit = Number(line.debit || 0);
+      const credit = Number(line.credit || 0);
+      const type = line.chart_of_account_entries?.account_type || "";
+
+      if (type === "asset") totalAssets += debit - credit;
+      if (type === "liability") totalLiabilities += credit - debit;
+      if (type === "equity") totalEquity += credit - debit;
+    });
+  });
+
+  return {
+    overview: {
+      totals: {
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        total_equity: totalEquity,
+      },
+    },
+    overviewPrior: {
+      totals: {
+        total_assets: 0,
+        total_liabilities: 0,
+        total_equity: 0,
+      },
+    },
+    notes: {},
+    directorApproval: {},
+  };
+}
+
+// ---------------- HANDLER ----------------
+if (formCode.startsWith("FRS")) {
+  formData = await buildAccountsFormData(
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd
+  );
+}
+
+// ---------------- PDF GENERATION ----------------
 if (formCode === "FRS105") {
   return await generateFrs105AccountsPdf({
-    clientId,
+    clientId: resolvedClientId,
     year,
     periodStart,
     periodEnd,
     filename,
-    createdBy,
-    companyDetails,
-
-    // Pass full API responses, not sliced balance sheets
-    overview: formData.overview,            // ✅ includes totals
-    overviewPrior: formData.overviewPrior,  // ✅ prior year JSON (or safe default)
-
+    createdBy: session.user.email || "system",
+    companyDetails: client,
+    overview: formData.overview,
+    overviewPrior: formData.overviewPrior,
     notes: formData.notes || {},
     directorApproval: formData.directorApproval || {},
     framework: "FRS105",
@@ -1699,22 +1766,21 @@ if (formCode === "FRS105") {
 
 if (formCode === "FRS102_1A") {
   return await generateFrs1021aAccountsPdf({
-    clientId,
+    clientId: resolvedClientId,
     year,
     periodStart,
     periodEnd,
     filename,
-    createdBy,
-    companyDetails,
-
-    overview: formData.overview,            // ✅ includes totals
-    overviewPrior: formData.overviewPrior,  // ✅ prior year JSON (or safe default)
-
+    createdBy: session.user.email || "system",
+    companyDetails: client,
+    overview: formData.overview,
+    overviewPrior: formData.overviewPrior,
     notes: formData.notes || {},
     directorApproval: formData.directorApproval || {},
     framework: "FRS102_1A",
   });
 }
+
 
 throw new Error("No PDF template configured for formCode: " + formCode);
 
