@@ -1047,14 +1047,13 @@ function amountFromLine(line) {
   return debit - credit;
 }
 
-/* -------------------------- SA103 (Self-Employment) ----------------------- */
+//* -------------------------- SA103 (Self-Employment) ----------------------- */
 
 function buildSA103FromJournals(saSubmission, client, journals) {
   let turnover = 0;
   let allowable = 0;
   let disallowable = 0;
   let capitalAllowances = 0;
-
   let adjustments = 0;
 
   (journals || []).forEach((j) => {
@@ -1092,56 +1091,62 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   const allowableExpenses = Math.max(allowable, 0);
   const disallowableExpenses = Math.max(disallowable, 0);
 
-  const rawProfit = turnover - allowableExpenses + disallowableExpenses - capitalAllowances + adjustments;
-
+  // ✅ Correct tax profit formula
+  const rawProfit =
+    turnover -
+    allowableExpenses +
+    disallowableExpenses -
+    capitalAllowances +
+    adjustments;
 
   const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
   const lossBF = (saSubmission && saSubmission.loss_bf) || 0;
   const lossCF =
-    (saSubmission && saSubmission.loss_cf) ||
-    (rawProfit < 0 ? Math.abs(rawProfit) : 0);
+    saSubmission && saSubmission.loss_cf != null
+      ? saSubmission.loss_cf
+      : lossBF + currentPeriodLoss;
 
   const usingSimplifiedExpenses =
     (saSubmission && saSubmission.using_simplified_expenses) || false;
 
+  // If simplified expenses are used, override allowableExpenses
+  const effectiveAllowableExpenses = usingSimplifiedExpenses
+    ? (saSubmission && saSubmission.simplified_expense_amount) || allowableExpenses
+    : allowableExpenses;
+
   const class2NIC =
-    (saSubmission && saSubmission.class2_nic) != null
+    saSubmission && saSubmission.class2_nic != null
       ? saSubmission.class2_nic
       : 0;
   const class4NIC =
-    (saSubmission && saSubmission.class4_nic) != null
+    saSubmission && saSubmission.class4_nic != null
       ? saSubmission.class4_nic
       : 0;
 
   return {
-  summary: {
-    businessName: client?.trading_name || client?.name || "",
-    turnover,
-    allowableExpenses,
-    disallowableExpenses,
-    netProfit: rawProfit,
-  },
-  turnover: { totalTurnover: turnover },
-  allowableExpenses: { totalAllowableExpenses: allowableExpenses },
-  disallowableExpenses: { totalDisallowableExpenses: disallowableExpenses },
-  capitalAllowances: {
-    totalCapitalAllowances: capitalAllowances,
-  },
-  simplifiedExpenses: {
-    usingSimplifiedExpenses,
-  },
-  adjustments: {
-    adjustmentsTotal: adjustments,
-  },
-  losses: {
-    currentPeriodLoss,
-    broughtForward: lossBF,
-    carriedForward: lossCF,
-  },
-  class2NIC: { class2NIC },
-  class4NIC: { class4NIC },
-};
+    summary: {
+      businessName: client?.trading_name || client?.name || "",
+      turnover,
+      allowableExpenses: effectiveAllowableExpenses,
+      disallowableExpenses,
+      netProfit: rawProfit,
+    },
+    turnover: { totalTurnover: turnover },
+    allowableExpenses: { totalAllowableExpenses: effectiveAllowableExpenses },
+    disallowableExpenses: { totalDisallowableExpenses: disallowableExpenses },
+    capitalAllowances: { totalCapitalAllowances: capitalAllowances },
+    simplifiedExpenses: { usingSimplifiedExpenses },
+    adjustments: { adjustmentsTotal: adjustments },
+    losses: {
+      currentPeriodLoss,
+      broughtForward: lossBF,
+      carriedForward: lossCF,
+    },
+    class2NIC: { class2NIC },
+    class4NIC: { class4NIC },
+  };
 }
+
 
 /* ----------------------------- SA105 (Property) --------------------------- */
 
