@@ -409,7 +409,13 @@ function computeCorpTaxRate(profit, associatedCompanies) {
 
 // Utility: define once at top, not inside loop
 function amountFromLine(line) {
-  return Number(line.debit || 0) - Number(line.credit || 0);
+  const type = line.chart_of_account_entries?.account_type || null;
+  const debit = Number(line.debit || 0);
+  const credit = Number(line.credit || 0);
+
+  if (type === "INCOME") return credit - debit;
+  if (type === "EXPENSE") return debit - credit;
+  return debit - credit;
 }
 
 async function buildCTFormData(
