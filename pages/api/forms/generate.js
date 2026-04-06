@@ -363,7 +363,8 @@ const DEFAULT_R_AND_D_RDEC_RATE = 0.2; // 20% RDEC rate (example)
 
 function computeCorpTaxRate(profit, associatedCompanies) {
   // Ensure at least 1 company for threshold scaling
-  const n = Math.max(1, (associatedCompanies || 0) + 1);
+  const n = Math.max(1, associatedCompanies || 1);
+
 
   const lowerLimit = 50000 / n;
   const upperLimit = 250000 / n;
@@ -1067,7 +1068,8 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   let turnover = 0;
   let allowable = 0;
   let disallowable = 0;
-  let capitalAllowances;
+  let capitalAllowances = 0;
+
   let adjustments = 0;
 
   (journals || []).forEach((j) => {
@@ -1741,12 +1743,12 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 // ---------------- PDF GENERATION ----------------
 if (formCode === "FRS105") {
   return await generateFrs105AccountsPdf({
-    clientId: resolvedClientId,
+    clientId,
     year,
     periodStart,
     periodEnd,
     filename,
-    createdBy: session.user.email || "system",
+    createdBy,
     companyDetails: client,
     overview: formData.overview,
     overviewPrior: formData.overviewPrior,
@@ -1758,12 +1760,12 @@ if (formCode === "FRS105") {
 
 if (formCode === "FRS102_1A") {
   return await generateFrs1021aAccountsPdf({
-    clientId: resolvedClientId,
+    clientId,
     year,
     periodStart,
     periodEnd,
     filename,
-    createdBy: session.user.email || "system",
+    createdBy,
     companyDetails: client,
     overview: formData.overview,
     overviewPrior: formData.overviewPrior,
