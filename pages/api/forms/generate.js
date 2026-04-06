@@ -1736,15 +1736,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   };
 }
 
-// ---------------- HANDLER ----------------
-if (formCode.startsWith("FRS")) {
-  formData = await buildAccountsFormData(
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd
-  );
-}
+
 
 // ---------------- PDF GENERATION ----------------
 if (formCode === "FRS105") {
