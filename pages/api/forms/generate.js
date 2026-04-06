@@ -1142,11 +1142,12 @@ function buildSA105FromJournals(saSubmission, journals) {
 
   // Core property profit: allowable expenses + capital allowances + losses reduce profit
   const propertyExpenses = Math.max(propertyAllowable, 0);
-  const propertyProfit =
-    rentalIncome -
-    propertyExpenses -
-    Math.max(propertyCapitalAllowances, 0) -
-    Math.max(propertyLosses, 0);
+const propertyProfit =
+  rentalIncome - propertyExpenses - Math.max(propertyCapitalAllowances, 0) - Math.max(propertyLosses, 0);
+
+// Mortgage interest is a tax credit, not an expense
+const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
+
 
   // FHL net profit
   const fhlProfit = fhlIncome - Math.max(fhlExpenses, 0);
@@ -1157,8 +1158,7 @@ function buildSA105FromJournals(saSubmission, journals) {
     netRentARoom -= 7500;
   }
 
-  // Mortgage interest is not deductible — treat as 20% tax credit
-  const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
+
 
   return {
     property: {
