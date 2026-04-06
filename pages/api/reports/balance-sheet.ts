@@ -18,13 +18,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 🔥 Unified engine: journals + full reporting engine
-    const unified = await getUnifiedBalanceSheet(clientId);
+    const year = req.query.year ? Number(req.query.year) : new Date().getFullYear();
+
+    const current = await getUnifiedBalanceSheet(clientId, year);
+    const prior = await getUnifiedBalanceSheet(clientId, year - 1);
 
     return res.status(200).json({
-      assets: unified.assets,
-      liabilities: unified.liabilities,
-      equity: unified.equity,
-      totals: unified.totals,
+      current,
+      prior,
     });
 
   } catch (err) {

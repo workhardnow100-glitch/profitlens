@@ -1,4 +1,3 @@
-// lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
 
 console.log("🔥 USING UNIFIED JOURNAL-DRIVEN ACCOUNTING ENGINE");
@@ -68,18 +67,18 @@ export type CashFlowResult = {
 };
 
 // ------------------------------------------------------------
-// CORE: pull all journal lines for a client
-// via journal_entries (client_id) + COA join
+// CORE: pull all journal lines for a client, optionally by year
 // ------------------------------------------------------------
-async function getJournalLines(clientId: string) {
-  const { data, error } = await supabaseAdmin
+async function getJournalLines(clientId: string, year?: number) {
+  let query = supabaseAdmin
     .from("journal_lines")
     .select(`
       debit,
       credit,
       account_id,
       journal_entries!inner (
-        client_id
+        client_id,
+        date
       ),
       chart_of_account_entries:account_id (
         account_code,
@@ -90,6 +89,13 @@ async function getJournalLines(clientId: string) {
     `)
     .eq("journal_entries.client_id", clientId);
 
+  if (year) {
+    query = query
+      .gte("journal_entries.date", `${year}-01-01`)
+      .lte("journal_entries.date", `${year}-12-31`);
+  }
+
+  const { data, error } = await query;
   if (error || !data) {
     console.error("❌ Journal pull error:", error);
     return [];
@@ -138,12 +144,13 @@ function groupByAccount(lines: any[]): BSLine[] {
 }
 
 // ------------------------------------------------------------
-// BALANCE SHEET (journal-driven)
+// BALANCE SHEET (journal-driven, year-aware)
 // ------------------------------------------------------------
 export async function getUnifiedBalanceSheet(
-  clientId: string
+  clientId: string,
+  year?: number
 ): Promise<BSStructure> {
-  const lines = await getJournalLines(clientId);
+  const lines = await getJournalLines(clientId, year);
   if (!lines.length) return emptyStructure();
 
   const accounts = groupByAccount(lines);
@@ -185,15 +192,7 @@ function mapToStructure(rows: BSLine[]) {
     const isControl = type === "CONTROL" || bucket === "control";
     if (isSystem || isControl) continue;
 
-    // ---- ASSETS ----
-    const isAssetBucket =
-      bucket === "fixed_asset" ||
-      bucket === "current_asset" ||
-      bucket === "balance_sheet" ||
-      bucket === "assets" ||
-      bucket === "bank";
-
-    if (type === "ASSET" || type === "BANK" || isAssetBucket) {
+    if (type === "ASSET" || type === "BANK" || bucket === "fixed_asset" || bucket === "current_asset" || bucket === "balance_sheet" || bucket === "assets" || bucket === "bank") {
       if (bucket === "fixed_asset") {
         structure.assets.non_current.push(row);
       } else {
@@ -202,22 +201,16 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // ---- LIABILITIES ----
-    const isLiabilityBucket =
-      bucket === "liabilities" || bucket === "vat" || type === "VAT_CONTROL";
-
-    if (type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || isLiabilityBucket) {
+    if (type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || bucket === "liabilities" || bucket === "vat" || type === "VAT_CONTROL") {
       structure.liabilities.current.push(row);
       continue;
     }
 
-    // ---- EQUITY ----
     if (type === "EQUITY") {
       structure.equity.push(row);
       continue;
     }
 
-    // ---- P&L: INCOME + EXPENSE ----
     if (type === "INCOME" || type === "EXPENSE") {
       totalDebits += row.debit ?? 0;
       totalCredits += row.credit ?? 0;
@@ -225,9 +218,7 @@ function mapToStructure(rows: BSLine[]) {
     }
   }
 
-  // ---- CURRENT YEAR PROFIT (FULL P&L) ----
   const profit = totalCredits - totalDebits;
-
   structure.equity.push({
     account_code: "PROFIT",
     account_name: "Current Year Profit",
@@ -238,15 +229,10 @@ function mapToStructure(rows: BSLine[]) {
 }
 
 function computeTotals(structure: Omit<BSStructure, "totals">) {
-  const sum = (rows: BSLine[]) =>
-    rows.reduce((a, r) => a + Number(r.balance || 0), 0);
+  const sum = (rows: BSLine[]) => rows.reduce((a, r) => a + Number(r.balance || 0), 0);
 
-  const totalAssets =
-    sum(structure.assets.current) + sum(structure.assets.non_current);
-
-  const totalLiabilities =
-    sum(structure.liabilities.current) + sum(structure.liabilities.non_current);
-
+  const totalAssets = sum(structure.assets.current) + sum(structure.assets.non_current);
+  const totalLiabilities = sum(structure.liabilities.current) + sum(structure.liabilities.non_current);
   const totalEquity = sum(structure.equity);
 
   return {
@@ -258,53 +244,35 @@ function computeTotals(structure: Omit<BSStructure, "totals">) {
 }
 
 // ------------------------------------------------------------
-// TRIAL BALANCE (journal-driven)
+// TRIAL BALANCE (journal-driven, year-aware)
 // ------------------------------------------------------------
 export async function getUnifiedTrialBalance(
-  clientId: string
+  clientId: string,
+  year?: number
 ): Promise<TrialBalanceResult> {
-  const lines = await getJournalLines(clientId);
+  const lines = await getJournalLines(clientId, year);
   const accounts = groupByAccount(lines);
 
-  const summary = {
-    assets: 0,
-    liabilities: 0,
-    equity: 0,
-    income: 0,
-    expenses: 0,
-  };
+  const summary = { assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 };
 
   for (const acc of accounts) {
-    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet") {
-      summary.assets += acc.balance;
-    }
-    if (acc.account_type === "LIABILITY") {
-      summary.liabilities += acc.balance;
-    }
-    if (acc.account_type === "EQUITY") {
-      summary.equity += acc.balance;
-    }
-    if (acc.account_type === "INCOME") {
-      summary.income += acc.credit ?? 0;
-    }
-    if (acc.account_type === "EXPENSE") {
-      summary.expenses += acc.debit ?? 0;
-    }
+    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet") summary.assets += acc.balance;
+    if (acc.account_type === "LIABILITY") summary.liabilities += acc.balance;
+    if (acc.account_type === "EQUITY") summary.equity += acc.balance;
+    if (acc.account_type === "INCOME") summary.income += acc.credit ?? 0;
+    if (acc.account_type === "EXPENSE") summary.expenses += acc.debit ?? 0;
   }
 
-  return {
-    lines: accounts,
-    summary,
-  };
+  return { lines: accounts, summary };
 }
-
 // ------------------------------------------------------------
-// PROFIT & LOSS (journal-driven)
+// PROFIT & LOSS (journal-driven, year-aware)
 // ------------------------------------------------------------
 export async function getUnifiedProfitAndLoss(
-  clientId: string
+  clientId: string,
+  year?: number
 ): Promise<ProfitAndLossResult> {
-  const lines = await getJournalLines(clientId);
+  const lines = await getJournalLines(clientId, year);
   const accounts = groupByAccount(lines);
 
   const revenue = accounts
@@ -333,9 +301,10 @@ export async function getUnifiedProfitAndLoss(
 // DIRECTOR LOAN (journal-driven)
 // ------------------------------------------------------------
 export async function getUnifiedDirectorLoan(
-  clientId: string
+  clientId: string,
+  year?: number
 ): Promise<DirectorLoanResult> {
-  const lines = await getJournalLines(clientId);
+  const lines = await getJournalLines(clientId, year);
   const accounts = groupByAccount(lines);
 
   // Adjust this code to your actual Director Loan account code
@@ -351,9 +320,10 @@ export async function getUnifiedDirectorLoan(
 // CASH FLOW (journal-driven, simple version)
 // ------------------------------------------------------------
 export async function getUnifiedCashFlow(
-  clientId: string
+  clientId: string,
+  year?: number
 ): Promise<CashFlowResult> {
-  const lines = await getJournalLines(clientId);
+  const lines = await getJournalLines(clientId, year);
 
   const operating = lines
     .filter((l) => l.account_type === "EXPENSE" || l.account_type === "INCOME")
