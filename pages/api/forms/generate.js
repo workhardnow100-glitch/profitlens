@@ -575,8 +575,11 @@ async function buildCTFormData(
   if (autoRAndDGrants > autoTotalRAndDSpend) {
     console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
   }
+  if (autoRAndDGrants > autoTotalRAndDSpend) {
+  console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
+}
+const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
 
-  const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
   const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
 
   const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
@@ -1141,11 +1144,10 @@ function buildSA105FromJournals(saSubmission, journals) {
   });
 
   // Core property profit: allowable expenses + capital allowances + losses reduce profit
-  const propertyExpenses = Math.max(propertyAllowable, 0);
+const propertyExpenses = Math.max(propertyAllowable, 0);
 const propertyProfit =
   rentalIncome - propertyExpenses - Math.max(propertyCapitalAllowances, 0) - Math.max(propertyLosses, 0);
 
-// Mortgage interest is a tax credit, not an expense
 const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
 
 
