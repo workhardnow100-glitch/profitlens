@@ -1417,6 +1417,11 @@ let totalNonCurrentLiabilities = 0;
   const priorAssets = priorSubmission?.total_assets || 0;
   const priorLiabilities = priorSubmission?.total_liabilities || 0;
   const priorEquity = priorSubmission?.total_equity || 0;
+  const priorFixedAssets = priorSubmission?.fixed_assets || 0;
+const priorCurrentAssets = priorSubmission?.current_assets || 0;
+const priorCurrentLiabilities = priorSubmission?.current_liabilities || 0;
+const priorNonCurrentLiabilities = priorSubmission?.non_current_liabilities || 0;
+
 
   return {
   overview: {
