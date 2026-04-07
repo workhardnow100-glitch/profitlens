@@ -1344,6 +1344,7 @@ async function buildCISFormData(
 }
 // ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
+  // Current year journals
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
     .select(`
@@ -1383,37 +1384,52 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     });
   });
 
-  return {
-  overview: {
-    totals: {
-      total_assets: totalAssets,
-      total_liabilities: totalLiabilities,
-      total_equity: totalEquity,
-      capital_and_reserves: totalEquity, // map equity accounts here
-    },
-  },
-  overviewPrior: {
-    totals: {
-      total_assets: priorAssets,
-      total_liabilities: priorLiabilities,
-      total_equity: priorEquity,
-    },
-  },
-  notes: {
-    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-    employees: client?.employee_count || 0,
-    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-    debtors: client?.debtors_total || 0,
-    creditors: client?.creditors_total || 0,
-  },
-  directorApproval: {
-    approvedBy: client?.director_name || "Director",
-    approvalDate: new Date().toISOString().split("T")[0],
-    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-  },
-};
+  // Prior year comparatives (optional: pull from accounts_submissions)
+  const priorYearEnd = new Date(periodStart);
+  priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
 
+  const { data: priorSubmission } = await supabaseAdmin
+    .from("accounts_submissions")
+    .select("*")
+    .eq("client_id", clientId)
+    .eq("period_end", priorYearEnd.toISOString().split("T")[0])
+    .maybeSingle();
+
+  const priorAssets = priorSubmission?.total_assets || 0;
+  const priorLiabilities = priorSubmission?.total_liabilities || 0;
+  const priorEquity = priorSubmission?.total_equity || 0;
+
+  return {
+    overview: {
+      totals: {
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        total_equity: totalEquity,
+        capital_and_reserves: totalEquity, // equity mapping
+      },
+    },
+    overviewPrior: {
+      totals: {
+        total_assets: priorAssets,
+        total_liabilities: priorLiabilities,
+        total_equity: priorEquity,
+      },
+    },
+    notes: {
+      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+      employees: client?.employee_count || 0,
+      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+      debtors: client?.debtors_total || 0,
+      creditors: client?.creditors_total || 0,
+    },
+    directorApproval: {
+      approvedBy: client?.director_name || "Director",
+      approvalDate: new Date().toISOString().split("T")[0],
+      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+    },
+  };
 }
+
 
 
 
