@@ -44,7 +44,13 @@ const HMRC_BUCKET_LABELS = {
   equity: "Equity",
   vat: "VAT",
   control: "Control",
+  fixed_asset: "Fixed Asset",
+  fixed_asset_contra: "Fixed Asset Contra",
+  current_asset: "Current Asset",
+  current_liability: "Current Liability",
+  non_current_liability: "Non‑Current Liability",
 };
+
 
 export default function ChartOfAccounts() {
   const router = useRouter();
@@ -252,19 +258,28 @@ export default function ChartOfAccounts() {
                   value={filterBucket}
                   onChange={(e) => setFilterBucket(e.target.value)}
                 >
-                  <option value="ALL">All</option>
-                  <option value="income">Income (P&L)</option>
-                  <option value="allowable">Allowable (P&L)</option>
-                  <option value="disallowable">Disallowable (P&L)</option>
-                  <option value="ignore">Ignore</option>
-                  <option value="balance_sheet">Balance Sheet</option>
-                  <option value="assets">Assets</option>
-                  <option value="liabilities">Liabilities</option>
-                  <option value="equity">Equity</option>
-                  <option value="vat">VAT</option>
-                  <option value="control">Control</option>
-                  <option value="system">System</option>
-                </select>
+                  
+  <option value="ALL">All</option>
+  <option value="income">Income (P&L)</option>
+  <option value="allowable">Allowable (P&L)</option>
+  <option value="disallowable">Disallowable (P&L)</option>
+  <option value="ignore">Ignore</option>
+  <option value="balance_sheet">Balance Sheet</option>
+  <option value="assets">Assets</option>
+  <option value="liabilities">Liabilities</option>
+  <option value="equity">Equity</option>
+  <option value="vat">VAT</option>
+  <option value="control">Control</option>
+  <option value="system">System</option>
+
+  {/* New buckets */}
+  <option value="fixed_asset">Fixed Asset</option>
+  <option value="fixed_asset_contra">Fixed Asset Contra</option>
+  <option value="current_asset">Current Asset</option>
+  <option value="current_liability">Current Liability</option>
+  <option value="non_current_liability">Non‑Current Liability</option>
+</select>
+
               </div>
             </div>
 
@@ -790,18 +805,27 @@ function AccountForm({ mode, account, onSuccess }) {
           onChange={(e) => setBucket(e.target.value)}
           disabled={isSystem}
         >
-          <option value="income">Income (P&L)</option>
-          <option value="allowable">Allowable (P&L)</option>
-          <option value="disallowable">Disallowable (P&L)</option>
-          <option value="ignore">Ignore</option>
-          <option value="balance_sheet">Balance Sheet</option>
-          <option value="assets">Assets</option>
-          <option value="liabilities">Liabilities</option>
-          <option value="equity">Equity</option>
-          <option value="vat">VAT</option>
-          <option value="control">Control</option>
-          <option value="system">System</option>
-        </select>
+          
+  <option value="income">Income (P&L)</option>
+  <option value="allowable">Allowable (P&L)</option>
+  <option value="disallowable">Disallowable (P&L)</option>
+  <option value="ignore">Ignore</option>
+  <option value="balance_sheet">Balance Sheet</option>
+  <option value="assets">Assets</option>
+  <option value="liabilities">Liabilities</option>
+  <option value="equity">Equity</option>
+  <option value="vat">VAT</option>
+  <option value="control">Control</option>
+  <option value="system">System</option>
+
+  {/* New buckets */}
+  <option value="fixed_asset">Fixed Asset</option>
+  <option value="fixed_asset_contra">Fixed Asset Contra</option>
+  <option value="current_asset">Current Asset</option>
+  <option value="current_liability">Current Liability</option>
+  <option value="non_current_liability">Non‑Current Liability</option>
+</select>
+
         {isSystem && (
           <p className="mt-1 text-xs text-slate-500">
             System accounts cannot change HMRC bucket.
