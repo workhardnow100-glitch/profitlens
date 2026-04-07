@@ -940,6 +940,7 @@ async function loadSAJournals(clientId, periodStart, periodEnd) {
   return data || [];
 }
 
+
 async function loadCISJournals(clientId, periodStart, periodEnd) {
   const { data, error } = await supabaseAdmin
     .from("journal_entries")
@@ -1341,6 +1342,74 @@ async function buildCISFormData(
   },
 };
 }
+// ---------------- ACCOUNTS BUILDER ----------------
+async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
+  const { data: journals, error } = await supabaseAdmin
+    .from("journal_entries")
+    .select(`
+      id,
+      date,
+      journal_lines (
+        debit,
+        credit,
+        chart_of_account_entries (
+          account_name,
+          account_type
+        )
+      )
+    `)
+    .eq("client_id", clientId)
+    .gte("date", periodStart)
+    .lte("date", periodEnd);
+
+  if (error) {
+    console.error("Error loading Accounts journals:", error);
+    return { overview: { totals: {} }, overviewPrior: { totals: {} } };
+  }
+
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let totalEquity = 0;
+
+  (journals || []).forEach(j => {
+    (j.journal_lines || []).forEach(line => {
+      const debit = Number(line.debit || 0);
+      const credit = Number(line.credit || 0);
+      const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
+
+      if (type === "asset") totalAssets += debit - credit;
+      if (type === "liability") totalLiabilities += credit - debit;
+      if (type === "equity") totalEquity += credit - debit;
+    });
+  });
+
+  return {
+    overview: {
+      totals: {
+        total_assets: totalAssets,
+        total_liabilities: totalLiabilities,
+        total_equity: totalEquity,
+      },
+    },
+    overviewPrior: {
+      totals: {
+        total_assets: 0,
+        total_liabilities: 0,
+        total_equity: 0,
+      },
+    },
+    notes: {
+      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+    },
+    directorApproval: {
+      approvedBy: client?.director_name || "Director",
+      approvalDate: new Date().toISOString().split("T")[0],
+      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+    },
+  };
+}
+
+
 
 /* -------------------------------------------------------------------------- */
 /*                        PDF TEMPLATE DISPATCHER                             */
@@ -1605,67 +1674,7 @@ if (formCode === "CIS_STATEMENT") {
   });
 }
 
-// ---------------- ACCOUNTS BUILDER ----------------
-async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
-  const { data: journals, error } = await supabaseAdmin
-    .from("journal_entries")
-    .select(`
-      id,
-      date,
-      journal_lines (
-        debit,
-        credit,
-        chart_of_account_entries (
-          account_name,
-          account_type
-        )
-      )
-    `)
-    .eq("client_id", clientId)
-    .gte("date", periodStart)
-    .lte("date", periodEnd);
 
-  if (error) {
-    console.error("Error loading Accounts journals:", error);
-    return { overview: { totals: {} }, overviewPrior: { totals: {} } };
-  }
-
-  let totalAssets = 0;
-  let totalLiabilities = 0;
-  let totalEquity = 0;
-
-  (journals || []).forEach(j => {
-    (j.journal_lines || []).forEach(line => {
-      const debit = Number(line.debit || 0);
-      const credit = Number(line.credit || 0);
-      const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
-
-
-      if (type === "asset") totalAssets += debit - credit;
-      if (type === "liability") totalLiabilities += credit - debit;
-      if (type === "equity") totalEquity += credit - debit;
-    });
-  });
-
-  return {
-    overview: {
-      totals: {
-        total_assets: totalAssets,
-        total_liabilities: totalLiabilities,
-        total_equity: totalEquity,
-      },
-    },
-    overviewPrior: {
-      totals: {
-        total_assets: 0,
-        total_liabilities: 0,
-        total_equity: 0,
-      },
-    },
-    notes: {},
-    directorApproval: {},
-  };
-}
 
 
 
