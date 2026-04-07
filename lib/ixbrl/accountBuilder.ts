@@ -161,16 +161,32 @@ export async function buildAccountsIxbrl(params: {
     periodMeta?.small_companies_regime_override ?? null;
 
   // ------------------------------------------------------------
-  // 1. LOAD CHART OF ACCOUNTS
-  // ------------------------------------------------------------
-  const { data: coa, error: coaError } = await supabaseAdmin
-    .from("chart_of_account_entries")
-    .select("*")
-    .eq("coa_id", clientId);
+// 1. LOAD CHART OF ACCOUNTS (using correct coa_id)
+// ------------------------------------------------------------
 
-  if (coaError) {
-    throw new Error("Failed to load COA: " + coaError.message);
-  }
+// Step 1: get the client record to find its coa_id
+const { data: clientRow, error: clientRowError } = await supabaseAdmin
+  .from("clients")
+  .select("coa_id")
+  .eq("id", clientId)
+  .single();
+
+if (clientRowError) {
+  throw new Error("Failed to load client COA ID: " + clientRowError.message);
+}
+
+const coaId = clientRow.coa_id;
+
+// Step 2: load the chart of accounts using that coaId
+const { data: coa, error: coaError } = await supabaseAdmin
+  .from("chart_of_account_entries")
+  .select("*")
+  .eq("coa_id", coaId);
+
+if (coaError) {
+  throw new Error("Failed to load COA: " + coaError.message);
+}
+
 
   // ------------------------------------------------------------
   // 2. LOAD JOURNALS
