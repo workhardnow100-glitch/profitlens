@@ -1438,7 +1438,12 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       : new Date().toISOString().split("T")[0],
     statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
   },
+  
 };
+// ✅ Correct placement of log
+  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+
+  return payload;
 
 }
 
