@@ -5,7 +5,7 @@ type BSLine = {
   id?: string;
   label?: string;
   amount?: number;
-  // custome line feild 
+  // custom line field
   account_code?: string;
   account_name?: string;
   balance?: number;
@@ -60,22 +60,20 @@ export default function BalanceSheetPage() {
     setLoading(true);
 
     const [curRes, compRes] = await Promise.all([
-      fetch(
-        `/api/reports/balance-sheet${
-          yearCurrent ? `?year=${yearCurrent}` : ""
-        }`
-      ),
+      fetch(`/api/reports/balance-sheet${yearCurrent ? `?year=${yearCurrent}` : ""}`),
       yearCompare
         ? fetch(`/api/reports/balance-sheet?year=${yearCompare}`)
         : Promise.resolve(null),
     ]);
 
     const curJson = await curRes.json();
-    setDataCurrent(curJson);
+    // ✅ unwrap the "current" object
+    setDataCurrent(curJson.current);
 
     if (compRes) {
       const compJson = await compRes.json();
-      setDataCompare(compJson);
+      // ✅ unwrap the "prior" object
+      setDataCompare(compJson.prior);
     } else {
       setDataCompare(null);
     }
