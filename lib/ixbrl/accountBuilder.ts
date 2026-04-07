@@ -161,35 +161,33 @@ export async function buildAccountsIxbrl(params: {
     periodMeta?.small_companies_regime_override ?? null;
 
 // ------------------------------------------------------------
-// 1. LOAD CHART OF ACCOUNTS (resolve coa_id from journals → accounts)
+// 1. LOAD CHART OF ACCOUNTS (direct mapping via chart_of_accounts)
 // ------------------------------------------------------------
 
-// Step 1: find the COA ID in use by this client
-const { data: coaIdRows, error: coaIdError } = await supabaseAdmin
-  .from("journal_entries")
-  .select("lines:journal_lines(account:chart_of_account_entries(id, coa_id))")
+// Step 1: get the client’s COA mapping
+const { data: chartOfAccounts, error: chartError } = await supabaseAdmin
+  .from("chart_of_accounts")
+  .select("id")
   .eq("client_id", clientId)
-  .limit(1)
   .single();
 
-if (coaIdError) {
-  throw new Error("Failed to resolve client COA ID: " + coaIdError.message);
+if (chartError) {
+  throw new Error("Failed to load chart_of_accounts: " + chartError.message);
 }
 
-// Supabase nests joins as arrays, so drill down
-const coaId: string | undefined = coaIdRows?.lines?.[0]?.account?.[0]?.coa_id;
+const coaId = chartOfAccounts.id;
 if (!coaId) {
-  throw new Error(`No COA ID found for client ${clientId}`);
+  throw new Error(`Client ${clientId} has no chart_of_accounts row`);
 }
 
-// Step 2: load the chart of accounts using that coaId
+// Step 2: load the chart of account entries using that coaId
 const { data: coa, error: coaError } = await supabaseAdmin
   .from("chart_of_account_entries")
   .select("*")
   .eq("coa_id", coaId);
 
 if (coaError) {
-  throw new Error("Failed to load COA: " + coaError.message);
+  throw new Error("Failed to load COA entries: " + coaError.message);
 }
 
 
