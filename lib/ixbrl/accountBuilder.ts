@@ -160,24 +160,16 @@ export async function buildAccountsIxbrl(params: {
   const smallCompaniesRegimeOverride: string | null =
     periodMeta?.small_companies_regime_override ?? null;
 
-  // ------------------------------------------------------------
+// ------------------------------------------------------------
 // 1. LOAD CHART OF ACCOUNTS (using correct coa_id)
 // ------------------------------------------------------------
 
-// Step 1: get the client record to find its coa_id
-const { data: clientRow, error: clientRowError } = await supabaseAdmin
-  .from("clients")
-  .select("coa_id")
-  .eq("id", clientId)
-  .single();
-
-if (clientRowError) {
-  throw new Error("Failed to load client COA ID: " + clientRowError.message);
+// Use the coa_id from the client record we already loaded
+const coaId = client.coa_id;
+if (!coaId) {
+  throw new Error(`Client ${clientId} has no coa_id assigned`);
 }
 
-const coaId = clientRow.coa_id;
-
-// Step 2: load the chart of accounts using that coaId
 const { data: coa, error: coaError } = await supabaseAdmin
   .from("chart_of_account_entries")
   .select("*")
@@ -186,6 +178,7 @@ const { data: coa, error: coaError } = await supabaseAdmin
 if (coaError) {
   throw new Error("Failed to load COA: " + coaError.message);
 }
+
 
 
   // ------------------------------------------------------------
