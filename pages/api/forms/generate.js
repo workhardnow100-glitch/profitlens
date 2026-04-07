@@ -1423,10 +1423,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       creditors: client?.creditors_total || 0,
     },
     directorApproval: {
-      approvedBy: client?.director_name || "Director",
-      approvalDate: new Date().toISOString().split("T")[0],
-      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-    },
+  approvedBy: client?.director_name || "Director",
+  signature: client?.director_signature_name || "Signature",
+  approvalDate: client?.accounts_approval_date 
+    ? client.accounts_approval_date.toISOString().split("T")[0]
+    : new Date().toISOString().split("T")[0],
+  statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+},
+
   };
 }
 
