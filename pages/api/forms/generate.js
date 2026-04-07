@@ -1367,12 +1367,13 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     console.error("Error loading Accounts journals:", error);
     return { overview: { totals: {} }, overviewPrior: { totals: {} } };
   }
-
 let totalAssets = 0;
 let totalLiabilities = 0;
 let totalEquity = 0;
 let totalFixedAssets = 0;
 let totalCurrentAssets = 0;
+let totalCurrentLiabilities = 0;
+let totalNonCurrentLiabilities = 0;
 
 (journals || []).forEach(j => {
   (j.journal_lines || []).forEach(line => {
@@ -1391,8 +1392,15 @@ let totalCurrentAssets = 0;
     if (bucket === "current_asset") {
       totalCurrentAssets += debit - credit;
     }
+    if (bucket === "current_liability") {
+      totalCurrentLiabilities += credit - debit;
+    }
+    if (bucket === "non_current_liability") {
+      totalNonCurrentLiabilities += credit - debit;
+    }
   });
 });
+
 
 
   // Prior year comparatives (optional: pull from accounts_submissions)
