@@ -161,28 +161,23 @@ export async function buildAccountsIxbrl(params: {
     periodMeta?.small_companies_regime_override ?? null;
 
 // ------------------------------------------------------------
-// 1. LOAD CHART OF ACCOUNTS (resolve coa_id dynamically)
+// 1. LOAD CHART OF ACCOUNTS (via client_chart_of_accounts mapping)
 // ------------------------------------------------------------
 
-// Resolve COA ID from one journal line
-const { data: coaRow, error: coaRowError } = await supabaseAdmin
-  .from("journal_entries")
-  .select("lines:journal_lines(account:chart_of_account_entries(coa_id))")
+// Step 1: get the client’s COA mapping
+const { data: clientCoa, error: clientCoaError } = await supabaseAdmin
+  .from("client_chart_of_accounts")
+  .select("coa_id")
   .eq("client_id", clientId)
-  .limit(1)
   .single();
 
-if (coaRowError) {
-  throw new Error("Failed to resolve client COA ID: " + coaRowError.message);
+if (clientCoaError) {
+  throw new Error("Failed to load client COA mapping: " + clientCoaError.message);
 }
 
-// Supabase nests joins as arrays, so account is an array
-const coaId: string | undefined = coaRow?.lines?.[0]?.account?.[0]?.coa_id;
-if (!coaId) {
-  throw new Error(`No COA ID found for client ${clientId}`);
-}
+const coaId: string = clientCoa.coa_id;
 
-// Now load the chart of accounts
+// Step 2: load the chart of accounts using that coaId
 const { data: coa, error: coaError } = await supabaseAdmin
   .from("chart_of_account_entries")
   .select("*")
