@@ -1371,6 +1371,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   let totalAssets = 0;
   let totalLiabilities = 0;
   let totalEquity = 0;
+  let totalFixedAssets = 0;
 
   (journals || []).forEach(j => {
     (j.journal_lines || []).forEach(line => {
@@ -1381,6 +1382,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       if (type === "asset") totalAssets += debit - credit;
       if (type === "liability") totalLiabilities += credit - debit;
       if (type === "equity") totalEquity += credit - debit;
+      if (type === "fixed_asset") { totalFixedAssets += debit - credit;
+      }
     });
   });
 
@@ -1438,13 +1441,10 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       : new Date().toISOString().split("T")[0],
     statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
   },
-  
 };
-// ✅ Correct placement of log
-  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+ console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
 
   return payload;
-
 }
 
 
