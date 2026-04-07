@@ -1400,38 +1400,46 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const priorEquity = priorSubmission?.total_equity || 0;
 
   return {
-    overview: {
-      totals: {
-        total_assets: totalAssets,
-        total_liabilities: totalLiabilities,
-        total_equity: totalEquity,
-        capital_and_reserves: totalEquity, // equity mapping
-      },
+  overview: {
+    totals: {
+      non_current_assets: totalFixedAssets,   // e.g. plant, equipment
+      current_assets: totalCurrentAssets,     // e.g. cash, debtors
+      total_assets: totalAssets,
+      current_liabilities: totalCurrentLiabilities,
+      non_current_liabilities: totalNonCurrentLiabilities,
+      total_liabilities: totalLiabilities,
+      total_equity: totalEquity,
+      capital_and_reserves: totalEquity,
     },
-    overviewPrior: {
-      totals: {
-        total_assets: priorAssets,
-        total_liabilities: priorLiabilities,
-        total_equity: priorEquity,
-      },
+  },
+  overviewPrior: {
+    totals: {
+      non_current_assets: priorFixedAssets || 0,
+      current_assets: priorCurrentAssets || 0,
+      total_assets: priorAssets || 0,
+      current_liabilities: priorCurrentLiabilities || 0,
+      non_current_liabilities: priorNonCurrentLiabilities || 0,
+      total_liabilities: priorLiabilities || 0,
+      total_equity: priorEquity || 0,
     },
-    notes: {
-      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-      employees: client?.employee_count || 0,
-      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-      debtors: client?.debtors_total || 0,
-      creditors: client?.creditors_total || 0,
-    },
-    directorApproval: {
-  approvedBy: client?.director_name || "Director",
-  signature: client?.director_signature_name || "Signature",
-  approvalDate: client?.accounts_approval_date 
-    ? client.accounts_approval_date.toISOString().split("T")[0]
-    : new Date().toISOString().split("T")[0],
-  statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-},
+  },
+  notes: {
+    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+    employees: client?.employees_current_year || 0,
+    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+    debtors: client?.debtors_total || 0,
+    creditors: client?.creditors_total || 0,
+  },
+  directorApproval: {
+    approvedBy: client?.director_name || "Director",
+    signature: client?.director_signature_name || "Signature",
+    approvalDate: client?.accounts_approval_date 
+      ? client.accounts_approval_date.toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0],
+    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+  },
+};
 
-  };
 }
 
 
