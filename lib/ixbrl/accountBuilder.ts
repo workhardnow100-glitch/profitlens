@@ -291,6 +291,34 @@ export async function buildAccountsIxbrl(params: {
 
   const balanceSheetTotal = totalAssets;
 
+
+  // ------------------------------------------------------------
+// DEBUG: Verify trial balance totals
+// ------------------------------------------------------------
+console.log("Trial balance totals:", {
+  totalAssets,
+  totalLiabilities,
+  totalEquity,
+  turnover,
+  costOfSales,
+  grossProfit,
+  profitForYear,
+  balanceSheetTotal,
+});
+
+// ------------------------------------------------------------
+// DEBUG: Check for COA ↔ balances mismatches
+// ------------------------------------------------------------
+for (const [code, bal] of Object.entries(balances)) {
+  const acc = coa.find(
+    (a) => String(a.account_code).trim() === String(code).trim()
+  );
+  if (!acc) {
+    console.warn(`Unmatched journal code: ${code} → ${bal}`);
+  }
+}
+
+
   // ------------------------------------------------------------
   // 5. DETERMINE FRAMEWORK
   // ------------------------------------------------------------
