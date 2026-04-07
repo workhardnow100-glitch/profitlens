@@ -1384,29 +1384,35 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   });
 
   return {
-    overview: {
-      totals: {
-        total_assets: totalAssets,
-        total_liabilities: totalLiabilities,
-        total_equity: totalEquity,
-      },
+  overview: {
+    totals: {
+      total_assets: totalAssets,
+      total_liabilities: totalLiabilities,
+      total_equity: totalEquity,
+      capital_and_reserves: totalEquity, // map equity accounts here
     },
-    overviewPrior: {
-      totals: {
-        total_assets: 0,
-        total_liabilities: 0,
-        total_equity: 0,
-      },
+  },
+  overviewPrior: {
+    totals: {
+      total_assets: priorAssets,
+      total_liabilities: priorLiabilities,
+      total_equity: priorEquity,
     },
-    notes: {
-      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-    },
-    directorApproval: {
-      approvedBy: client?.director_name || "Director",
-      approvalDate: new Date().toISOString().split("T")[0],
-      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-    },
-  };
+  },
+  notes: {
+    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+    employees: client?.employee_count || 0,
+    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+    debtors: client?.debtors_total || 0,
+    creditors: client?.creditors_total || 0,
+  },
+  directorApproval: {
+    approvedBy: client?.director_name || "Director",
+    approvalDate: new Date().toISOString().split("T")[0],
+    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+  },
+};
+
 }
 
 
