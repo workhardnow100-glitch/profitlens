@@ -191,12 +191,10 @@ function mapToStructure(rows: BSLine[]) {
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
-    // Ignore/control/system accounts
     if (bucket === "ignore" || bucket === "control" || type === "SYSTEM" || type === "CONTROL") {
       continue;
     }
 
-    // Assets
     if (bucket === "fixed_asset" || bucket === "fixed_asset_contra") {
       structure.assets.non_current.push(row);
       continue;
@@ -206,23 +204,16 @@ function mapToStructure(rows: BSLine[]) {
       continue;
     }
 
-    // Liabilities
     if (bucket === "liabilities" || bucket === "vat" || type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || type === "VAT_CONTROL") {
       structure.liabilities.current.push(row);
       continue;
     }
-    if (bucket === "long_term_liability") {
-      structure.liabilities.non_current.push(row);
-      continue;
-    }
 
-    // Equity
     if (bucket === "equity" || type === "EQUITY") {
       structure.equity.push(row);
       continue;
     }
 
-    // Profit & Loss buckets
     if (bucket === "income" || bucket === "non_trading_income" || type === "INCOME") {
       totalCredits += row.credit ?? 0;
       continue;
@@ -233,7 +224,6 @@ function mapToStructure(rows: BSLine[]) {
     }
   }
 
-  // Push current year profit into equity
   const profit = totalCredits - totalDebits;
   structure.equity.push({
     account_code: "PROFIT",
@@ -241,8 +231,9 @@ function mapToStructure(rows: BSLine[]) {
     balance: profit,
   });
 
-  return structure;
+  return structure; // ✅ always return full structure
 }
+
 
 function computeTotals(structure: Omit<BSStructure, "totals">) {
   const sum = (rows: BSLine[]) => rows.reduce((a, r) => a + Number(r.balance || 0), 0);
