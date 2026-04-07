@@ -174,6 +174,9 @@ function emptyStructure(): BSStructure {
   };
 }
 
+// ------------------------------------------------------------
+// CLASSIFICATION MAP
+// ------------------------------------------------------------
 function mapToStructure(rows: BSLine[]) {
   const structure: Omit<BSStructure, "totals"> = {
     assets: { non_current: [], current: [] },
@@ -188,36 +191,49 @@ function mapToStructure(rows: BSLine[]) {
     const type = row.account_type ?? "";
     const bucket = row.hmrc_bucket ?? "";
 
-    const isSystem = type === "SYSTEM" || bucket === "ignore";
-    const isControl = type === "CONTROL" || bucket === "control";
-    if (isSystem || isControl) continue;
-
-    if (type === "ASSET" || type === "BANK" || bucket === "fixed_asset" || bucket === "current_asset" || bucket === "balance_sheet" || bucket === "assets" || bucket === "bank") {
-      if (bucket === "fixed_asset") {
-        structure.assets.non_current.push(row);
-      } else {
-        structure.assets.current.push(row);
-      }
+    // Ignore/control/system accounts
+    if (bucket === "ignore" || bucket === "control" || type === "SYSTEM" || type === "CONTROL") {
       continue;
     }
 
-    if (type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || bucket === "liabilities" || bucket === "vat" || type === "VAT_CONTROL") {
+    // Assets
+    if (bucket === "fixed_asset" || bucket === "fixed_asset_contra") {
+      structure.assets.non_current.push(row);
+      continue;
+    }
+    if (bucket === "assets" || bucket === "balance_sheet" || bucket === "current_asset" || type === "ASSET" || type === "BANK") {
+      structure.assets.current.push(row);
+      continue;
+    }
+
+    // Liabilities
+    if (bucket === "liabilities" || bucket === "vat" || type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || type === "VAT_CONTROL") {
       structure.liabilities.current.push(row);
       continue;
     }
+    if (bucket === "long_term_liability") {
+      structure.liabilities.non_current.push(row);
+      continue;
+    }
 
-    if (type === "EQUITY") {
+    // Equity
+    if (bucket === "equity" || type === "EQUITY") {
       structure.equity.push(row);
       continue;
     }
 
-    if (type === "INCOME" || type === "EXPENSE") {
-      totalDebits += row.debit ?? 0;
+    // Profit & Loss buckets
+    if (bucket === "income" || bucket === "non_trading_income" || type === "INCOME") {
       totalCredits += row.credit ?? 0;
+      continue;
+    }
+    if (bucket === "allowable" || bucket === "disallowable" || type === "EXPENSE") {
+      totalDebits += row.debit ?? 0;
       continue;
     }
   }
 
+  // Push current year profit into equity
   const profit = totalCredits - totalDebits;
   structure.equity.push({
     account_code: "PROFIT",
@@ -265,6 +281,7 @@ export async function getUnifiedTrialBalance(
 
   return { lines: accounts, summary };
 }
+
 // ------------------------------------------------------------
 // PROFIT & LOSS (journal-driven, year-aware)
 // ------------------------------------------------------------
