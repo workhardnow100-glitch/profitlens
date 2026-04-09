@@ -1372,7 +1372,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     return { overview: { totals: {} }, overviewPrior: { totals: {} } };
   }
 
-  // Helper to compute totals + accounts from journals
+  // Helper to compute totals + accounts + categories from journals
   function computeFromJournals(journals) {
     let totals = {
       totalAssets: 0,
@@ -1384,6 +1384,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       totalNonCurrentLiabilities: 0,
     };
     let accounts = {};
+    let categories = {
+      fixedAssets: 0,
+      accumulatedDepreciation: 0,
+      bank: 0,
+      receivables: 0,
+      payables: 0,
+      equity: 0,
+    };
 
     (journals || []).forEach(j => {
       (j.journal_lines || []).forEach(line => {
@@ -1398,19 +1406,29 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         }
 
         // Grouping logic based on your schema
-        if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
-        if (bucket === "fixed_asset_contra") totals.totalFixedAssets -= (debit - credit);
+        if (bucket === "fixed_asset") {
+          totals.totalFixedAssets += debit - credit;
+          categories.fixedAssets += debit - credit;
+        }
+        if (bucket === "fixed_asset_contra") {
+          totals.totalFixedAssets -= (debit - credit);
+          categories.accumulatedDepreciation += debit - credit;
+        }
 
         if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
           totals.totalCurrentAssets += debit - credit;
+          if (type === "BANK") categories.bank += debit - credit;
+          if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
         }
 
         if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
           totals.totalCurrentLiabilities += credit - debit;
+          categories.payables += credit - debit;
         }
 
         if (bucket === "equity" || type === "EQUITY") {
           totals.totalEquity += credit - debit;
+          categories.equity += credit - debit;
         }
 
         // Grand totals
@@ -1419,7 +1437,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       });
     });
 
-    return { totals, accounts };
+    return { totals, accounts, categories };
   }
 
   // Compute current year
@@ -1470,6 +1488,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
     prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
     prior.accounts = priorSubmission.accounts || prior.accounts;
+    prior.categories = priorSubmission.categories || prior.categories;
   }
 
   const payload = {
@@ -1485,6 +1504,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         capital_and_reserves: current.totals.totalEquity,
       },
       accounts: current.accounts,
+      categories: current.categories,
     },
     overviewPrior: {
       totals: {
@@ -1497,6 +1517,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         total_equity: prior.totals.totalEquity,
       },
       accounts: prior.accounts,
+      categories: prior.categories,
     },
     notes: {
       accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
@@ -1518,6 +1539,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
+
 
 
 /* -------------------------------------------------------------------------- */
