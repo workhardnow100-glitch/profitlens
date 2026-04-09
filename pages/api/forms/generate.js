@@ -1391,6 +1391,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       receivables: 0,
       payables: 0,
       equity: 0,
+      directorLoans: 0, // NEW category
     };
 
     (journals || []).forEach(j => {
@@ -1429,6 +1430,11 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         if (bucket === "equity" || type === "EQUITY") {
           totals.totalEquity += credit - debit;
           categories.equity += credit - debit;
+        }
+
+        // NEW: Director loans (504x range)
+        if (bucket === "balance_sheet" && code && code.startsWith("504")) {
+          categories.directorLoans += debit - credit;
         }
 
         // Grand totals
