@@ -1441,7 +1441,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   }
 
   // Compute current year
-  const current = computeFromJournals(journals);
+  let current = computeFromJournals(journals);
 
   // Prior year journals
   const priorYearStart = new Date(periodStart);
@@ -1469,7 +1469,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     .gte("date", priorYearStart.toISOString().split("T")[0])
     .lte("date", priorYearEnd.toISOString().split("T")[0]);
 
-  const prior = computeFromJournals(priorJournals);
+  let prior = computeFromJournals(priorJournals);
 
   // If accounts_submissions exists, override prior totals
   const { data: priorSubmission } = await supabaseAdmin
@@ -1490,6 +1490,32 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     prior.accounts = priorSubmission.accounts || prior.accounts;
     prior.categories = priorSubmission.categories || prior.categories;
   }
+
+  // Auto carry-forward if current year has no opening balances
+  function applyCarryForward(current, prior) {
+    const categories = { ...current.categories };
+    const totals = { ...current.totals };
+
+    if (categories.fixedAssets === 0 && prior.categories.fixedAssets) {
+      categories.fixedAssets = prior.categories.fixedAssets;
+      totals.totalFixedAssets = prior.totals.totalFixedAssets;
+    }
+    if (categories.accumulatedDepreciation === 0 && prior.categories.accumulatedDepreciation) {
+      categories.accumulatedDepreciation = prior.categories.accumulatedDepreciation;
+    }
+    if (categories.payables === 0 && prior.categories.payables) {
+      categories.payables = prior.categories.payables;
+      totals.totalCurrentLiabilities = prior.totals.totalCurrentLiabilities;
+    }
+    if (categories.equity === 0 && prior.categories.equity) {
+      categories.equity = prior.categories.equity;
+      totals.totalEquity = prior.totals.totalEquity;
+    }
+
+    return { ...current, categories, totals };
+  }
+
+  current = applyCarryForward(current, prior);
 
   const payload = {
     overview: {
