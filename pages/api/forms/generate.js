@@ -1440,8 +1440,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     return { totals, accounts, categories };
   }
 
-  // Compute current year
-  let current = computeFromJournals(journals);
+  // Compute current year movements
+  let currentMovements = computeFromJournals(journals);
 
   // Prior year journals
   const priorYearStart = new Date(periodStart);
@@ -1491,31 +1491,26 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     prior.categories = priorSubmission.categories || prior.categories;
   }
 
-  // Auto carry-forward if current year has no opening balances
-  function applyCarryForward(current, prior) {
-    const categories = { ...current.categories };
-    const totals = { ...current.totals };
+  // Always add prior balances to current movements
+  function addCarryForward(prior, currentMovements) {
+    const categories = {};
+    const totals = {};
+    const accounts = {};
 
-    if (categories.fixedAssets === 0 && prior.categories.fixedAssets) {
-      categories.fixedAssets = prior.categories.fixedAssets;
-      totals.totalFixedAssets = prior.totals.totalFixedAssets;
+    for (const key of Object.keys(prior.categories)) {
+      categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
     }
-    if (categories.accumulatedDepreciation === 0 && prior.categories.accumulatedDepreciation) {
-      categories.accumulatedDepreciation = prior.categories.accumulatedDepreciation;
+    for (const key of Object.keys(prior.totals)) {
+      totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
     }
-    if (categories.payables === 0 && prior.categories.payables) {
-      categories.payables = prior.categories.payables;
-      totals.totalCurrentLiabilities = prior.totals.totalCurrentLiabilities;
-    }
-    if (categories.equity === 0 && prior.categories.equity) {
-      categories.equity = prior.categories.equity;
-      totals.totalEquity = prior.totals.totalEquity;
+    for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
+      accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
     }
 
-    return { ...current, categories, totals };
+    return { totals, accounts, categories };
   }
 
-  current = applyCarryForward(current, prior);
+  let current = addCarryForward(prior, currentMovements);
 
   const payload = {
     overview: {
