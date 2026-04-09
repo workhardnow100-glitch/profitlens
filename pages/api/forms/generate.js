@@ -1341,8 +1341,7 @@ async function buildCISFormData(
     notes: cisSubmission?.notes || null,
   },
 };
-}
-// ---------------- ACCOUNTS BUILDER ----------------
+}// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   // Current year journals
   const { data: journals, error } = await supabaseAdmin
@@ -1354,8 +1353,10 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         debit,
         credit,
         chart_of_account_entries (
+          account_code,
           account_name,
-          account_type
+          account_type,
+          hmrc_bucket
         )
       )
     `)
@@ -1367,41 +1368,42 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     console.error("Error loading Accounts journals:", error);
     return { overview: { totals: {} }, overviewPrior: { totals: {} } };
   }
-let totalAssets = 0;
-let totalLiabilities = 0;
-let totalEquity = 0;
-let totalFixedAssets = 0;
-let totalCurrentAssets = 0;
-let totalCurrentLiabilities = 0;
-let totalNonCurrentLiabilities = 0;
 
-(journals || []).forEach(j => {
-  (j.journal_lines || []).forEach(line => {
-    const debit = Number(line.debit || 0);
-    const credit = Number(line.credit || 0);
-    const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
-    const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+  let totalAssets = 0;
+  let totalLiabilities = 0;
+  let totalEquity = 0;
+  let totalFixedAssets = 0;
+  let totalCurrentAssets = 0;
+  let totalCurrentLiabilities = 0;
+  let totalNonCurrentLiabilities = 0;
 
-    if (type === "asset") totalAssets += debit - credit;
-    if (type === "liability") totalLiabilities += credit - debit;
-    if (type === "equity") totalEquity += credit - debit;
+  // NEW: account-level balances
+  let accounts = {};
 
-    if (bucket === "fixed_asset") {
-      totalFixedAssets += debit - credit;
-    }
-    if (bucket === "current_asset") {
-      totalCurrentAssets += debit - credit;
-    }
-    if (bucket === "current_liability") {
-      totalCurrentLiabilities += credit - debit;
-    }
-    if (bucket === "non_current_liability") {
-      totalNonCurrentLiabilities += credit - debit;
-    }
+  (journals || []).forEach(j => {
+    (j.journal_lines || []).forEach(line => {
+      const debit = Number(line.debit || 0);
+      const credit = Number(line.credit || 0);
+      const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
+      const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+      const code = line.chart_of_account_entries?.account_code;
+
+      // Net balance per account
+      if (code) {
+        accounts[code] = (accounts[code] || 0) + (debit - credit);
+      }
+
+      // Existing totals logic
+      if (type === "asset") totalAssets += debit - credit;
+      if (type === "liability") totalLiabilities += credit - debit;
+      if (type === "equity") totalEquity += credit - debit;
+
+      if (bucket === "fixed_asset") totalFixedAssets += debit - credit;
+      if (bucket === "current_asset") totalCurrentAssets += debit - credit;
+      if (bucket === "current_liability") totalCurrentLiabilities += credit - debit;
+      if (bucket === "non_current_liability") totalNonCurrentLiabilities += credit - debit;
+    });
   });
-});
-
-
 
   // Prior year comparatives (optional: pull from accounts_submissions)
   const priorYearEnd = new Date(periodStart);
@@ -1418,55 +1420,60 @@ let totalNonCurrentLiabilities = 0;
   const priorLiabilities = priorSubmission?.total_liabilities || 0;
   const priorEquity = priorSubmission?.total_equity || 0;
   const priorFixedAssets = priorSubmission?.fixed_assets || 0;
-const priorCurrentAssets = priorSubmission?.current_assets || 0;
-const priorCurrentLiabilities = priorSubmission?.current_liabilities || 0;
-const priorNonCurrentLiabilities = priorSubmission?.non_current_liabilities || 0;
+  const priorCurrentAssets = priorSubmission?.current_assets || 0;
+  const priorCurrentLiabilities = priorSubmission?.current_liabilities || 0;
+  const priorNonCurrentLiabilities = priorSubmission?.non_current_liabilities || 0;
 
+  // NEW: prior accounts if stored
+  const priorAccounts = priorSubmission?.accounts || {};
 
-  return {
-  overview: {
-    totals: {
-      non_current_assets: totalFixedAssets,   // e.g. plant, equipment
-      current_assets: totalCurrentAssets,     // e.g. cash, debtors
-      total_assets: totalAssets,
-      current_liabilities: totalCurrentLiabilities,
-      non_current_liabilities: totalNonCurrentLiabilities,
-      total_liabilities: totalLiabilities,
-      total_equity: totalEquity,
-      capital_and_reserves: totalEquity,
+  const payload = {
+    overview: {
+      totals: {
+        non_current_assets: totalFixedAssets,
+        current_assets: totalCurrentAssets,
+        total_assets: totalAssets,
+        current_liabilities: totalCurrentLiabilities,
+        non_current_liabilities: totalNonCurrentLiabilities,
+        total_liabilities: totalLiabilities,
+        total_equity: totalEquity,
+        capital_and_reserves: totalEquity,
+      },
+      accounts, // <-- added
     },
-  },
-  overviewPrior: {
-    totals: {
-      non_current_assets: priorFixedAssets || 0,
-      current_assets: priorCurrentAssets || 0,
-      total_assets: priorAssets || 0,
-      current_liabilities: priorCurrentLiabilities || 0,
-      non_current_liabilities: priorNonCurrentLiabilities || 0,
-      total_liabilities: priorLiabilities || 0,
-      total_equity: priorEquity || 0,
+    overviewPrior: {
+      totals: {
+        non_current_assets: priorFixedAssets || 0,
+        current_assets: priorCurrentAssets || 0,
+        total_assets: priorAssets || 0,
+        current_liabilities: priorCurrentLiabilities || 0,
+        non_current_liabilities: priorNonCurrentLiabilities || 0,
+        total_liabilities: priorLiabilities || 0,
+        total_equity: priorEquity || 0,
+      },
+      accounts: priorAccounts, // <-- added
     },
-  },
-  notes: {
-    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-    employees: client?.employees_current_year || 0,
-    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-    debtors: client?.debtors_total || 0,
-    creditors: client?.creditors_total || 0,
-  },
-  directorApproval: {
-    approvedBy: client?.director_name || "Director",
-    signature: client?.director_signature_name || "Signature",
-    approvalDate: client?.accounts_approval_date 
-      ? client.accounts_approval_date.toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0],
-    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-  },
-};
- console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+    notes: {
+      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+      employees: client?.employees_current_year || 0,
+      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+      debtors: client?.debtors_total || 0,
+      creditors: client?.creditors_total || 0,
+    },
+    directorApproval: {
+      approvedBy: client?.director_name || "Director",
+      signature: client?.director_signature_name || "Signature",
+      approvalDate: client?.accounts_approval_date
+        ? client.accounts_approval_date.toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+    },
+  };
 
+  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
+
 
 
 
