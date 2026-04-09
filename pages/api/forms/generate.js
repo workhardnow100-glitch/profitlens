@@ -1380,30 +1380,30 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   // NEW: account-level balances
   let accounts = {};
 
-  (journals || []).forEach(j => {
-    (j.journal_lines || []).forEach(line => {
-      const debit = Number(line.debit || 0);
-      const credit = Number(line.credit || 0);
-      const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
-      const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
-      const code = line.chart_of_account_entries?.account_code;
+ (journals || []).forEach(j => {
+  (j.journal_lines || []).forEach(line => {
+    const debit = Number(line.debit || 0);
+    const credit = Number(line.credit || 0);
+    const type = (line.chart_of_account_entries?.account_type || "").toLowerCase();
+    const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+    const code = line.chart_of_account_entries?.account_code;
 
-      // Net balance per account
-      if (code) {
-        accounts[code] = (accounts[code] || 0) + (debit - credit);
-      }
+    // Net balance per account
+    if (code) {
+      accounts[code] = (accounts[code] || 0) + (debit - credit);
+    }
 
-      // Totals logic (unchanged from before)
-      if (type === "asset") totalAssets += debit - credit;
-      if (type === "liability") totalLiabilities += credit - debit;
-      if (type === "equity") totalEquity += credit - debit;
+    // Totals by type/bucket
+    if (type === "asset") totalAssets += debit - credit;
+    if (type === "liability") totalLiabilities += credit - debit;
+    if (type === "equity") totalEquity += credit - debit;
 
-      if (bucket === "fixed_asset") totalFixedAssets += debit - credit;
-      if (bucket === "current_asset") totalCurrentAssets += debit - credit;
-      if (bucket === "current_liability") totalCurrentLiabilities += credit - debit;
-      if (bucket === "non_current_liability") totalNonCurrentLiabilities += credit - debit;
-    });
+    if (bucket === "fixed_asset") totalFixedAssets += debit - credit;
+    if (bucket === "assets" || bucket === "current_asset") totalCurrentAssets += debit - credit;
+    if (bucket === "liabilities" || bucket === "current_liability") totalCurrentLiabilities += credit - debit;
+    if (bucket === "non_current_liability") totalNonCurrentLiabilities += credit - debit;
   });
+});
 
   // Prior year comparatives
   const priorYearEnd = new Date(periodStart);
@@ -1427,18 +1427,19 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   const payload = {
     overview: {
-      totals: {
-        non_current_assets: totalFixedAssets,
-        current_assets: totalCurrentAssets,
-        total_assets: totalAssets,
-        current_liabilities: totalCurrentLiabilities,
-        non_current_liabilities: totalNonCurrentLiabilities,
-        total_liabilities: totalLiabilities,
-        total_equity: totalEquity,
-        capital_and_reserves: totalEquity,
-      },
-      accounts, // <-- added
-    },
+  totals: {
+    non_current_assets: totalFixedAssets,
+    current_assets: totalCurrentAssets,
+    total_assets: totalAssets,
+    current_liabilities: totalCurrentLiabilities,
+    non_current_liabilities: totalNonCurrentLiabilities,
+    total_liabilities: totalLiabilities,
+    total_equity: totalEquity,
+    capital_and_reserves: totalEquity,
+  },
+  accounts,
+},
+
     overviewPrior: {
       totals: {
         non_current_assets: priorFixedAssets || 0,
