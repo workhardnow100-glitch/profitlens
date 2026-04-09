@@ -1440,6 +1440,15 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     return { totals, accounts, categories };
   }
 
+  // Rounding helper
+  function roundObjectValues(obj) {
+    const rounded = {};
+    for (const key in obj) {
+      rounded[key] = Math.round(obj[key] || 0);
+    }
+    return rounded;
+  }
+
   // Compute current year movements
   let currentMovements = computeFromJournals(journals);
 
@@ -1511,6 +1520,12 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   }
 
   let current = addCarryForward(prior, currentMovements);
+
+  // Round totals and categories before returning
+  current.totals = roundObjectValues(current.totals);
+  current.categories = roundObjectValues(current.categories);
+  prior.totals = roundObjectValues(prior.totals);
+  prior.categories = roundObjectValues(prior.categories);
 
   const payload = {
     overview: {
