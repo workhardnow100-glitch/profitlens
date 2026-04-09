@@ -1341,7 +1341,7 @@ async function buildCISFormData(
     notes: cisSubmission?.notes || null,
   },
 };
-}// ---------------- ACCOUNTS BUILDER ----------------
+}/// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   // Current year journals
   const { data: journals, error } = await supabaseAdmin
@@ -1393,7 +1393,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         accounts[code] = (accounts[code] || 0) + (debit - credit);
       }
 
-      // Existing totals logic
+      // Totals logic (unchanged from before)
       if (type === "asset") totalAssets += debit - credit;
       if (type === "liability") totalLiabilities += credit - debit;
       if (type === "equity") totalEquity += credit - debit;
@@ -1405,7 +1405,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     });
   });
 
-  // Prior year comparatives (optional: pull from accounts_submissions)
+  // Prior year comparatives
   const priorYearEnd = new Date(periodStart);
   priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
 
@@ -1423,8 +1423,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const priorCurrentAssets = priorSubmission?.current_assets || 0;
   const priorCurrentLiabilities = priorSubmission?.current_liabilities || 0;
   const priorNonCurrentLiabilities = priorSubmission?.non_current_liabilities || 0;
-
-  // NEW: prior accounts if stored
   const priorAccounts = priorSubmission?.accounts || {};
 
   const payload = {
@@ -1473,7 +1471,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
-
 
 
 
