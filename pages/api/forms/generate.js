@@ -1551,21 +1551,23 @@ let current = addCarryForward(prior, currentMovements);
   prior.totals = roundObjectValues(prior.totals);
   prior.categories = roundObjectValues(prior.categories);
 
-  const payload = {
-    overview: {
-      totals: {
-        non_current_assets: current.totals.totalFixedAssets,
-        current_assets: current.totals.totalCurrentAssets,
-        total_assets: current.totals.totalAssets,
-        current_liabilities: current.totals.totalCurrentLiabilities,
-        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-        total_liabilities: current.totals.totalLiabilities,
-        total_equity: current.totals.totalEquity,
-        capital_and_reserves: current.totals.totalEquity,
-      },
-      accounts: current.accounts,
-      categories: current.categories,
+ const payload = {
+  overview: {
+    totals: {
+      non_current_assets: current.totals.totalFixedAssets,
+      current_assets: current.totals.totalCurrentAssets,
+      total_assets: current.totals.totalAssets,
+      current_liabilities: current.totals.totalCurrentLiabilities,
+      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+      total_liabilities: current.totals.totalLiabilities,
+      total_equity: current.totals.totalEquity,
+      // 🔧 Ensure capital & reserves matches net assets
+      capital_and_reserves: 
+        (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
     },
+    accounts: current.accounts,
+    categories: current.categories,
+  },
     overviewPrior: {
       totals: {
         non_current_assets: prior.totals.totalFixedAssets,
