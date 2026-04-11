@@ -1343,7 +1343,6 @@ async function buildCISFormData(
 };
 
 }
-
 // ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   // Current year journals
@@ -1371,99 +1370,96 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     console.error("Error loading Accounts journals:", error);
     return { overview: { totals: {} }, overviewPrior: { totals: {} } };
   }
-// Helper to compute totals + accounts + categories from journals
-function computeFromJournals(journals) {
-  let totals = {
-    totalAssets: 0,
-    totalLiabilities: 0,
-    totalEquity: 0,
-    totalFixedAssets: 0,
-    totalCurrentAssets: 0,
-    totalCurrentLiabilities: 0,
-    totalNonCurrentLiabilities: 0,
-  };
-  let accounts = {};
-  let categories = {
-    fixedAssets: 0,              // will be recalculated to NBV
-    accumulatedDepreciation: 0,
-    depreciationCharge: 0,
-    bank: 0,
-    receivables: 0,
-    payables: 0,
-    equity: 0,
-    directorLoans: 0,
-  };
 
-  (journals || []).forEach(j => {
-    (j.journal_lines || []).forEach(line => {
-      const debit = Number(line.debit || 0);
-      const credit = Number(line.credit || 0);
-      const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
-      const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
-      const code = line.chart_of_account_entries?.account_code;
-      const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
+  // Helper to compute totals + accounts + categories from journals
+  function computeFromJournals(journals) {
+    let totals = {
+      totalAssets: 0,
+      totalLiabilities: 0,
+      totalEquity: 0,
+      totalFixedAssets: 0,
+      totalCurrentAssets: 0,
+      totalCurrentLiabilities: 0,
+      totalNonCurrentLiabilities: 0,
+    };
+    let accounts = {};
+    let categories = {
+      fixedAssets: 0,              // will be recalculated to NBV
+      accumulatedDepreciation: 0,
+      depreciationCharge: 0,
+      bank: 0,
+      receivables: 0,
+      payables: 0,
+      equity: 0,
+      directorLoans: 0,
+    };
 
-      if (code) {
-        accounts[code] = (accounts[code] || 0) + (debit - credit);
-      }
+    let grossCost = 0; // internal tracker for asset cost
 
-      // Grouping logic
-      if (bucket === "fixed_asset") {
-        totals.totalFixedAssets += debit - credit;
-        // track gross cost movements in a temp variable
-        categories._grossCost = (categories._grossCost || 0) + (debit - credit);
-      }
-      if (bucket === "fixed_asset_contra") {
-        totals.totalFixedAssets -= (debit - credit);
-        categories.accumulatedDepreciation += debit - credit;
-      }
+    (journals || []).forEach(j => {
+      (j.journal_lines || []).forEach(line => {
+        const debit = Number(line.debit || 0);
+        const credit = Number(line.credit || 0);
+        const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
+        const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+        const code = line.chart_of_account_entries?.account_code;
+        const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
 
-      if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
-        totals.totalCurrentAssets += debit - credit;
-        if (type === "BANK") categories.bank += debit - credit;
-        if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
-      }
+        if (code) {
+          accounts[code] = (accounts[code] || 0) + (debit - credit);
+        }
 
-      if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
-        totals.totalCurrentLiabilities += credit - debit;
-        categories.payables += credit - debit;
-      }
+        // Grouping logic
+        if (bucket === "fixed_asset") {
+          totals.totalFixedAssets += debit - credit;
+          grossCost += debit - credit; // track gross cost
+        }
+        if (bucket === "fixed_asset_contra") {
+          totals.totalFixedAssets -= (debit - credit);
+          categories.accumulatedDepreciation += debit - credit;
+        }
 
-      if (bucket === "equity" || type === "EQUITY") {
-        totals.totalEquity += credit - debit;
-        categories.equity += credit - debit;
-      }
+        if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
+          totals.totalCurrentAssets += debit - credit;
+          if (type === "BANK") categories.bank += debit - credit;
+          if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
+        }
 
-      if (bucket === "balance_sheet" && code && code.startsWith("504")) {
-        categories.directorLoans += debit - credit;
-      }
+        if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
+          totals.totalCurrentLiabilities += credit - debit;
+          categories.payables += credit - debit;
+        }
 
-      if (name.includes("depreciation expense")) {
-        categories.depreciationCharge += debit;
-      }
-      if (name.includes("accumulated depreciation")) {
-        categories.accumulatedDepreciation += credit;
-      }
+        if (bucket === "equity" || type === "EQUITY") {
+          totals.totalEquity += credit - debit;
+          categories.equity += credit - debit;
+        }
 
-      // Grand totals
-      if (type === "ASSET") totals.totalAssets += debit - credit;
-      if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+        if (bucket === "balance_sheet" && code && code.startsWith("504")) {
+          categories.directorLoans += debit - credit;
+        }
+
+        if (name.includes("depreciation expense")) {
+          categories.depreciationCharge += debit;
+        }
+        if (name.includes("accumulated depreciation")) {
+          categories.accumulatedDepreciation += credit;
+        }
+
+        // Grand totals
+        if (type === "ASSET") totals.totalAssets += debit - credit;
+        if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+      });
     });
-  });
 
-  // ✅ Enforce statutory identity: Equity = Assets − Liabilities
-  totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
+    // ✅ Enforce statutory identity: Equity = Assets − Liabilities
+    totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-  // ✅ Recalculate NBV: gross cost − accumulated depreciation
-  const grossCost = categories._grossCost || 0;
-  categories.fixedAssets = grossCost - (categories.accumulatedDepreciation || 0);
+    // ✅ Recalculate NBV: gross cost − accumulated depreciation
+    categories.fixedAssets = grossCost - (categories.accumulatedDepreciation || 0);
 
-  return { totals, accounts, categories };
-}
-
-
-
-
+    return { totals, accounts, categories };
+  }
 
   // Rounding helper
   function roundObjectValues(obj) {
@@ -1474,104 +1470,104 @@ function computeFromJournals(journals) {
     return rounded;
   }
 
- // Compute current year movements
-let currentMovements = computeFromJournals(journals);
+  // Compute current year movements
+  let currentMovements = computeFromJournals(journals);
 
-// Prior year journals
-const priorYearStart = new Date(periodStart);
-priorYearStart.setFullYear(priorYearStart.getFullYear() - 1);
-const priorYearEnd = new Date(periodEnd);
-priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
+  // Prior year journals
+  const priorYearStart = new Date(periodStart);
+  priorYearStart.setFullYear(priorYearStart.getFullYear() - 1);
+  const priorYearEnd = new Date(periodEnd);
+  priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
 
-const { data: priorJournals } = await supabaseAdmin
-  .from("journal_entries")
-  .select(`
-    id,
-    date,
-    journal_lines (
-      debit,
-      credit,
-      chart_of_account_entries (
-        account_code,
-        account_name,
-        account_type,
-        hmrc_bucket
+  const { data: priorJournals } = await supabaseAdmin
+    .from("journal_entries")
+    .select(`
+      id,
+      date,
+      journal_lines (
+        debit,
+        credit,
+        chart_of_account_entries (
+          account_code,
+          account_name,
+          account_type,
+          hmrc_bucket
+        )
       )
-    )
-  `)
-  .eq("client_id", clientId)
-  .gte("date", priorYearStart.toISOString().split("T")[0])
-  .lte("date", priorYearEnd.toISOString().split("T")[0]);
+    `)
+    .eq("client_id", clientId)
+    .gte("date", priorYearStart.toISOString().split("T")[0])
+    .lte("date", priorYearEnd.toISOString().split("T")[0]);
 
-let prior = computeFromJournals(priorJournals);
+  let prior = computeFromJournals(priorJournals);
 
-// If accounts_submissions exists, override prior totals
-const { data: priorSubmission } = await supabaseAdmin
-  .from("accounts_submissions")
-  .select("*")
-  .eq("client_id", clientId)
-  .eq("period_end", priorYearEnd.toISOString().split("T")[0])
-  .maybeSingle();
+  // If accounts_submissions exists, override prior totals
+  const { data: priorSubmission } = await supabaseAdmin
+    .from("accounts_submissions")
+    .select("*")
+    .eq("client_id", clientId)
+    .eq("period_end", priorYearEnd.toISOString().split("T")[0])
+    .maybeSingle();
 
-if (priorSubmission) {
-  prior.totals.totalAssets = priorSubmission.total_assets || prior.totals.totalAssets;
-  prior.totals.totalLiabilities = priorSubmission.total_liabilities || prior.totals.totalLiabilities;
-  prior.totals.totalEquity = priorSubmission.total_equity || prior.totals.totalEquity;
-  prior.totals.totalFixedAssets = priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
-  prior.totals.totalCurrentAssets = priorSubmission.current_assets || prior.totals.totalCurrentAssets;
-  prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
-  prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
-  prior.accounts = priorSubmission.accounts || prior.accounts;
-  prior.categories = priorSubmission.categories || prior.categories;
-} else {
-  // ✅ Lock prior equity before carry‑forward if no submission override
-  prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
-}
+  if (priorSubmission) {
+    prior.totals.totalAssets = priorSubmission.total_assets || prior.totals.totalAssets;
+    prior.totals.totalLiabilities = priorSubmission.total_liabilities || prior.totals.totalLiabilities;
+    prior.totals.totalEquity = priorSubmission.total_equity || prior.totals.totalEquity;
+    prior.totals.totalFixedAssets = priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
+    prior.totals.totalCurrentAssets = priorSubmission.current_assets || prior.totals.totalCurrentAssets;
+    prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
+    prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
+    prior.accounts = priorSubmission.accounts || prior.accounts;
+    prior.categories = priorSubmission.categories || prior.categories;
+  } else {
+    // ✅ Lock prior equity before carry‑forward if no submission override
+    prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
+  }
 
-// Always add prior balances to current movements
-function addCarryForward(prior, currentMovements) {
-  const categories = {};
-  const totals = {};
-  const accounts = {};
+  // Always add prior balances to current movements
+  function addCarryForward(prior, currentMovements) {
+    const categories = {};
+    const totals = {};
+    const accounts = {};
 
-  for (const key of Object.keys(prior.categories)) {
-    if (key === "depreciationCharge") {
-      // ✅ Reset each year: only take current year’s charge
-      categories[key] = currentMovements.categories[key] || 0;
-    } else {
-      categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
+    for (const key of Object.keys(prior.categories)) {
+      if (key === "depreciationCharge") {
+        // ✅ Reset each year: only take current year’s charge
+        categories[key] = currentMovements.categories[key] || 0;
+      } else {
+        categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
+      }
     }
+
+    for (const key of Object.keys(prior.totals)) {
+      totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
+    }
+
+    for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
+      accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
+    }
+
+    return { totals, accounts, categories };
   }
 
-  for (const key of Object.keys(prior.totals)) {
-    totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
-  }
+  let current = addCarryForward(prior, currentMovements);
 
-  for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
-    accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
-  }
+  // Round totals and categories before returning
+  current.totals = roundObjectValues(current.totals);
+  current.categories = roundObjectValues(current.categories);
+  prior.totals = roundObjectValues(prior.totals);
+  prior.categories = roundObjectValues(prior.categories);
 
-  return { totals, accounts, categories };
-}
-
-let current = addCarryForward(prior, currentMovements);
-
-// Round totals and categories before returning
-current.totals = roundObjectValues(current.totals);
-current.categories = roundObjectValues(current.categories);
-prior.totals = roundObjectValues(prior.totals);
-prior.categories = roundObjectValues(prior.categories);
-
-const payload = {
-  overview: {
-    totals: {
-      non_current_assets: current.totals.totalFixedAssets,
-      current_assets: current.totals.totalCurrentAssets,
-      total_assets: current.totals.totalAssets,
-      current_liabilities: current.totals.totalCurrentLiabilities,
-      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-      total_liabilities: current.totals.totalLiabilities,
-      total_equity: current.totals.totalEquity,
+  const payload = {
+    overview: {
+      totals: {
+        non_current_assets: current.totals.totalFixedAssets,
+        current_assets: current.totals.totalCurrentAssets,
+        total_assets: current.totals.totalAssets,
+        current_liabilities: current.totals.totalCurrentLiabilities,
+        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+        total_liabilities: current.totals.totalLiabilities,
+        total_equity: current.totals.totalEquity,
       capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
     },
     accounts: current.accounts,
