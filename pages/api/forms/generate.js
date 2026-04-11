@@ -1386,12 +1386,12 @@ function computeFromJournals(journals) {
   let categories = {
     fixedAssets: 0,
     accumulatedDepreciation: 0,
-    depreciationCharge: 0,   // NEW category
+    depreciationCharge: 0,
     bank: 0,
     receivables: 0,
     payables: 0,
     equity: 0,
-    directorLoans: 0,        // NEW category
+    directorLoans: 0,
   };
 
   (journals || []).forEach(j => {
@@ -1407,7 +1407,7 @@ function computeFromJournals(journals) {
         accounts[code] = (accounts[code] || 0) + (debit - credit);
       }
 
-      // Grouping logic based on your schema
+      // Grouping logic
       if (bucket === "fixed_asset") {
         totals.totalFixedAssets += debit - credit;
         categories.fixedAssets += debit - credit;
@@ -1433,12 +1433,10 @@ function computeFromJournals(journals) {
         categories.equity += credit - debit;
       }
 
-      // NEW: Director loans (504x range)
       if (bucket === "balance_sheet" && code && code.startsWith("504")) {
         categories.directorLoans += debit - credit;
       }
 
-      // 🔧 NEW: Map depreciation journals
       if (name.includes("depreciation expense")) {
         categories.depreciationCharge += debit;
       }
@@ -1451,10 +1449,13 @@ function computeFromJournals(journals) {
       if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
     });
   });
-// 🔧 Force equity to equal net assets
-totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-return { totals, accounts, categories };
+  // 🔧 Force equity to equal net assets
+  totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
+
+  return { totals, accounts, categories };
+}
+
 
 
 
