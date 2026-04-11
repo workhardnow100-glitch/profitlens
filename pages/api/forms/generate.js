@@ -1384,7 +1384,7 @@ function computeFromJournals(journals) {
   };
   let accounts = {};
   let categories = {
-    fixedAssets: 0,
+    fixedAssets: 0,              // will be recalculated to NBV
     accumulatedDepreciation: 0,
     depreciationCharge: 0,
     bank: 0,
@@ -1410,7 +1410,8 @@ function computeFromJournals(journals) {
       // Grouping logic
       if (bucket === "fixed_asset") {
         totals.totalFixedAssets += debit - credit;
-        categories.fixedAssets += debit - credit;
+        // track gross cost movements in a temp variable
+        categories._grossCost = (categories._grossCost || 0) + (debit - credit);
       }
       if (bucket === "fixed_asset_contra") {
         totals.totalFixedAssets -= (debit - credit);
@@ -1452,6 +1453,10 @@ function computeFromJournals(journals) {
 
   // ✅ Enforce statutory identity: Equity = Assets − Liabilities
   totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
+
+  // ✅ Recalculate NBV: gross cost − accumulated depreciation
+  const grossCost = categories._grossCost || 0;
+  categories.fixedAssets = grossCost - (categories.accumulatedDepreciation || 0);
 
   return { totals, accounts, categories };
 }
