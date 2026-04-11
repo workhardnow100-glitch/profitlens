@@ -1517,25 +1517,33 @@ function computeFromJournals(journals) {
   }
 
   // Always add prior balances to current movements
-  function addCarryForward(prior, currentMovements) {
-    const categories = {};
-    const totals = {};
-    const accounts = {};
+function addCarryForward(prior, currentMovements) {
+  const categories = {};
+  const totals = {};
+  const accounts = {};
 
-    for (const key of Object.keys(prior.categories)) {
+  for (const key of Object.keys(prior.categories)) {
+    if (key === "depreciationCharge") {
+      // ✅ Reset each year: only take current year’s charge
+      categories[key] = currentMovements.categories[key] || 0;
+    } else {
+      // Carry forward accumulated balances and other categories
       categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
     }
-    for (const key of Object.keys(prior.totals)) {
-      totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
-    }
-    for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
-      accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
-    }
-
-    return { totals, accounts, categories };
   }
 
-  let current = addCarryForward(prior, currentMovements);
+  for (const key of Object.keys(prior.totals)) {
+    totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
+  }
+
+  for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
+    accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
+  }
+
+  return { totals, accounts, categories };
+}
+
+let current = addCarryForward(prior, currentMovements);
 
   // Round totals and categories before returning
   current.totals = roundObjectValues(current.totals);
