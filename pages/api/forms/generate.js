@@ -1548,14 +1548,16 @@ function addCarryForward(prior, currentMovements) {
 }
 
 let current = addCarryForward(prior, currentMovements);
+// Round totals and categories before returning
+current.totals = roundObjectValues(current.totals);
+current.categories = roundObjectValues(current.categories);
+prior.totals = roundObjectValues(prior.totals);
+prior.categories = roundObjectValues(prior.categories);
 
-  // Round totals and categories before returning
-  current.totals = roundObjectValues(current.totals);
-  current.categories = roundObjectValues(current.categories);
-  prior.totals = roundObjectValues(prior.totals);
-  prior.categories = roundObjectValues(prior.categories);
+// ✅ Ensure prior year equity is always set correctly
+prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
 
- const payload = {
+const payload = {
   overview: {
     totals: {
       non_current_assets: current.totals.totalFixedAssets,
@@ -1565,26 +1567,24 @@ let current = addCarryForward(prior, currentMovements);
       non_current_liabilities: current.totals.totalNonCurrentLiabilities,
       total_liabilities: current.totals.totalLiabilities,
       total_equity: current.totals.totalEquity,
-      // 🔧 Ensure capital & reserves matches net assets
-      capital_and_reserves: 
-        (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
+      capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
     },
     accounts: current.accounts,
     categories: current.categories,
   },
-    overviewPrior: {
-      totals: {
-        non_current_assets: prior.totals.totalFixedAssets,
-        current_assets: prior.totals.totalCurrentAssets,
-        total_assets: prior.totals.totalAssets,
-        current_liabilities: prior.totals.totalCurrentLiabilities,
-        non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-        total_liabilities: prior.totals.totalLiabilities,
-        total_equity: prior.totals.totalEquity,
-      },
-      accounts: prior.accounts,
-      categories: prior.categories,
+  overviewPrior: {
+    totals: {
+      non_current_assets: prior.totals.totalFixedAssets,
+      current_assets: prior.totals.totalCurrentAssets,
+      total_assets: prior.totals.totalAssets,
+      current_liabilities: prior.totals.totalCurrentLiabilities,
+      non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+      total_liabilities: prior.totals.totalLiabilities,
+      total_equity: prior.totals.totalEquity,   // ✅ now always correct
     },
+    accounts: prior.accounts,
+    categories: prior.categories,
+  },
     notes: {
       accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
       employees: client?.employees_current_year || 0,
