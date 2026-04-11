@@ -1451,9 +1451,11 @@ function computeFromJournals(journals) {
       if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
     });
   });
+// 🔧 Force equity to equal net assets
+totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-  return { totals, accounts, categories };
-}
+return { totals, accounts, categories };
+
 
 
   // Rounding helper
