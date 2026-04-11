@@ -1469,58 +1469,61 @@ function computeFromJournals(journals) {
     return rounded;
   }
 
-  // Compute current year movements
-  let currentMovements = computeFromJournals(journals);
+ // Compute current year movements
+let currentMovements = computeFromJournals(journals);
 
-  // Prior year journals
-  const priorYearStart = new Date(periodStart);
-  priorYearStart.setFullYear(priorYearStart.getFullYear() - 1);
-  const priorYearEnd = new Date(periodEnd);
-  priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
+// Prior year journals
+const priorYearStart = new Date(periodStart);
+priorYearStart.setFullYear(priorYearStart.getFullYear() - 1);
+const priorYearEnd = new Date(periodEnd);
+priorYearEnd.setFullYear(priorYearEnd.getFullYear() - 1);
 
-  const { data: priorJournals } = await supabaseAdmin
-    .from("journal_entries")
-    .select(`
-      id,
-      date,
-      journal_lines (
-        debit,
-        credit,
-        chart_of_account_entries (
-          account_code,
-          account_name,
-          account_type,
-          hmrc_bucket
-        )
+const { data: priorJournals } = await supabaseAdmin
+  .from("journal_entries")
+  .select(`
+    id,
+    date,
+    journal_lines (
+      debit,
+      credit,
+      chart_of_account_entries (
+        account_code,
+        account_name,
+        account_type,
+        hmrc_bucket
       )
-    `)
-    .eq("client_id", clientId)
-    .gte("date", priorYearStart.toISOString().split("T")[0])
-    .lte("date", priorYearEnd.toISOString().split("T")[0]);
+    )
+  `)
+  .eq("client_id", clientId)
+  .gte("date", priorYearStart.toISOString().split("T")[0])
+  .lte("date", priorYearEnd.toISOString().split("T")[0]);
 
-  let prior = computeFromJournals(priorJournals);
+let prior = computeFromJournals(priorJournals);
 
-  // If accounts_submissions exists, override prior totals
-  const { data: priorSubmission } = await supabaseAdmin
-    .from("accounts_submissions")
-    .select("*")
-    .eq("client_id", clientId)
-    .eq("period_end", priorYearEnd.toISOString().split("T")[0])
-    .maybeSingle();
+// If accounts_submissions exists, override prior totals
+const { data: priorSubmission } = await supabaseAdmin
+  .from("accounts_submissions")
+  .select("*")
+  .eq("client_id", clientId)
+  .eq("period_end", priorYearEnd.toISOString().split("T")[0])
+  .maybeSingle();
 
-  if (priorSubmission) {
-    prior.totals.totalAssets = priorSubmission.total_assets || prior.totals.totalAssets;
-    prior.totals.totalLiabilities = priorSubmission.total_liabilities || prior.totals.totalLiabilities;
-    prior.totals.totalEquity = priorSubmission.total_equity || prior.totals.totalEquity;
-    prior.totals.totalFixedAssets = priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
-    prior.totals.totalCurrentAssets = priorSubmission.current_assets || prior.totals.totalCurrentAssets;
-    prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
-    prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
-    prior.accounts = priorSubmission.accounts || prior.accounts;
-    prior.categories = priorSubmission.categories || prior.categories;
-  }
+if (priorSubmission) {
+  prior.totals.totalAssets = priorSubmission.total_assets || prior.totals.totalAssets;
+  prior.totals.totalLiabilities = priorSubmission.total_liabilities || prior.totals.totalLiabilities;
+  prior.totals.totalEquity = priorSubmission.total_equity || prior.totals.totalEquity;
+  prior.totals.totalFixedAssets = priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
+  prior.totals.totalCurrentAssets = priorSubmission.current_assets || prior.totals.totalCurrentAssets;
+  prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
+  prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
+  prior.accounts = priorSubmission.accounts || prior.accounts;
+  prior.categories = priorSubmission.categories || prior.categories;
+} else {
+  // ✅ Lock prior equity before carry‑forward if no submission override
+  prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
+}
 
-  // Always add prior balances to current movements
+// Always add prior balances to current movements
 function addCarryForward(prior, currentMovements) {
   const categories = {};
   const totals = {};
@@ -1531,7 +1534,6 @@ function addCarryForward(prior, currentMovements) {
       // ✅ Reset each year: only take current year’s charge
       categories[key] = currentMovements.categories[key] || 0;
     } else {
-      // Carry forward accumulated balances and other categories
       categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
     }
   }
@@ -1548,14 +1550,12 @@ function addCarryForward(prior, currentMovements) {
 }
 
 let current = addCarryForward(prior, currentMovements);
+
 // Round totals and categories before returning
 current.totals = roundObjectValues(current.totals);
 current.categories = roundObjectValues(current.categories);
 prior.totals = roundObjectValues(prior.totals);
 prior.categories = roundObjectValues(prior.categories);
-
-// ✅ Ensure prior year equity is always set correctly
-prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
 
 const payload = {
   overview: {
@@ -1580,30 +1580,30 @@ const payload = {
       current_liabilities: prior.totals.totalCurrentLiabilities,
       non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
       total_liabilities: prior.totals.totalLiabilities,
-      total_equity: prior.totals.totalEquity,   // ✅ now always correct
+      total_equity: prior.totals.totalEquity,   // ✅ locked before carry‑forward
     },
     accounts: prior.accounts,
     categories: prior.categories,
   },
-    notes: {
-      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-      employees: client?.employees_current_year || 0,
-      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-      debtors: client?.debtors_total || 0,
-      creditors: client?.creditors_total || 0,
-    },
-    directorApproval: {
-      approvedBy: client?.director_name || "Director",
-      signature: client?.director_signature_name || "Signature",
-      approvalDate: client?.accounts_approval_date
-        ? client.accounts_approval_date.toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0],
-      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-    },
-  };
+  notes: {
+    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+    employees: client?.employees_current_year || 0,
+    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+    debtors: client?.debtors_total || 0,
+    creditors: client?.creditors_total || 0,
+  },
+  directorApproval: {
+    approvedBy: client?.director_name || "Director",
+    signature: client?.director_signature_name || "Signature",
+    approvalDate: client?.accounts_approval_date
+      ? client.accounts_approval_date.toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0],
+    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+  },
+};
 
-  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-  return payload;
+console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+return payload;
 }
 
 
