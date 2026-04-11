@@ -1450,11 +1450,12 @@ function computeFromJournals(journals) {
     });
   });
 
-  // 🔧 Force equity to equal net assets
+  // ✅ Enforce statutory identity: Equity = Assets − Liabilities
   totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
   return { totals, accounts, categories };
 }
+
 
 
 
