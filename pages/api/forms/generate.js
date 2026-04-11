@@ -1384,7 +1384,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     };
     let accounts = {};
     let categories = {
-      fixedAssets: 0,              // will be recalculated to NBV
+      fixedAssets: 0,              // NBV
+      assetCost: 0,                // expose gross cost for notes
       accumulatedDepreciation: 0,
       depreciationCharge: 0,
       bank: 0,
@@ -1393,8 +1394,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       equity: 0,
       directorLoans: 0,
     };
-
-    let grossCost = 0; // internal tracker for asset cost
 
     (journals || []).forEach(j => {
       (j.journal_lines || []).forEach(line => {
@@ -1412,7 +1411,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         // Grouping logic
         if (bucket === "fixed_asset") {
           totals.totalFixedAssets += debit - credit;
-          grossCost += debit - credit; // track gross cost
+          categories.assetCost += debit - credit; // track gross cost
         }
         if (bucket === "fixed_asset_contra") {
           totals.totalFixedAssets -= (debit - credit);
@@ -1455,8 +1454,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     // ✅ Enforce statutory identity: Equity = Assets − Liabilities
     totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-    // ✅ Recalculate NBV: gross cost − accumulated depreciation
-    categories.fixedAssets = grossCost - (categories.accumulatedDepreciation || 0);
+    // ✅ Recalculate NBV: cost − accumulated depreciation
+    categories.fixedAssets = (categories.assetCost || 0) - (categories.accumulatedDepreciation || 0);
 
     return { totals, accounts, categories };
   }
@@ -1568,9 +1567,9 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         non_current_liabilities: current.totals.totalNonCurrentLiabilities,
         total_liabilities: current.totals.totalLiabilities,
         total_equity: current.totals.totalEquity,
-      capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
-    },
-    accounts: current.accounts,
+        capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
+      },
+      accounts: current.accounts,
     categories: current.categories,
   },
   overviewPrior: {
