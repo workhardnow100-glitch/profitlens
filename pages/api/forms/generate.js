@@ -1385,7 +1385,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     let accounts = {};
     let categories = {
       fixedAssets: 0,              // NBV
-      assetCost: 0,                // expose gross cost for notes
       accumulatedDepreciation: 0,
       depreciationCharge: 0,
       bank: 0,
@@ -1411,7 +1410,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         // Grouping logic
         if (bucket === "fixed_asset") {
           totals.totalFixedAssets += debit - credit;
-          categories.assetCost += debit - credit; // track gross cost
+          categories.fixedAssets += debit - credit; // track gross cost
         }
         if (bucket === "fixed_asset_contra") {
           totals.totalFixedAssets -= (debit - credit);
@@ -1455,7 +1454,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
     // ✅ Recalculate NBV: cost − accumulated depreciation
-    categories.fixedAssets = (categories.assetCost || 0) - (categories.accumulatedDepreciation || 0);
+    categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
 
     return { totals, accounts, categories };
   }
