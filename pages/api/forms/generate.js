@@ -1411,8 +1411,9 @@ function computeFromJournals(journals) {
     // In computeFromJournals
 if (bucket === "fixed_asset") {
   totals.totalFixedAssets += debit - credit;
-  categories.fixedAssets += debit - credit;   // gross cost movements
+  // remove categories.fixedAssets += debit - credit;
 }
+
 
 if (bucket === "fixed_asset_contra") {
   // ignore full contra balance here
