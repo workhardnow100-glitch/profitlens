@@ -1372,6 +1372,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   }
 
   // Helper to compute totals + accounts + categories from journals
+// Helper to compute totals + accounts + categories from journals
 function computeFromJournals(journals) {
   let totals = {
     totalAssets: 0,
@@ -1384,14 +1385,14 @@ function computeFromJournals(journals) {
   };
   let accounts = {};
   let categories = {
-    fixedAssets: 0,              // NBV
+    fixedAssets: 0,
     accumulatedDepreciation: 0,
-    depreciationCharge: 0,
+    depreciationCharge: 0,   // NEW category
     bank: 0,
     receivables: 0,
     payables: 0,
     equity: 0,
-    directorLoans: 0,
+    directorLoans: 0,        // NEW category
   };
 
   (journals || []).forEach(j => {
@@ -1407,44 +1408,43 @@ function computeFromJournals(journals) {
         accounts[code] = (accounts[code] || 0) + (debit - credit);
       }
 
-      // Fixed assets (gross movements)
+      // Grouping logic based on your schema
       if (bucket === "fixed_asset") {
         totals.totalFixedAssets += debit - credit;
         categories.fixedAssets += debit - credit;
       }
-
-      // Accumulated depreciation (credits increase depreciation)
       if (bucket === "fixed_asset_contra") {
-        categories.accumulatedDepreciation += credit - debit;
+        totals.totalFixedAssets -= (debit - credit);
+        categories.accumulatedDepreciation += debit - credit;
       }
 
-      // Current assets
       if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
         totals.totalCurrentAssets += debit - credit;
         if (type === "BANK") categories.bank += debit - credit;
         if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
       }
 
-      // Liabilities
       if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
         totals.totalCurrentLiabilities += credit - debit;
         categories.payables += credit - debit;
       }
 
-      // Equity
       if (bucket === "equity" || type === "EQUITY") {
         totals.totalEquity += credit - debit;
         categories.equity += credit - debit;
       }
 
-      // Director loans
+      // NEW: Director loans (504x range)
       if (bucket === "balance_sheet" && code && code.startsWith("504")) {
         categories.directorLoans += debit - credit;
       }
 
-      // Depreciation expense
+      // 🔧 NEW: Map depreciation journals
       if (name.includes("depreciation expense")) {
         categories.depreciationCharge += debit;
+      }
+      if (name.includes("accumulated depreciation")) {
+        categories.accumulatedDepreciation += credit;
       }
 
       // Grand totals
@@ -1453,14 +1453,9 @@ function computeFromJournals(journals) {
     });
   });
 
-  // ✅ Enforce statutory identity
-  totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
-
-  // ✅ Net Book Value = cost − accumulated depreciation
-  categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
-
   return { totals, accounts, categories };
 }
+
 
 
 
