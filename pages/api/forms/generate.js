@@ -1455,9 +1455,6 @@ if (bucket === "fixed_asset_contra") {
   });
 });
 
-// Net Book Value = cost − accumulated depreciation
-categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
-
 return { totals, accounts, categories };
 
 }
@@ -1558,9 +1555,10 @@ function addCarryForward(prior, currentMovements) {
   }
 
   // ✅ Recalculate NBV correctly
-  const cost = (prior.categories.fixedAssets || 0) + (currentMovements.categories.fixedAssets || 0);
-  const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.accumulatedDepreciation || 0);
-  categories.fixedAssets = cost - depreciation;
+const cost = (prior.categories.fixedAssets || 0) + (currentMovements.categories.fixedAssets || 0);
+const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.accumulatedDepreciation || 0);
+categories.fixedAssets = cost - depreciation;
+
 
   return { totals, accounts, categories };
 }
