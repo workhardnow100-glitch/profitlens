@@ -1574,12 +1574,14 @@ prior.categories = roundObjectValues(prior.categories);
 // ✅ Ensure prior fixed assets are NBV (cost – depreciation)
 const priorCost = prior.totals.totalFixedAssets || 0;
 const priorDep = prior.categories.accumulatedDepreciation || 0;
-prior.categories.fixedAssets = priorCost - priorDep;
+const priorNBV = priorCost - priorDep;
+prior.categories.fixedAssets = priorNBV;
+prior.totals.non_current_assets = priorNBV;   // overwrite gross cost with NBV
 
 const payload = {
   overview: {
     totals: {
-      non_current_assets: current.totals.totalFixedAssets,
+      non_current_assets: current.categories.fixedAssets,   // NBV current year
       current_assets: current.totals.totalCurrentAssets,
       total_assets: current.totals.totalAssets,
       current_liabilities: current.totals.totalCurrentLiabilities,
@@ -1593,13 +1595,13 @@ const payload = {
   },
   overviewPrior: {
     totals: {
-      non_current_assets: prior.totals.totalFixedAssets,
+      non_current_assets: prior.totals.non_current_assets,   // ✅ NBV prior year
       current_assets: prior.totals.totalCurrentAssets,
       total_assets: prior.totals.totalAssets,
       current_liabilities: prior.totals.totalCurrentLiabilities,
       non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
       total_liabilities: prior.totals.totalLiabilities,
-      total_equity: prior.totals.totalEquity,   // ✅ locked before carry‑forward
+      total_equity: prior.totals.totalEquity,   // locked before carry‑forward
     },
     accounts: prior.accounts,
     categories: prior.categories,
@@ -1620,6 +1622,10 @@ const payload = {
     statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
   },
 };
+
+console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+return payload;
+
 
 console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
 return payload;
