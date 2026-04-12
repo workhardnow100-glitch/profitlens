@@ -1531,30 +1531,37 @@ return { totals, accounts, categories };
     prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
   }
 
-  // Always add prior balances to current movements
- function addCarryForward(prior, currentMovements) {
+ // Always add prior balances to current movements
+function addCarryForward(prior, currentMovements) {
   const categories = {};
   const totals = {};
   const accounts = {};
 
+  // Merge categories
   for (const key of Object.keys(prior.categories)) {
     if (key === "depreciationCharge") {
+      // depreciation charge is only current year
       categories[key] = currentMovements.categories[key] || 0;
     } else {
       categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
     }
   }
 
+  // Merge totals
   for (const key of Object.keys(prior.totals)) {
     totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
   }
 
+  // Merge accounts
   for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
     accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
   }
 
-  // ✅ Recalculate NBV after carry-forward
-  categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
+  // ✅ Recalculate NBV correctly:
+  // cost (fixedAsset movements) minus accumulated depreciation
+  const cost = (prior.categories.fixedAssets || 0) + (currentMovements.categories.fixedAssets || 0);
+  const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.accumulatedDepreciation || 0);
+  categories.fixedAssets = cost - depreciation;
 
   return { totals, accounts, categories };
 }
