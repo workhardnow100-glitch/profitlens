@@ -1554,10 +1554,10 @@ function addCarryForward(prior, currentMovements) {
     accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
   }
 
-  // ✅ Recalculate NBV correctly
-const cost = (prior.categories.fixedAssets || 0) + (currentMovements.categories.fixedAssets || 0);
-const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.accumulatedDepreciation || 0);
+const cost = currentMovements.categories.fixedAssets || 0;
+const depreciation = currentMovements.categories.accumulatedDepreciation || 0;
 categories.fixedAssets = cost - depreciation;
+
 
 
   return { totals, accounts, categories };
