@@ -1572,13 +1572,7 @@ current.categories = roundObjectValues(current.categories);
 prior.totals = roundObjectValues(prior.totals);
 prior.categories = roundObjectValues(prior.categories);
 
-// ✅ Ensure prior fixed assets are NBV (cost – depreciation)
-const priorCost = prior.totals.totalFixedAssets || 0;
-const priorDep = prior.categories.accumulatedDepreciation || 0;
-const priorNBV = priorCost - priorDep;
 
-prior.categories.fixedAssets = priorNBV;
-prior.totals.non_current_assets = priorNBV;   // overwrite gross cost with NBV
 
 
 const payload = {
