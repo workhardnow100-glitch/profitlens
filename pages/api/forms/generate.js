@@ -1528,8 +1528,7 @@ return { totals, accounts, categories };
     // ✅ Lock prior equity before carry‑forward if no submission override
     prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
   }
-
- // Always add prior balances to current movements
+// Carry forward balances correctly
 function addCarryForward(prior, currentMovements) {
   const categories = {};
   const totals = {};
@@ -1538,6 +1537,7 @@ function addCarryForward(prior, currentMovements) {
   // Merge categories
   for (const key of Object.keys(prior.categories)) {
     if (key === "depreciationCharge") {
+      // depreciation charge is only current year
       categories[key] = currentMovements.categories[key] || 0;
     } else {
       categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
@@ -1554,14 +1554,19 @@ function addCarryForward(prior, currentMovements) {
     accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
   }
 
-const cost = currentMovements.categories.fixedAssets || 0;
-const depreciation = currentMovements.categories.accumulatedDepreciation || 0;
-categories.fixedAssets = cost - depreciation;
+  // ✅ Recalculate NBV correctly:
+  // Cost = prior cost + current additions/disposals
+  const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
 
+  // Depreciation = prior accumulated depreciation + current year charge
+  const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.depreciationCharge || 0);
 
+  categories.accumulatedDepreciation = depreciation;
+  categories.fixedAssets = cost - depreciation;
 
   return { totals, accounts, categories };
 }
+
 
 
   let current = addCarryForward(prior, currentMovements);
