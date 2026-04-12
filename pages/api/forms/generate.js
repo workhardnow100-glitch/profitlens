@@ -1564,7 +1564,7 @@ function addCarryForward(prior, currentMovements) {
 let current = addCarryForward(prior, currentMovements);
 
 
-  // Round totals and categories before returning
+ // Round totals and categories before returning
 current.totals = roundObjectValues(current.totals);
 current.categories = roundObjectValues(current.categories);
 prior.totals = roundObjectValues(prior.totals);
