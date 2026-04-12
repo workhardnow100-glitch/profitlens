@@ -1343,7 +1343,7 @@ async function buildCISFormData(
 };
 
 }
-// /// ---------------- ACCOUNTS BUILDER ----------------
+/// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
@@ -1406,7 +1406,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
 
         if (bucket === "fixed_asset_contra") {
-          // opening accumulated depreciation
+          // opening accumulated depreciation only
           categories.accumulatedDepreciation += credit - debit;
         }
 
@@ -1558,7 +1558,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         current_assets: current.totals.totalCurrentAssets,
         total_assets: current.totals.totalAssets,
         current_liabilities: current.totals.totalCurrentLiabilities,
-               non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+                non_current_liabilities: current.totals.totalNonCurrentLiabilities,
         total_liabilities: current.totals.totalLiabilities,
         total_equity: current.totals.totalEquity,
         capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
