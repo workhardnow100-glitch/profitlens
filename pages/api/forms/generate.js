@@ -1396,64 +1396,69 @@ function computeFromJournals(journals) {
   };
 
   (journals || []).forEach(j => {
-    (j.journal_lines || []).forEach(line => {
-      const debit = Number(line.debit || 0);
-      const credit = Number(line.credit || 0);
-      const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
-      const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
-      const code = line.chart_of_account_entries?.account_code;
-      const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
+  (j.journal_lines || []).forEach(line => {
+    const debit = Number(line.debit || 0);
+    const credit = Number(line.credit || 0);
+    const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
+    const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+    const code = line.chart_of_account_entries?.account_code;
+    const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
 
-      if (code) {
-        accounts[code] = (accounts[code] || 0) + (debit - credit);
-      }
+    if (code) {
+      accounts[code] = (accounts[code] || 0) + (debit - credit);
+    }
 
-      // Grouping logic based on your schema
-      if (bucket === "fixed_asset") {
-        totals.totalFixedAssets += debit - credit;
-        categories.fixedAssets += debit - credit;
-      }
-      if (bucket === "fixed_asset_contra") {
-        totals.totalFixedAssets -= (debit - credit);
-        categories.accumulatedDepreciation += debit - credit;
-      }
+    // Fixed assets (gross cost movements)
+    if (bucket === "fixed_asset") {
+      totals.totalFixedAssets += debit - credit;
+      categories.fixedAssets += debit - credit;
+    }
 
-      if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
-        totals.totalCurrentAssets += debit - credit;
-        if (type === "BANK") categories.bank += debit - credit;
-        if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
-      }
+    // Accumulated depreciation: credits increase depreciation
+    if (bucket === "fixed_asset_contra") {
+      categories.accumulatedDepreciation += credit;
+    }
 
-      if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
-        totals.totalCurrentLiabilities += credit - debit;
-        categories.payables += credit - debit;
-      }
+    // Current assets
+    if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
+      totals.totalCurrentAssets += debit - credit;
+      if (type === "BANK") categories.bank += debit - credit;
+      if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
+    }
 
-      if (bucket === "equity" || type === "EQUITY") {
-        totals.totalEquity += credit - debit;
-        categories.equity += credit - debit;
-      }
+    // Liabilities
+    if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
+      totals.totalCurrentLiabilities += credit - debit;
+      categories.payables += credit - debit;
+    }
 
-      // NEW: Director loans (504x range)
-      if (bucket === "balance_sheet" && code && code.startsWith("504")) {
-        categories.directorLoans += debit - credit;
-      }
+    // Equity
+    if (bucket === "equity" || type === "EQUITY") {
+      totals.totalEquity += credit - debit;
+      categories.equity += credit - debit;
+    }
 
-      // 🔧 NEW: Map depreciation journals
-      if (name.includes("depreciation expense")) {
-        categories.depreciationCharge += debit;
-      }
-      if (name.includes("accumulated depreciation")) {
-        categories.accumulatedDepreciation += credit;
-      }
+    // Director loans (504x range)
+    if (bucket === "balance_sheet" && code && code.startsWith("504")) {
+      categories.directorLoans += debit - credit;
+    }
 
-      // Grand totals
-      if (type === "ASSET") totals.totalAssets += debit - credit;
-      if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
-    });
+    // Depreciation expense journals
+    if (name.includes("depreciation expense")) {
+      categories.depreciationCharge += debit;
+    }
+
+    // Grand totals
+    if (type === "ASSET") totals.totalAssets += debit - credit;
+    if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
   });
+});
 
-  return { totals, accounts, categories };
+// ✅ Net Book Value = cost − accumulated depreciation
+categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
+
+return { totals, accounts, categories };
+
 }
 
 
