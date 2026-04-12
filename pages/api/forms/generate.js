@@ -1416,9 +1416,10 @@ if (bucket === "fixed_asset") {
 
 
 if (bucket === "fixed_asset_contra") {
-  // ignore full contra balance here
-  // depreciation is handled via depreciationCharge
+  totals.totalFixedAssets += 0; // don’t add to cost
+  categories.accumulatedDepreciation += credit - debit; // store contra balance
 }
+
 
 
 
