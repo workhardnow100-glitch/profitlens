@@ -1394,7 +1394,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       directorLoans: 0,
     };
 
-   (journals || []).forEach(j => {
+  (journals || []).forEach(j => {
   (j.journal_lines || []).forEach(line => {
     const debit = Number(line.debit || 0);
     const credit = Number(line.credit || 0);
@@ -1409,12 +1409,13 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
     // Grouping logic
     if (bucket === "fixed_asset") {
+      // track gross cost only
       totals.totalFixedAssets += debit - credit;
-      categories.fixedAssets += debit - credit; // track gross cost
+      categories.grossCost = (categories.grossCost || 0) + (debit - credit);
     }
     if (bucket === "fixed_asset_contra") {
-      // ✅ only track accumulated depreciation here
-      categories.accumulatedDepreciation += credit - debit;
+      // track accumulated depreciation (credits increase depreciation)
+      categories.accumulatedDepreciation = (categories.accumulatedDepreciation || 0) + (credit - debit);
     }
 
     if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
@@ -1453,9 +1454,10 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 // ✅ Enforce statutory identity: Equity = Assets − Liabilities
 totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-// ✅ Recalculate NBV: cost − accumulated depreciation
-categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
+// ✅ Recalculate NBV once: gross cost − accumulated depreciation
+categories.fixedAssets = (categories.grossCost || 0) - (categories.accumulatedDepreciation || 0);
 
+return { totals, accounts, categories };
 return { totals, accounts, categories };
 
 
