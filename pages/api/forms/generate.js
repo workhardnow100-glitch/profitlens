@@ -1343,9 +1343,8 @@ async function buildCISFormData(
 };
 
 }
-// // ---------------- ACCOUNTS BUILDER ----------------
+// /// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
-  // Current year journals
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
     .select(`
@@ -1371,7 +1370,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     return { overview: { totals: {} }, overviewPrior: { totals: {} } };
   }
 
-  // Helper to compute totals + accounts + categories from journals
   function computeFromJournals(journals) {
     let totals = {
       totalAssets: 0,
@@ -1403,50 +1401,39 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         const code = line.chart_of_account_entries?.account_code;
         const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
 
-        if (code) {
-          accounts[code] = (accounts[code] || 0) + (debit - credit);
-        }
+        if (code) accounts[code] = (accounts[code] || 0) + (debit - credit);
 
-        // Fixed asset cost
-        if (bucket === "fixed_asset") {
-          totals.totalFixedAssets += debit - credit;
-        }
+        if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
 
-        // Accumulated depreciation (contra accounts)
         if (bucket === "fixed_asset_contra") {
+          // opening accumulated depreciation
           categories.accumulatedDepreciation += credit - debit;
         }
 
-        // Current assets
         if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
           totals.totalCurrentAssets += debit - credit;
           if (type === "BANK") categories.bank += debit - credit;
           if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
         }
 
-        // Liabilities
         if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
           totals.totalCurrentLiabilities += credit - debit;
           categories.payables += credit - debit;
         }
 
-        // Equity
         if (bucket === "equity" || type === "EQUITY") {
           totals.totalEquity += credit - debit;
           categories.equity += credit - debit;
         }
 
-        // Director loans
         if (bucket === "balance_sheet" && code && code.startsWith("504")) {
           categories.directorLoans += debit - credit;
         }
 
-        // Depreciation expense journals
         if (name.includes("depreciation expense")) {
           categories.depreciationCharge += debit;
         }
 
-        // Grand totals
         if (type === "ASSET") totals.totalAssets += debit - credit;
         if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
       });
@@ -1455,19 +1442,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     return { totals, accounts, categories };
   }
 
-  // Rounding helper
   function roundObjectValues(obj) {
     const rounded = {};
-    for (const key in obj) {
-      rounded[key] = Math.round(obj[key] || 0);
-    }
+    for (const key in obj) rounded[key] = Math.round(obj[key] || 0);
     return rounded;
   }
 
-  // Compute current year movements
   let currentMovements = computeFromJournals(journals);
 
-  // Prior year journals
   const priorYearStart = new Date(periodStart);
   priorYearStart.setFullYear(priorYearStart.getFullYear() - 1);
   const priorYearEnd = new Date(periodEnd);
@@ -1495,7 +1477,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   let prior = computeFromJournals(priorJournals);
 
-  // If accounts_submissions exists, override prior totals
   const { data: priorSubmission } = await supabaseAdmin
     .from("accounts_submissions")
     .select("*")
@@ -1517,13 +1498,16 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
   }
 
-  // Carry forward balances correctly
+  // Lock prior NBV once
+  const priorCost = prior.totals.totalFixedAssets || 0;
+  const priorDep = prior.categories.accumulatedDepreciation || 0;
+  prior.categories.fixedAssets = priorCost - priorDep;
+
   function addCarryForward(prior, currentMovements) {
     const categories = {};
     const totals = {};
     const accounts = {};
 
-    // Merge categories
     for (const key of Object.keys(prior.categories)) {
       if (key === "depreciationCharge") {
         categories[key] = currentMovements.categories[key] || 0;
@@ -1532,17 +1516,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       }
     }
 
-    // Merge totals
     for (const key of Object.keys(prior.totals)) {
       totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
     }
 
-    // Merge accounts
     for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
       accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
     }
 
-    // NBV calculation
     const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
     const depreciation = (prior.categories.accumulatedDepreciation || 0)
                        + (currentMovements.categories.depreciationCharge || 0);
@@ -1555,16 +1536,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   let current = addCarryForward(prior, currentMovements);
 
-  // Round before returning
   current.totals = roundObjectValues(current.totals);
   current.categories = roundObjectValues(current.categories);
   prior.totals = roundObjectValues(prior.totals);
   prior.categories = roundObjectValues(prior.categories);
 
-  // Debug logs
   console.log("=== PRIOR YEAR DEBUG ===");
-  console.log("Prior cost:", prior.totals.totalFixedAssets);
-  console.log("Prior accumulated depreciation:", prior.categories.accumulatedDepreciation);
+  console.log("Prior cost:", priorCost);
+  console.log("Prior accumulated depreciation:", priorDep);
   console.log("Prior NBV:", prior.categories.fixedAssets);
 
   console.log("=== CURRENT YEAR DEBUG ===");
@@ -1575,11 +1554,11 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const payload = {
     overview: {
       totals: {
-        non_current_assets: current.categories.fixedAssets,   // NBV current year
+        non_current_assets: current.categories.fixedAssets,
         current_assets: current.totals.totalCurrentAssets,
         total_assets: current.totals.totalAssets,
         current_liabilities: current.totals.totalCurrentLiabilities,
-        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+               non_current_liabilities: current.totals.totalNonCurrentLiabilities,
         total_liabilities: current.totals.totalLiabilities,
         total_equity: current.totals.totalEquity,
         capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
@@ -1620,6 +1599,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
+
 
 
 /* -------------------------------------------------------------------------- */
