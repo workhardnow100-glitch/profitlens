@@ -1456,17 +1456,8 @@ if (bucket === "fixed_asset_contra") {
 });
 
 return { totals, accounts, categories };
-
 }
-
-
-
-
-
-
-  
-
-  // Rounding helper
+ // Rounding helper
   function roundObjectValues(obj) {
     const rounded = {};
     for (const key in obj) {
@@ -1555,21 +1546,22 @@ function addCarryForward(prior, currentMovements) {
   }
 
   // ✅ Recalculate NBV correctly:
-  // Cost = prior cost + current additions/disposals
+  // Cost = prior cost + current year additions/disposals
   const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
 
   // Depreciation = prior accumulated depreciation + current year charge
-  const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.depreciationCharge || 0);
+  const depreciation = (prior.categories.accumulatedDepreciation || 0)
+                     + (currentMovements.categories.depreciationCharge || 0);
 
+  // Update categories
   categories.accumulatedDepreciation = depreciation;
-  categories.fixedAssets = cost - depreciation;
+  categories.fixedAssets = cost - depreciation;   // NBV
 
   return { totals, accounts, categories };
 }
 
+let current = addCarryForward(prior, currentMovements);
 
-
-  let current = addCarryForward(prior, currentMovements);
 
   // Round totals and categories before returning
   current.totals = roundObjectValues(current.totals);
