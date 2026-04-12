@@ -1575,8 +1575,10 @@ prior.categories = roundObjectValues(prior.categories);
 const priorCost = prior.totals.totalFixedAssets || 0;
 const priorDep = prior.categories.accumulatedDepreciation || 0;
 const priorNBV = priorCost - priorDep;
+
 prior.categories.fixedAssets = priorNBV;
 prior.totals.non_current_assets = priorNBV;   // overwrite gross cost with NBV
+
 
 const payload = {
   overview: {
@@ -1594,18 +1596,19 @@ const payload = {
     categories: current.categories,
   },
   overviewPrior: {
-    totals: {
-      non_current_assets: prior.totals.non_current_assets,   // ✅ NBV prior year
-      current_assets: prior.totals.totalCurrentAssets,
-      total_assets: prior.totals.totalAssets,
-      current_liabilities: prior.totals.totalCurrentLiabilities,
-      non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-      total_liabilities: prior.totals.totalLiabilities,
-      total_equity: prior.totals.totalEquity,   // locked before carry‑forward
-    },
-    accounts: prior.accounts,
-    categories: prior.categories,
+  totals: {
+    non_current_assets: prior.totals.non_current_assets,   // NBV now
+    current_assets: prior.totals.totalCurrentAssets,
+    total_assets: prior.totals.totalAssets,
+    current_liabilities: prior.totals.totalCurrentLiabilities,
+    non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+    total_liabilities: prior.totals.totalLiabilities,
+    total_equity: prior.totals.totalEquity,
   },
+  accounts: prior.accounts,
+  categories: prior.categories,
+},
+
   notes: {
     accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
     employees: client?.employees_current_year || 0,
