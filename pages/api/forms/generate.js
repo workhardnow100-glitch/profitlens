@@ -1419,10 +1419,6 @@ if (bucket === "fixed_asset_contra") {
   totals.totalFixedAssets += 0; // don’t add to cost
   categories.accumulatedDepreciation += credit - debit; // store contra balance
 }
-
-
-
-
     // Current assets
     if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
       totals.totalCurrentAssets += debit - credit;
