@@ -1407,13 +1407,13 @@ function computeFromJournals(journals) {
         accounts[code] = (accounts[code] || 0) + (debit - credit);
       }
 
-      // Fixed assets: track cost movements
+      // Fixed assets (gross movements)
       if (bucket === "fixed_asset") {
         totals.totalFixedAssets += debit - credit;
         categories.fixedAssets += debit - credit;
       }
 
-      // Accumulated depreciation: credits increase depreciation
+      // Accumulated depreciation (credits increase depreciation)
       if (bucket === "fixed_asset_contra") {
         categories.accumulatedDepreciation += credit - debit;
       }
@@ -1461,6 +1461,8 @@ function computeFromJournals(journals) {
 
   return { totals, accounts, categories };
 }
+
+
 
 
 
