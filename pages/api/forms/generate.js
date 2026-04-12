@@ -1343,7 +1343,7 @@ async function buildCISFormData(
 };
 
 }
-// ---------------- ACCOUNTS BUILDER ----------------
+// // ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   // Current year journals
   const { data: journals, error } = await supabaseAdmin
@@ -1372,91 +1372,90 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   }
 
   // Helper to compute totals + accounts + categories from journals
-// Helper to compute totals + accounts + categories from journals
-function computeFromJournals(journals) {
-  let totals = {
-    totalAssets: 0,
-    totalLiabilities: 0,
-    totalEquity: 0,
-    totalFixedAssets: 0,
-    totalCurrentAssets: 0,
-    totalCurrentLiabilities: 0,
-    totalNonCurrentLiabilities: 0,
-  };
-  let accounts = {};
-  let categories = {
-    fixedAssets: 0,
-    accumulatedDepreciation: 0,
-    depreciationCharge: 0,   // NEW category
-    bank: 0,
-    receivables: 0,
-    payables: 0,
-    equity: 0,
-    directorLoans: 0,        // NEW category
-  };
+  function computeFromJournals(journals) {
+    let totals = {
+      totalAssets: 0,
+      totalLiabilities: 0,
+      totalEquity: 0,
+      totalFixedAssets: 0,
+      totalCurrentAssets: 0,
+      totalCurrentLiabilities: 0,
+      totalNonCurrentLiabilities: 0,
+    };
+    let accounts = {};
+    let categories = {
+      fixedAssets: 0,
+      accumulatedDepreciation: 0,
+      depreciationCharge: 0,
+      bank: 0,
+      receivables: 0,
+      payables: 0,
+      equity: 0,
+      directorLoans: 0,
+    };
 
-  (journals || []).forEach(j => {
-  (j.journal_lines || []).forEach(line => {
-    const debit = Number(line.debit || 0);
-    const credit = Number(line.credit || 0);
-    const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
-    const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
-    const code = line.chart_of_account_entries?.account_code;
-    const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
+    (journals || []).forEach(j => {
+      (j.journal_lines || []).forEach(line => {
+        const debit = Number(line.debit || 0);
+        const credit = Number(line.credit || 0);
+        const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
+        const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+        const code = line.chart_of_account_entries?.account_code;
+        const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
 
-    if (code) {
-      accounts[code] = (accounts[code] || 0) + (debit - credit);
-    }
+        if (code) {
+          accounts[code] = (accounts[code] || 0) + (debit - credit);
+        }
 
-    // In computeFromJournals
-if (bucket === "fixed_asset") {
-  totals.totalFixedAssets += debit - credit;
-  // remove categories.fixedAssets += debit - credit;
-}
+        // Fixed asset cost
+        if (bucket === "fixed_asset") {
+          totals.totalFixedAssets += debit - credit;
+        }
 
+        // Accumulated depreciation (contra accounts)
+        if (bucket === "fixed_asset_contra") {
+          categories.accumulatedDepreciation += credit - debit;
+        }
 
-if (bucket === "fixed_asset_contra") {
-  totals.totalFixedAssets += 0; // don’t add to cost
-  categories.accumulatedDepreciation += credit - debit; // store contra balance
-}
-    // Current assets
-    if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
-      totals.totalCurrentAssets += debit - credit;
-      if (type === "BANK") categories.bank += debit - credit;
-      if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
-    }
+        // Current assets
+        if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
+          totals.totalCurrentAssets += debit - credit;
+          if (type === "BANK") categories.bank += debit - credit;
+          if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
+        }
 
-    // Liabilities
-    if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
-      totals.totalCurrentLiabilities += credit - debit;
-      categories.payables += credit - debit;
-    }
+        // Liabilities
+        if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
+          totals.totalCurrentLiabilities += credit - debit;
+          categories.payables += credit - debit;
+        }
 
-    // Equity
-    if (bucket === "equity" || type === "EQUITY") {
-      totals.totalEquity += credit - debit;
-      categories.equity += credit - debit;
-    }
+        // Equity
+        if (bucket === "equity" || type === "EQUITY") {
+          totals.totalEquity += credit - debit;
+          categories.equity += credit - debit;
+        }
 
-    // Director loans (504x range)
-    if (bucket === "balance_sheet" && code && code.startsWith("504")) {
-      categories.directorLoans += debit - credit;
-    }
+        // Director loans
+        if (bucket === "balance_sheet" && code && code.startsWith("504")) {
+          categories.directorLoans += debit - credit;
+        }
 
-    // Depreciation expense journals
-    if (name.includes("depreciation expense")) {
-      categories.depreciationCharge += debit;
-    }
+        // Depreciation expense journals
+        if (name.includes("depreciation expense")) {
+          categories.depreciationCharge += debit;
+        }
 
-    // Grand totals
-    if (type === "ASSET") totals.totalAssets += debit - credit;
-    if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
-  });
-});
+        // Grand totals
+        if (type === "ASSET") totals.totalAssets += debit - credit;
+        if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+      });
+    });
 
-return { totals, accounts, categories };
-}
- // Rounding helper
+    return { totals, accounts, categories };
+  }
+
+  // Rounding helper
   function roundObjectValues(obj) {
     const rounded = {};
     for (const key in obj) {
@@ -1515,117 +1514,112 @@ return { totals, accounts, categories };
     prior.accounts = priorSubmission.accounts || prior.accounts;
     prior.categories = priorSubmission.categories || prior.categories;
   } else {
-    // ✅ Lock prior equity before carry‑forward if no submission override
     prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
   }
-// Carry forward balances correctly
-function addCarryForward(prior, currentMovements) {
-  const categories = {};
-  const totals = {};
-  const accounts = {};
 
-  // Merge categories
-  for (const key of Object.keys(prior.categories)) {
-    if (key === "depreciationCharge") {
-      // depreciation charge is only current year
-      categories[key] = currentMovements.categories[key] || 0;
-    } else {
-      categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
+  // Carry forward balances correctly
+  function addCarryForward(prior, currentMovements) {
+    const categories = {};
+    const totals = {};
+    const accounts = {};
+
+    // Merge categories
+    for (const key of Object.keys(prior.categories)) {
+      if (key === "depreciationCharge") {
+        categories[key] = currentMovements.categories[key] || 0;
+      } else {
+        categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
+      }
     }
+
+    // Merge totals
+    for (const key of Object.keys(prior.totals)) {
+      totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
+    }
+
+    // Merge accounts
+    for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
+      accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
+    }
+
+    // NBV calculation
+    const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
+    const depreciation = (prior.categories.accumulatedDepreciation || 0)
+                       + (currentMovements.categories.depreciationCharge || 0);
+
+    categories.accumulatedDepreciation = depreciation;
+    categories.fixedAssets = cost - depreciation;
+
+    return { totals, accounts, categories };
   }
 
-  // Merge totals
-  for (const key of Object.keys(prior.totals)) {
-    totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
-  }
+  let current = addCarryForward(prior, currentMovements);
 
-  // Merge accounts
-  for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
-    accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
-  }
+  // Round before returning
+  current.totals = roundObjectValues(current.totals);
+  current.categories = roundObjectValues(current.categories);
+  prior.totals = roundObjectValues(prior.totals);
+  prior.categories = roundObjectValues(prior.categories);
 
-  // ✅ Recalculate NBV correctly:
-  // Cost = prior cost + current year additions/disposals
-  const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
+  // Debug logs
+  console.log("=== PRIOR YEAR DEBUG ===");
+  console.log("Prior cost:", prior.totals.totalFixedAssets);
+  console.log("Prior accumulated depreciation:", prior.categories.accumulatedDepreciation);
+  console.log("Prior NBV:", prior.categories.fixedAssets);
 
-  // Depreciation = prior accumulated depreciation + current year charge
-  const depreciation = (prior.categories.accumulatedDepreciation || 0)
-                     + (currentMovements.categories.depreciationCharge || 0);
+  console.log("=== CURRENT YEAR DEBUG ===");
+  console.log("Current cost:", current.totals.totalFixedAssets);
+  console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
+  console.log("Current NBV:", current.categories.fixedAssets);
 
-  // Update categories
-  categories.accumulatedDepreciation = depreciation;
-  categories.fixedAssets = cost - depreciation;   // NBV
-
-  return { totals, accounts, categories };
-}
-
-let current = addCarryForward(prior, currentMovements);
-
-
- // Round totals and categories before returning
-current.totals = roundObjectValues(current.totals);
-current.categories = roundObjectValues(current.categories);
-prior.totals = roundObjectValues(prior.totals);
-prior.categories = roundObjectValues(prior.categories);
-
-
-
-
-const payload = {
-  overview: {
-    totals: {
-      non_current_assets: current.categories.fixedAssets,   // NBV current year
-      current_assets: current.totals.totalCurrentAssets,
-      total_assets: current.totals.totalAssets,
-      current_liabilities: current.totals.totalCurrentLiabilities,
-      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-      total_liabilities: current.totals.totalLiabilities,
-      total_equity: current.totals.totalEquity,
-      capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
+  const payload = {
+    overview: {
+      totals: {
+        non_current_assets: current.categories.fixedAssets,   // NBV current year
+        current_assets: current.totals.totalCurrentAssets,
+        total_assets: current.totals.totalAssets,
+        current_liabilities: current.totals.totalCurrentLiabilities,
+        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+        total_liabilities: current.totals.totalLiabilities,
+        total_equity: current.totals.totalEquity,
+        capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
+      },
+      accounts: current.accounts,
+      categories: current.categories,
     },
-    accounts: current.accounts,
-    categories: current.categories,
-  },
-  overviewPrior: {
-  totals: {
-    non_current_assets: prior.totals.non_current_assets,   // NBV now
-    current_assets: prior.totals.totalCurrentAssets,
-    total_assets: prior.totals.totalAssets,
-    current_liabilities: prior.totals.totalCurrentLiabilities,
-    non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-    total_liabilities: prior.totals.totalLiabilities,
-    total_equity: prior.totals.totalEquity,
-  },
-  accounts: prior.accounts,
-  categories: prior.categories,
-},
+    overviewPrior: {
+      totals: {
+        non_current_assets: prior.categories.fixedAssets,   // NBV prior year
+        current_assets: prior.totals.totalCurrentAssets,
+        total_assets: prior.totals.totalAssets,
+        current_liabilities: prior.totals.totalCurrentLiabilities,
+        non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+        total_liabilities: prior.totals.totalLiabilities,
+        total_equity: prior.totals.totalEquity,
+      },
+      accounts: prior.accounts,
+      categories: prior.categories,
+    },
+    notes: {
+      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+      employees: client?.employees_current_year || 0,
+      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+      debtors: client?.debtors_total || 0,
+      creditors: client?.creditors_total || 0,
+    },
+    directorApproval: {
+      approvedBy: client?.director_name || "Director",
+      signature: client?.director_signature_name || "Signature",
+      approvalDate: client?.accounts_approval_date
+        ? client.accounts_approval_date.toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+    },
+  };
 
-  notes: {
-    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-    employees: client?.employees_current_year || 0,
-    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-    debtors: client?.debtors_total || 0,
-    creditors: client?.creditors_total || 0,
-  },
-  directorApproval: {
-    approvedBy: client?.director_name || "Director",
-    signature: client?.director_signature_name || "Signature",
-    approvalDate: client?.accounts_approval_date
-      ? client.accounts_approval_date.toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0],
-    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-  },
-};
-
-console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-return payload;
-
-
-console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-return payload;
+  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+  return payload;
 }
-
-
 
 
 /* -------------------------------------------------------------------------- */
