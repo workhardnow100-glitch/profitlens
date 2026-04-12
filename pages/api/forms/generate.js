@@ -1415,9 +1415,10 @@ if (bucket === "fixed_asset") {
 }
 
 if (bucket === "fixed_asset_contra") {
-  // credits increase accumulated depreciation
-  categories.accumulatedDepreciation += credit;
+  // ignore full contra balance here
+  // depreciation is handled via depreciationCharge
 }
+
 
 
     // Current assets
