@@ -1372,96 +1372,99 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   }
 
   // Helper to compute totals + accounts + categories from journals
-  function computeFromJournals(journals) {
-    let totals = {
-      totalAssets: 0,
-      totalLiabilities: 0,
-      totalEquity: 0,
-      totalFixedAssets: 0,
-      totalCurrentAssets: 0,
-      totalCurrentLiabilities: 0,
-      totalNonCurrentLiabilities: 0,
-    };
-    let accounts = {};
-    let categories = {
-      fixedAssets: 0,              // NBV
-      accumulatedDepreciation: 0,
-      depreciationCharge: 0,
-      bank: 0,
-      receivables: 0,
-      payables: 0,
-      equity: 0,
-      directorLoans: 0,
-    };
+function computeFromJournals(journals) {
+  let totals = {
+    totalAssets: 0,
+    totalLiabilities: 0,
+    totalEquity: 0,
+    totalFixedAssets: 0,
+    totalCurrentAssets: 0,
+    totalCurrentLiabilities: 0,
+    totalNonCurrentLiabilities: 0,
+  };
+  let accounts = {};
+  let categories = {
+    fixedAssets: 0,              // NBV
+    accumulatedDepreciation: 0,
+    depreciationCharge: 0,
+    bank: 0,
+    receivables: 0,
+    payables: 0,
+    equity: 0,
+    directorLoans: 0,
+  };
 
   (journals || []).forEach(j => {
-  (j.journal_lines || []).forEach(line => {
-    const debit = Number(line.debit || 0);
-    const credit = Number(line.credit || 0);
-    const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
-    const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
-    const code = line.chart_of_account_entries?.account_code;
-    const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
+    (j.journal_lines || []).forEach(line => {
+      const debit = Number(line.debit || 0);
+      const credit = Number(line.credit || 0);
+      const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
+      const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+      const code = line.chart_of_account_entries?.account_code;
+      const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
 
-    if (code) {
-      accounts[code] = (accounts[code] || 0) + (debit - credit);
-    }
+      if (code) {
+        accounts[code] = (accounts[code] || 0) + (debit - credit);
+      }
 
-    // Grouping logic
-    if (bucket === "fixed_asset") {
-      // track gross cost only
-      totals.totalFixedAssets += debit - credit;
-      categories.grossCost = (categories.grossCost || 0) + (debit - credit);
-    }
-    if (bucket === "fixed_asset_contra") {
-      // track accumulated depreciation (credits increase depreciation)
-      categories.accumulatedDepreciation = (categories.accumulatedDepreciation || 0) + (credit - debit);
-    }
+      // Fixed assets: track cost movements
+      if (bucket === "fixed_asset") {
+        totals.totalFixedAssets += debit - credit;
+        categories.fixedAssets += debit - credit;
+      }
 
-    if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
-      totals.totalCurrentAssets += debit - credit;
-      if (type === "BANK") categories.bank += debit - credit;
-      if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
-    }
+      // Accumulated depreciation: credits increase depreciation
+      if (bucket === "fixed_asset_contra") {
+        categories.accumulatedDepreciation += credit - debit;
+      }
 
-    if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
-      totals.totalCurrentLiabilities += credit - debit;
-      categories.payables += credit - debit;
-    }
+      // Current assets
+      if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
+        totals.totalCurrentAssets += debit - credit;
+        if (type === "BANK") categories.bank += debit - credit;
+        if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
+      }
 
-    if (bucket === "equity" || type === "EQUITY") {
-      totals.totalEquity += credit - debit;
-      categories.equity += credit - debit;
-    }
+      // Liabilities
+      if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
+        totals.totalCurrentLiabilities += credit - debit;
+        categories.payables += credit - debit;
+      }
 
-    if (bucket === "balance_sheet" && code && code.startsWith("504")) {
-      categories.directorLoans += debit - credit;
-    }
+      // Equity
+      if (bucket === "equity" || type === "EQUITY") {
+        totals.totalEquity += credit - debit;
+        categories.equity += credit - debit;
+      }
 
-    if (name.includes("depreciation expense")) {
-      categories.depreciationCharge += debit;
-    }
-    if (name.includes("accumulated depreciation")) {
-      categories.accumulatedDepreciation += credit;
-    }
+      // Director loans
+      if (bucket === "balance_sheet" && code && code.startsWith("504")) {
+        categories.directorLoans += debit - credit;
+      }
 
-    // Grand totals
-    if (type === "ASSET") totals.totalAssets += debit - credit;
-    if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+      // Depreciation expense
+      if (name.includes("depreciation expense")) {
+        categories.depreciationCharge += debit;
+      }
+
+      // Grand totals
+      if (type === "ASSET") totals.totalAssets += debit - credit;
+      if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+    });
   });
-});
 
-// ✅ Enforce statutory identity: Equity = Assets − Liabilities
-totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
+  // ✅ Enforce statutory identity
+  totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 
-// ✅ Recalculate NBV once: gross cost − accumulated depreciation
-categories.fixedAssets = (categories.grossCost || 0) - (categories.accumulatedDepreciation || 0);
+  // ✅ Net Book Value = cost − accumulated depreciation
+  categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
 
-return { totals, accounts, categories };
-return { totals, accounts, categories };
+  return { totals, accounts, categories };
+}
 
 
-  }
+
+  
 
   // Rounding helper
   function roundObjectValues(obj) {
