@@ -1565,24 +1565,29 @@ let current = addCarryForward(prior, currentMovements);
 
 
   // Round totals and categories before returning
-  current.totals = roundObjectValues(current.totals);
-  current.categories = roundObjectValues(current.categories);
-  prior.totals = roundObjectValues(prior.totals);
-  prior.categories = roundObjectValues(prior.categories);
+current.totals = roundObjectValues(current.totals);
+current.categories = roundObjectValues(current.categories);
+prior.totals = roundObjectValues(prior.totals);
+prior.categories = roundObjectValues(prior.categories);
 
-  const payload = {
-    overview: {
-      totals: {
-        non_current_assets: current.totals.totalFixedAssets,
-        current_assets: current.totals.totalCurrentAssets,
-        total_assets: current.totals.totalAssets,
-        current_liabilities: current.totals.totalCurrentLiabilities,
-        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-        total_liabilities: current.totals.totalLiabilities,
-        total_equity: current.totals.totalEquity,
-        capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
-      },
-      accounts: current.accounts,
+// ✅ Ensure prior fixed assets are NBV (cost – depreciation)
+const priorCost = prior.totals.totalFixedAssets || 0;
+const priorDep = prior.categories.accumulatedDepreciation || 0;
+prior.categories.fixedAssets = priorCost - priorDep;
+
+const payload = {
+  overview: {
+    totals: {
+      non_current_assets: current.totals.totalFixedAssets,
+      current_assets: current.totals.totalCurrentAssets,
+      total_assets: current.totals.totalAssets,
+      current_liabilities: current.totals.totalCurrentLiabilities,
+      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+      total_liabilities: current.totals.totalLiabilities,
+      total_equity: current.totals.totalEquity,
+      capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
+    },
+    accounts: current.accounts,
     categories: current.categories,
   },
   overviewPrior: {
@@ -1618,6 +1623,7 @@ let current = addCarryForward(prior, currentMovements);
 console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
 return payload;
 }
+
 
 
 
