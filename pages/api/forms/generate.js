@@ -1408,16 +1408,17 @@ function computeFromJournals(journals) {
       accounts[code] = (accounts[code] || 0) + (debit - credit);
     }
 
-    // Fixed assets (gross cost movements)
-    if (bucket === "fixed_asset") {
-      totals.totalFixedAssets += debit - credit;
-      categories.fixedAssets += debit - credit;
-    }
+    // In computeFromJournals
+if (bucket === "fixed_asset") {
+  totals.totalFixedAssets += debit - credit;
+  categories.fixedAssets += debit - credit;   // gross cost movements
+}
 
-    // Accumulated depreciation: credits increase depreciation
-    if (bucket === "fixed_asset_contra") {
-      categories.accumulatedDepreciation += credit;
-    }
+if (bucket === "fixed_asset_contra") {
+  // credits increase accumulated depreciation
+  categories.accumulatedDepreciation += credit;
+}
+
 
     // Current assets
     if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
@@ -1454,7 +1455,7 @@ function computeFromJournals(journals) {
   });
 });
 
-// ✅ Net Book Value = cost − accumulated depreciation
+// Net Book Value = cost − accumulated depreciation
 categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
 
 return { totals, accounts, categories };
@@ -1540,7 +1541,6 @@ function addCarryForward(prior, currentMovements) {
   // Merge categories
   for (const key of Object.keys(prior.categories)) {
     if (key === "depreciationCharge") {
-      // depreciation charge is only current year
       categories[key] = currentMovements.categories[key] || 0;
     } else {
       categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
@@ -1557,8 +1557,7 @@ function addCarryForward(prior, currentMovements) {
     accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
   }
 
-  // ✅ Recalculate NBV correctly:
-  // cost (fixedAsset movements) minus accumulated depreciation
+  // ✅ Recalculate NBV correctly
   const cost = (prior.categories.fixedAssets || 0) + (currentMovements.categories.fixedAssets || 0);
   const depreciation = (prior.categories.accumulatedDepreciation || 0) + (currentMovements.categories.accumulatedDepreciation || 0);
   categories.fixedAssets = cost - depreciation;
