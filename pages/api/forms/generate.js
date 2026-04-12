@@ -1394,7 +1394,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       directorLoans: 0,
     };
 
-    (journals || []).forEach(j => {
+   (journals || []).forEach(j => {
   (j.journal_lines || []).forEach(line => {
     const debit = Number(line.debit || 0);
     const credit = Number(line.credit || 0);
@@ -1413,9 +1413,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       categories.fixedAssets += debit - credit; // track gross cost
     }
     if (bucket === "fixed_asset_contra") {
-      // ✅ flip sign so accumulated depreciation is positive
-      totals.totalFixedAssets -= (debit - credit);
-      categories.accumulatedDepreciation += (credit - debit);
+      // ✅ only track accumulated depreciation here
+      categories.accumulatedDepreciation += credit - debit;
     }
 
     if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
@@ -1458,6 +1457,7 @@ totals.totalEquity = (totals.totalAssets || 0) - (totals.totalLiabilities || 0);
 categories.fixedAssets = (categories.fixedAssets || 0) - (categories.accumulatedDepreciation || 0);
 
 return { totals, accounts, categories };
+
 
   }
 
