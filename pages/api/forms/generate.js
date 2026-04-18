@@ -1343,7 +1343,7 @@ async function buildCISFormData(
 };
 
 }
-/// ---------------- ACCOUNTS BUILDER ----------------
+//// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
@@ -1502,6 +1502,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const priorCost = prior.totals.totalFixedAssets || 0;
   const priorDep = prior.categories.accumulatedDepreciation || 0;
   prior.categories.fixedAssets = priorCost - priorDep;
+  prior.totals.non_current_assets = prior.categories.fixedAssets;
 
   function addCarryForward(prior, currentMovements) {
     const categories = {};
@@ -1509,7 +1510,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     const accounts = {};
 
     for (const key of Object.keys(prior.categories)) {
-      if (key === "depreciationCharge") {
+      if (["fixedAssets", "accumulatedDepreciation", "depreciationCharge"].includes(key)) {
         categories[key] = currentMovements.categories[key] || 0;
       } else {
         categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
@@ -1524,9 +1525,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
     }
 
-    const cost = (prior.totals.totalFixedAssets || 0) + (currentMovements.totals.totalFixedAssets || 0);
-    const depreciation = (prior.categories.accumulatedDepreciation || 0)
-                       + (currentMovements.categories.depreciationCharge || 0);
+    const cost = priorCost + (currentMovements.totals.totalFixedAssets || 0);
+    const depreciation = priorDep + (currentMovements.categories.depreciationCharge || 0);
 
     categories.accumulatedDepreciation = depreciation;
     categories.fixedAssets = cost - depreciation;
@@ -1558,7 +1558,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         current_assets: current.totals.totalCurrentAssets,
         total_assets: current.totals.totalAssets,
         current_liabilities: current.totals.totalCurrentLiabilities,
-                non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
         total_liabilities: current.totals.totalLiabilities,
         total_equity: current.totals.totalEquity,
         capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
@@ -1566,7 +1566,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       accounts: current.accounts,
       categories: current.categories,
     },
-    overviewPrior: {
+        overviewPrior: {
       totals: {
         non_current_assets: prior.categories.fixedAssets,   // NBV prior year
         current_assets: prior.totals.totalCurrentAssets,
@@ -1599,7 +1599,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
-
 
 
 /* -------------------------------------------------------------------------- */
