@@ -1566,7 +1566,8 @@ const payload = {
     totals: {
       non_current_assets: current.categories.fixedAssets,
       current_assets: current.totals.totalCurrentAssets,
-      total_assets: current.totals.totalAssets,
+      total_assets_less_current_liabilities: current.categories.fixedAssets +
+        (current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities),
       current_liabilities: current.totals.totalCurrentLiabilities,
       non_current_liabilities: current.totals.totalNonCurrentLiabilities,
       total_liabilities: current.totals.totalLiabilities,
@@ -1581,7 +1582,8 @@ const payload = {
     totals: {
       non_current_assets: prior.categories.fixedAssets,
       current_assets: prior.totals.totalCurrentAssets,
-      total_assets: prior.totals.totalAssets,
+      total_assets_less_current_liabilities: prior.categories.fixedAssets +
+        (prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities),
       current_liabilities: prior.totals.totalCurrentLiabilities,
       non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
       total_liabilities: prior.totals.totalLiabilities,
