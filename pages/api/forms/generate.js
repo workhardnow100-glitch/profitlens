@@ -1390,6 +1390,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
       payables: 0,
       equity: 0,
       directorLoans: 0,
+      directorLoansReceivable: 0,
+      directorLoansPayable: 0,
     };
 
     (journals || []).forEach(j => {
@@ -1406,7 +1408,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
 
         if (bucket === "fixed_asset_contra") {
-          // opening accumulated depreciation only
           categories.accumulatedDepreciation += credit - debit;
         }
 
@@ -1426,8 +1427,22 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
           categories.equity += credit - debit;
         }
 
-        if (bucket === "balance_sheet" && code && code.startsWith("504")) {
-          categories.directorLoans += debit - credit;
+        // ✅ Director Loan logic by NAME
+        if (
+          name.includes("director loan") ||
+          name.includes("director payments") ||
+          name.includes("director personal expenses") ||
+          name.includes("cash withdrawals")
+        ) {
+          // Directors owe the company → asset
+          categories.directorLoansReceivable += debit - credit;
+          totals.totalCurrentAssets += debit - credit;
+        }
+
+        if (name.includes("loan liability") || name.includes("director loan payable")) {
+          // Company owes directors → liability
+          categories.directorLoansPayable += credit - debit;
+          totals.totalNonCurrentLiabilities += credit - debit;
         }
 
         if (name.includes("depreciation expense")) {
@@ -1536,88 +1551,87 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   let current = addCarryForward(prior, currentMovements);
 
-// Round values
-current.totals = roundObjectValues(current.totals);
-current.categories = roundObjectValues(current.categories);
-prior.totals = roundObjectValues(prior.totals);
-prior.categories = roundObjectValues(prior.categories);
+  // Round values
+  current.totals = roundObjectValues(current.totals);
+  current.categories = roundObjectValues(current.categories);
+  prior.totals = roundObjectValues(prior.totals);
+  prior.categories = roundObjectValues(prior.categories);
 
-console.log("=== PRIOR YEAR DEBUG ===");
-console.log("Prior cost:", priorCost);
-console.log("Prior accumulated depreciation:", priorDep);
-console.log("Prior NBV:", prior.categories.fixedAssets);
+  console.log("=== PRIOR YEAR DEBUG ===");
+  console.log("Prior cost:", priorCost);
+  console.log("Prior accumulated depreciation:", priorDep);
+  console.log("Prior NBV:", prior.categories.fixedAssets);
 
-console.log("=== CURRENT YEAR DEBUG ===");
-console.log("Current cost:", current.totals.totalFixedAssets);
-console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
-console.log("Current NBV:", current.categories.fixedAssets);
+  console.log("=== CURRENT YEAR DEBUG ===");
+  console.log("Current cost:", current.totals.totalFixedAssets);
+  console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
+  console.log("Current NBV:", current.categories.fixedAssets);
 
-// ✅ Fix: recompute statutory totals cleanly from raw components
-const netCurrentAssetsCurrent = current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities;
-current.totals.totalAssets = current.categories.fixedAssets + netCurrentAssetsCurrent;
-current.totals.totalEquity = current.totals.totalAssets; // Net assets = Capital & reserves
+  //  // ✅ Fix: recompute statutory totals cleanly from raw components
+  const netCurrentAssetsCurrent = current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities;
+  current.totals.totalAssets = current.categories.fixedAssets + netCurrentAssetsCurrent;
+  current.totals.totalEquity = current.totals.totalAssets; // Net assets = Capital & reserves
 
-const netCurrentAssetsPrior = prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities;
-prior.totals.totalAssets = prior.categories.fixedAssets + netCurrentAssetsPrior;
-prior.totals.totalEquity = prior.totals.totalAssets; // Net assets = Capital & reserves
+  const netCurrentAssetsPrior = prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities;
+  prior.totals.totalAssets = prior.categories.fixedAssets + netCurrentAssetsPrior;
+  prior.totals.totalEquity = prior.totals.totalAssets; // Net assets = Capital & reserves
 
-const payload = {
-  overview: {
-    totals: {
-      non_current_assets: current.categories.fixedAssets,
-      current_assets: current.totals.totalCurrentAssets,
-      total_assets_less_current_liabilities: current.categories.fixedAssets +
-        (current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities),
-      current_liabilities: current.totals.totalCurrentLiabilities,
-      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-      total_liabilities: current.totals.totalLiabilities,
-      total_equity: current.totals.totalEquity,
-      capital_and_reserves: current.totals.totalEquity,
-      net_current_assets: current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities,
-
+  const payload = {
+    overview: {
+      totals: {
+        non_current_assets: current.categories.fixedAssets,
+        current_assets: current.totals.totalCurrentAssets,
+        total_assets_less_current_liabilities:
+          current.categories.fixedAssets + (current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities),
+        current_liabilities: current.totals.totalCurrentLiabilities,
+        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+        total_liabilities: current.totals.totalLiabilities,
+        total_equity: current.totals.totalEquity,
+        capital_and_reserves: current.totals.totalEquity,
+        net_current_assets: current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities,
+      },
+      accounts: current.accounts,
+      categories: current.categories,
     },
-    accounts: current.accounts,
-    categories: current.categories,
-  },
 
-  overviewPrior: {
-    totals: {
-      non_current_assets: prior.categories.fixedAssets,
-      current_assets: prior.totals.totalCurrentAssets,
-      total_assets_less_current_liabilities: prior.categories.fixedAssets +
-        (prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities),
-      current_liabilities: prior.totals.totalCurrentLiabilities,
-      non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-      total_liabilities: prior.totals.totalLiabilities,
-      total_equity: prior.totals.totalEquity,
-      capital_and_reserves: prior.totals.totalEquity,
-     net_current_assets: prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities,
-
+    overviewPrior: {
+      totals: {
+        non_current_assets: prior.categories.fixedAssets,
+        current_assets: prior.totals.totalCurrentAssets,
+        total_assets_less_current_liabilities:
+          prior.categories.fixedAssets + (prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities),
+        current_liabilities: prior.totals.totalCurrentLiabilities,
+        non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+        total_liabilities: prior.totals.totalLiabilities,
+        total_equity: prior.totals.totalEquity,
+        capital_and_reserves: prior.totals.totalEquity,
+        net_current_assets: prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities,
+      },
+      accounts: prior.accounts,
+      categories: prior.categories,
     },
-    accounts: prior.accounts,
-    categories: prior.categories,
-  },
 
-  notes: {
-    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-    employees: client?.employees_current_year || 0,
-    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-    debtors: client?.debtors_total || 0,
-    creditors: client?.creditors_total || 0,
-  },
-  directorApproval: {
-    approvedBy: client?.director_name || "Director",
-    signature: client?.director_signature_name || "Signature",
-    approvalDate: client?.accounts_approval_date
-      ? client.accounts_approval_date.toISOString().split("T")[0]
-      : new Date().toISOString().split("T")[0],
-    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-  },
-};
+    notes: {
+      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+      employees: client?.employees_current_year || 0,
+      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+      debtors: client?.debtors_total || 0,
+      creditors: client?.creditors_total || 0,
+    },
+    directorApproval: {
+      approvedBy: client?.director_name || "Director",
+      signature: client?.director_signature_name || "Signature",
+      approvalDate: client?.accounts_approval_date
+        ? client.accounts_approval_date.toISOString().split("T")[0]
+        : new Date().toISOString().split("T")[0],
+      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+    },
+  };
 
-console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-return payload;
+  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+  return payload;
 }
+
 
 
 /* -------------------------------------------------------------------------- */
