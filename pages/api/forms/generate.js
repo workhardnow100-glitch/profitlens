@@ -1591,7 +1591,7 @@ const payload = {
       total_liabilities: prior.totals.totalLiabilities,
       total_equity: prior.totals.totalEquity,
       capital_and_reserves: prior.totals.totalEquity,
-      net_current_assets: current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities,
+     net_current_assets: prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities,
 
     },
     accounts: prior.accounts,
