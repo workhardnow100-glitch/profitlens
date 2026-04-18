@@ -1553,32 +1553,35 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   const payload = {
     overview: {
-      totals: {
-        non_current_assets: current.categories.fixedAssets,
-        current_assets: current.totals.totalCurrentAssets,
-        total_assets: current.totals.totalAssets,
-        current_liabilities: current.totals.totalCurrentLiabilities,
-        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-        total_liabilities: current.totals.totalLiabilities,
-        total_equity: current.totals.totalEquity,
-        capital_and_reserves: (current.totals.totalAssets || 0) - (current.totals.totalLiabilities || 0),
-      },
-      accounts: current.accounts,
-      categories: current.categories,
-    },
-        overviewPrior: {
-      totals: {
-        non_current_assets: prior.categories.fixedAssets,   // NBV prior year
-        current_assets: prior.totals.totalCurrentAssets,
-        total_assets: prior.totals.totalAssets,
-        current_liabilities: prior.totals.totalCurrentLiabilities,
-        non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-        total_liabilities: prior.totals.totalLiabilities,
-        total_equity: prior.totals.totalEquity,
-      },
-      accounts: prior.accounts,
-      categories: prior.categories,
-    },
+  totals: {
+    non_current_assets: current.categories.fixedAssets,
+    current_assets: current.totals.totalCurrentAssets,
+    total_assets: current.totals.totalAssets,
+    current_liabilities: current.totals.totalCurrentLiabilities,
+    non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+    total_liabilities: current.totals.totalLiabilities,
+    total_equity: current.totals.totalEquity,
+    capital_and_reserves: current.totals.totalEquity,  // <-- fix here
+  },
+  accounts: current.accounts,
+  categories: current.categories,
+},
+
+       overviewPrior: {
+  totals: {
+    non_current_assets: prior.categories.fixedAssets,
+    current_assets: prior.totals.totalCurrentAssets,
+    total_assets: prior.totals.totalAssets,
+    current_liabilities: prior.totals.totalCurrentLiabilities,
+    non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+    total_liabilities: prior.totals.totalLiabilities,
+    total_equity: prior.totals.totalEquity,
+    capital_and_reserves: prior.totals.totalEquity,  // <-- add this
+  },
+  accounts: prior.accounts,
+  categories: prior.categories,
+},
+
     notes: {
       accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
       employees: client?.employees_current_year || 0,
