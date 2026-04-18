@@ -1437,9 +1437,10 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   });
 
   // ✅ Recalculate statutory totals deterministically
-  totals.totalAssets = (totals.totalFixedAssets || 0) + (totals.totalCurrentAssets || 0);
-  totals.totalLiabilities = (totals.totalCurrentLiabilities || 0) + (totals.totalNonCurrentLiabilities || 0);
-  totals.totalEquity = totals.totalAssets - totals.totalLiabilities;
+totals.totalAssets = (categories.fixedAssets || 0) + (totals.totalCurrentAssets || 0);
+totals.totalLiabilities = (totals.totalCurrentLiabilities || 0) + (totals.totalNonCurrentLiabilities || 0);
+totals.totalEquity = totals.totalAssets - totals.totalLiabilities;
+
 
   return { totals, accounts, categories };
 }
