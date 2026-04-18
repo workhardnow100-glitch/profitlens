@@ -1343,7 +1343,7 @@ async function buildCISFormData(
 };
 
 }
-//// ---------------- ACCOUNTS BUILDER ----------------
+// ---------------- ACCOUNTS BUILDER ----------------
 async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
@@ -1406,6 +1406,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
 
         if (bucket === "fixed_asset_contra") {
+          // opening accumulated depreciation only
           categories.accumulatedDepreciation += credit - debit;
         }
 
@@ -1432,16 +1433,11 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
         if (name.includes("depreciation expense")) {
           categories.depreciationCharge += debit;
         }
+
+        if (type === "ASSET") totals.totalAssets += debit - credit;
+        if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
       });
     });
-
-    // ✅ Recalculate statutory totals deterministically
-    const netCurrentAssets = (totals.totalCurrentAssets || 0) - (totals.totalCurrentLiabilities || 0);
-    totals.non_current_assets = categories.fixedAssets || 0;
-    totals.net_current_assets = netCurrentAssets;
-    totals.totalAssets = (categories.fixedAssets || 0) + netCurrentAssets;
-    totals.totalLiabilities = totals.totalCurrentLiabilities + (totals.totalNonCurrentLiabilities || 0);
-    totals.totalEquity = totals.totalAssets - totals.totalLiabilities;
 
     return { totals, accounts, categories };
   }
@@ -1535,14 +1531,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     categories.accumulatedDepreciation = depreciation;
     categories.fixedAssets = cost - depreciation;
 
-    // ✅ Recalculate statutory totals deterministically
-    const netCurrentAssets = (totals.totalCurrentAssets || 0) - (totals.totalCurrentLiabilities || 0);
-    totals.non_current_assets = categories.fixedAssets || 0;
-    totals.net_current_assets = netCurrentAssets;
-    totals.totalAssets = (categories.fixedAssets || 0) + netCurrentAssets;
-    totals.totalLiabilities = totals.totalCurrentLiabilities + (totals.totalNonCurrentLiabilities || 0);
-    totals.totalEquity = totals.totalAssets - totals.totalLiabilities;
-
     return { totals, accounts, categories };
   }
 
@@ -1555,32 +1543,19 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   console.log("=== PRIOR YEAR DEBUG ===");
   console.log("Prior cost:", priorCost);
+  console.log("Prior accumulated depreciation:", priorDep);
+  console.log("Prior NBV:", prior.categories.fixedAssets);
+
   console.log("=== CURRENT YEAR DEBUG ===");
   console.log("Current cost:", current.totals.totalFixedAssets);
   console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
   console.log("Current NBV:", current.categories.fixedAssets);
-
-  // ✅ Final statutory reset for current and prior
-  const netCurrentAssetsCurrent = (current.totals.totalCurrentAssets || 0) - (current.totals.totalCurrentLiabilities || 0);
-  current.totals.non_current_assets = current.categories.fixedAssets || 0;
-  current.totals.net_current_assets = netCurrentAssetsCurrent;
-  current.totals.totalAssets = (current.categories.fixedAssets || 0) + netCurrentAssetsCurrent;
-  current.totals.totalLiabilities = current.totals.totalCurrentLiabilities + (current.totals.totalNonCurrentLiabilities || 0);
-  current.totals.totalEquity = current.totals.totalAssets - current.totals.totalLiabilities;
-
-  const netCurrentAssetsPrior = (prior.totals.totalCurrentAssets || 0) - (prior.totals.totalCurrentLiabilities || 0);
-  prior.totals.non_current_assets = prior.categories.fixedAssets || 0;
-  prior.totals.net_current_assets = netCurrentAssetsPrior;
-  prior.totals.totalAssets = (prior.categories.fixedAssets || 0) + netCurrentAssetsPrior;
-  prior.totals.totalLiabilities = prior.totals.totalCurrentLiabilities + (prior.totals.totalNonCurrentLiabilities || 0);
-  prior.totals.totalEquity = prior.totals.totalAssets - prior.totals.totalLiabilities;
 
   const payload = {
     overview: {
       totals: {
         non_current_assets: current.categories.fixedAssets,
         current_assets: current.totals.totalCurrentAssets,
-        net_current_assets: current.totals.net_current_assets,
         total_assets: current.totals.totalAssets,
         current_liabilities: current.totals.totalCurrentLiabilities,
         non_current_liabilities: current.totals.totalNonCurrentLiabilities,
@@ -1595,8 +1570,7 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     overviewPrior: {
       totals: {
         non_current_assets: prior.categories.fixedAssets,
-        current_assets: prior.totals.totalCurrentAssets,
-        net_current_assets: prior.totals.net_current_assets,
+               current_assets: prior.totals.totalCurrentAssets,
         total_assets: prior.totals.totalAssets,
         current_liabilities: prior.totals.totalCurrentLiabilities,
         non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
@@ -1628,7 +1602,6 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
   console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
   return payload;
 }
-
 
 /* -------------------------------------------------------------------------- */
 /*                        PDF TEMPLATE DISPATCHER                             */
