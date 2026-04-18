@@ -1536,72 +1536,83 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
 
   let current = addCarryForward(prior, currentMovements);
 
-  current.totals = roundObjectValues(current.totals);
-  current.categories = roundObjectValues(current.categories);
-  prior.totals = roundObjectValues(prior.totals);
-  prior.categories = roundObjectValues(prior.categories);
+// Round values
+current.totals = roundObjectValues(current.totals);
+current.categories = roundObjectValues(current.categories);
+prior.totals = roundObjectValues(prior.totals);
+prior.categories = roundObjectValues(prior.categories);
 
-  console.log("=== PRIOR YEAR DEBUG ===");
-  console.log("Prior cost:", priorCost);
-  console.log("Prior accumulated depreciation:", priorDep);
-  console.log("Prior NBV:", prior.categories.fixedAssets);
+console.log("=== PRIOR YEAR DEBUG ===");
+console.log("Prior cost:", priorCost);
+console.log("Prior accumulated depreciation:", priorDep);
+console.log("Prior NBV:", prior.categories.fixedAssets);
 
-  console.log("=== CURRENT YEAR DEBUG ===");
-  console.log("Current cost:", current.totals.totalFixedAssets);
-  console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
-  console.log("Current NBV:", current.categories.fixedAssets);
+console.log("=== CURRENT YEAR DEBUG ===");
+console.log("Current cost:", current.totals.totalFixedAssets);
+console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
+console.log("Current NBV:", current.categories.fixedAssets);
 
-  const payload = {
-    overview: {
-      totals: {
-        non_current_assets: current.categories.fixedAssets,
-        current_assets: current.totals.totalCurrentAssets,
-        total_assets: current.totals.totalAssets,
-        current_liabilities: current.totals.totalCurrentLiabilities,
-        non_current_liabilities: current.totals.totalNonCurrentLiabilities,
-        total_liabilities: current.totals.totalLiabilities,
-        total_equity: current.totals.totalEquity,
-        capital_and_reserves: current.totals.totalEquity,
-      },
-      accounts: current.accounts,
-      categories: current.categories,
+// ✅ Fix: recompute statutory totals cleanly from raw components
+const netCurrentAssetsCurrent = current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities;
+current.totals.totalAssets = current.categories.fixedAssets + netCurrentAssetsCurrent;
+current.totals.totalEquity = current.totals.totalAssets; // Net assets = Capital & reserves
+
+const netCurrentAssetsPrior = prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities;
+prior.totals.totalAssets = prior.categories.fixedAssets + netCurrentAssetsPrior;
+prior.totals.totalEquity = prior.totals.totalAssets; // Net assets = Capital & reserves
+
+const payload = {
+  overview: {
+    totals: {
+      non_current_assets: current.categories.fixedAssets,
+      current_assets: current.totals.totalCurrentAssets,
+      total_assets: current.totals.totalAssets,
+      current_liabilities: current.totals.totalCurrentLiabilities,
+      non_current_liabilities: current.totals.totalNonCurrentLiabilities,
+      total_liabilities: current.totals.totalLiabilities,
+      total_equity: current.totals.totalEquity,
+      capital_and_reserves: current.totals.totalEquity,
     },
+    accounts: current.accounts,
+    categories: current.categories,
+  },
 
-    overviewPrior: {
-      totals: {
-        non_current_assets: prior.categories.fixedAssets,
-               current_assets: prior.totals.totalCurrentAssets,
-        total_assets: prior.totals.totalAssets,
-        current_liabilities: prior.totals.totalCurrentLiabilities,
-        non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
-        total_liabilities: prior.totals.totalLiabilities,
-        total_equity: prior.totals.totalEquity,
-        capital_and_reserves: prior.totals.totalEquity,
-      },
-      accounts: prior.accounts,
-      categories: prior.categories,
+  overviewPrior: {
+    totals: {
+      non_current_assets: prior.categories.fixedAssets,
+      current_assets: prior.totals.totalCurrentAssets,
+      total_assets: prior.totals.totalAssets,
+      current_liabilities: prior.totals.totalCurrentLiabilities,
+      non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
+      total_liabilities: prior.totals.totalLiabilities,
+      total_equity: prior.totals.totalEquity,
+      capital_and_reserves: prior.totals.totalEquity,
     },
+    accounts: prior.accounts,
+    categories: prior.categories,
+  },
 
-    notes: {
-      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
-      employees: client?.employees_current_year || 0,
-      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
-      debtors: client?.debtors_total || 0,
-      creditors: client?.creditors_total || 0,
-    },
-    directorApproval: {
-      approvedBy: client?.director_name || "Director",
-      signature: client?.director_signature_name || "Signature",
-      approvalDate: client?.accounts_approval_date
-        ? client.accounts_approval_date.toISOString().split("T")[0]
-        : new Date().toISOString().split("T")[0],
-      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
-    },
-  };
+  notes: {
+    accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+    employees: client?.employees_current_year || 0,
+    taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+    debtors: client?.debtors_total || 0,
+    creditors: client?.creditors_total || 0,
+  },
+  directorApproval: {
+    approvedBy: client?.director_name || "Director",
+    signature: client?.director_signature_name || "Signature",
+    approvalDate: client?.accounts_approval_date
+      ? client.accounts_approval_date.toISOString().split("T")[0]
+      : new Date().toISOString().split("T")[0],
+    statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+  },
+};
 
-  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-  return payload;
+console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+return payload;
 }
+
 
 /* -------------------------------------------------------------------------- */
 /*                        PDF TEMPLATE DISPATCHER                             */
