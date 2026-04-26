@@ -177,14 +177,29 @@ export default async function handler(req, res) {
         periodStart,
         periodEnd
       );
-    } else if (formCode.startsWith("FRS")) {
-      formData = await buildAccountsFormData(
-        client,
-        resolvedClientId,
-        periodStart,
-        periodEnd
-      );
-    }
+   } else if (formCode.startsWith("FRS")) {
+
+  // STEP 2: Fetch custom notes
+  const { data: customNotes, error: notesError } = await supabaseAdmin
+    .from("accounts_notes")
+    .select("*")
+    .eq("client_id", resolvedClientId)
+    .eq("period_end", periodEnd);
+
+  if (notesError) {
+    console.error("Error loading custom notes:", notesError);
+  }
+
+  // STEP 2: Pass notes into builder
+  formData = await buildAccountsFormData(
+    client,
+    resolvedClientId,
+    periodStart,
+    periodEnd,
+    customNotes || []
+  );
+}
+
 
     const filename = `${submissionId}.pdf`;
 
@@ -1344,7 +1359,8 @@ async function buildCISFormData(
 
 }
 // ---------------- ACCOUNTS BUILDER ----------------
-async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
+async function buildAccountsFormData(client, clientId, periodStart, periodEnd, customNotes = []) {
+
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
     .select(`
@@ -1628,9 +1644,14 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd) {
     },
   };
 
-  console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-  return payload;
+ console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
+
+return {
+  ...payload,
+  customNotes: customNotes || []
+};
 }
+
 
 
 
@@ -1914,6 +1935,7 @@ if (formCode === "FRS105") {
     overview: formData.overview,
     overviewPrior: formData.overviewPrior,
     notes: formData.notes || {},
+    customNotes: formData.customNotes || [],   // ⭐ NEW
     directorApproval: formData.directorApproval || {},
     framework: "FRS105",
   });
@@ -1931,6 +1953,7 @@ if (formCode === "FRS102_1A") {
     overview: formData.overview,
     overviewPrior: formData.overviewPrior,
     notes: formData.notes || {},
+    customNotes: formData.customNotes || [],   // ⭐ NEW
     directorApproval: formData.directorApproval || {},
     framework: "FRS102_1A",
   });
