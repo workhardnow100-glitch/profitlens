@@ -13,6 +13,7 @@ function groupType(type) {
   if (t.startsWith("sa")) return "sa";
   if (t.startsWith("ct")) return "ct";
   if (t.startsWith("cis")) return "cis";
+  if (t.startsWith("accounts_frs")) return "accounts"; // ⭐ NEW: statutory accounts bucket
   return "other";
 }
 
@@ -60,7 +61,7 @@ export default function PdfLibraryPage() {
   const pdfs = data?.pdfs || [];
 
   const grouped = useMemo(() => {
-    const base = { vat: [], sa: [], ct: [], cis: [], other: [] };
+    const base = { vat: [], sa: [], ct: [], cis: [], accounts: [], other: [] }; // ⭐ NEW: accounts bucket
     pdfs.forEach((pdf) => base[groupType(pdf.type)].push(pdf));
     return base;
   }, [pdfs]);
@@ -116,6 +117,14 @@ export default function PdfLibraryPage() {
             <Dropdown
               label="CIS PDFs"
               items={grouped.cis}
+              selectedId={selectedPdfId}
+              onSelect={setSelectedPdfId}
+            />
+
+            {/* ⭐ NEW: Statutory accounts dropdown */}
+            <Dropdown
+              label="Statutory Accounts PDFs (FRS 102 / FRS 105)"
+              items={grouped.accounts}
               selectedId={selectedPdfId}
               onSelect={setSelectedPdfId}
             />
@@ -250,6 +259,34 @@ function InfoPanel({ pdf }) {
           {(clientDetails.trading_name || clientDetails.business_name) && (
             <div className="text-gray-500">
               {clientDetails.trading_name || clientDetails.business_name}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ⭐ NEW: Statutory accounts metadata */}
+      {pdf.type?.toLowerCase().startsWith("accounts_frs") && (
+        <div className="pt-2 border-t border-gray-200 space-y-1">
+          <div className="font-semibold text-gray-700 mb-1">
+            Statutory Accounts
+          </div>
+          <div>
+            <span className="font-medium text-gray-600">Framework:</span>{" "}
+            {meta.framework || "FRS 102 / FRS 105"}
+          </div>
+
+          {Array.isArray(meta.customNotes) && meta.customNotes.length > 0 && (
+            <div>
+              <span className="font-medium text-gray-600">
+                Custom Notes:
+              </span>
+              <ul className="list-disc ml-4 mt-1 space-y-0.5">
+                {meta.customNotes.map((note, idx) => (
+                  <li key={idx} className="text-gray-600">
+                    {note.title}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
