@@ -103,6 +103,42 @@ export default function FormsPage() {
     { code: "FRS102_1A", label: "FRS 102 1A — Small Company Accounts" },
   ];
 
+  // ⭐ NEW — Statutory Accounts Editor State
+
+  // Accounting policies (shared FRS105 / FRS102)
+  const [accountsPolicies, setAccountsPolicies] = useState({
+    turnover: "",
+    taxation: "",
+    debtors: "",
+    creditors: "",
+    cash: "",
+    tangibleFixedAssets: "",
+    depreciation: "",
+  });
+
+  // Profit & Loss (FRS102 only)
+  const [accountsPandL, setAccountsPandL] = useState({
+    turnover: "",
+    costOfSales: "",
+    adminExpenses: "",
+    interest: "",
+    tax: "",
+    profitForYear: "",
+  });
+
+  // Director’s report (FRS102 only)
+  const [accountsDirectorsReport, setAccountsDirectorsReport] = useState("");
+
+  // Additional notes (shared)
+  const [accountsNotes, setAccountsNotes] = useState([]); // [{ id, title, body }]
+  const [nextNoteId, setNextNoteId] = useState(1);
+
+  // Director approval (shared)
+  const [accountsApproval, setAccountsApproval] = useState({
+    directorName: "",
+    approvalDate: "",
+  });
+
   // ⭐ Helper: non‑negative numeric input
   const handleNonNegativeChange = (setter) => (e) => {
     const raw = e.target.value;
@@ -250,6 +286,7 @@ export default function FormsPage() {
       setIsLoading(false);
     }
   };
+
   // ⭐ Generate single form (CT, SA, CIS, ACCOUNTS)
   const handleGenerate = async (category) => {
     setResultMessage(null);
@@ -282,15 +319,31 @@ export default function FormsPage() {
     try {
       setIsLoading(true);
 
+      const payload = {
+        clientId,
+        formCode,
+        periodStart,
+        periodEnd,
+      };
+
+      // ⭐ Attach Statutory Accounts payload when generating FRS105 / FRS102_1A
+      if (category === "ACCOUNTS") {
+        payload.notes = {
+          policies: accountsPolicies,
+          directorsReport: accountsDirectorsReport,
+          details: accountsNotes,
+        };
+        payload.pAndlCurrent = accountsPandL;
+        payload.directorApproval = {
+          name: accountsApproval.directorName || "",
+          date: accountsApproval.approvalDate || "",
+        };
+      }
+
       const res = await fetch("/api/forms/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId,
-          formCode,
-          periodStart,
-          periodEnd,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -344,6 +397,38 @@ export default function FormsPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // ⭐ Notes helpers
+  const handleAddNote = () => {
+    setAccountsNotes((prev) => [
+      ...prev,
+      { id: nextNoteId, title: `Note ${nextNoteId}`, body: "" },
+    ]);
+    setNextNoteId((id) => id + 1);
+  };
+
+  const handleUpdateNote = (id, field, value) => {
+    setAccountsNotes((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, [field]: value } : n))
+    );
+  };
+
+  const handleDeleteNote = (id) => {
+    setAccountsNotes((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  const handleMoveNote = (id, direction) => {
+    setAccountsNotes((prev) => {
+      const index = prev.findIndex((n) => n.id === id);
+      if (index === -1) return prev;
+      const newIndex = index + direction;
+      if (newIndex < 0 || newIndex >= prev.length) return prev;
+      const copy = [...prev];
+      const [item] = copy.splice(index, 1);
+      copy.splice(newIndex, 0, item);
+      return copy;
+    });
   };
 
   return (
@@ -402,6 +487,9 @@ export default function FormsPage() {
           {/* CT */}
           <div className="border rounded-md p-4 space-y-3">
             <h2 className="font-semibold text-sm">Corporation Tax (CT)</h2>
+            <p className="text-xs text-gray-500">
+              Generate CT600 and related supplements based on your company’s profit, losses, and capital allowances.
+            </p>
             <select
               value={selectedCTForm}
               onChange={(e) => setSelectedCTForm(e.target.value)}
@@ -436,6 +524,10 @@ export default function FormsPage() {
                 )}
               </div>
 
+              <p className="text-xs text-gray-500">
+                Use these fields to refine your CT600 calculation for loss relief, group relief, and capital allowances.
+              </p>
+
               {ctValidationError && (
                 <p className="text-xs text-red-600">{ctValidationError}</p>
               )}
@@ -451,6 +543,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setLossCarryback)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Amount of trading losses you want to carry back to earlier periods.
+                  </p>
                 </div>
 
                 <div>
@@ -463,6 +558,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setGroupRelief)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Losses surrendered to or claimed from other group companies.
+                  </p>
                 </div>
 
                 <div>
@@ -475,6 +573,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setAiaClaimed)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Annual Investment Allowance claimed on qualifying assets.
+                  </p>
                 </div>
 
                 <div>
@@ -488,6 +589,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setRAndDMultiplier)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Enhancement factor for qualifying R&amp;D expenditure (e.g. 1.3).
+                  </p>
                 </div>
 
                 <div>
@@ -500,6 +604,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setMainPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Tax written down value brought forward for main pool assets.
+                  </p>
                 </div>
 
                 <div>
@@ -512,6 +619,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setSpecialPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Brought forward balance for special rate pool assets.
+                  </p>
                 </div>
 
                 <div>
@@ -524,6 +634,9 @@ export default function FormsPage() {
                     onChange={handleNonNegativeChange(setCarsPoolBF)}
                     className="border rounded px-2 py-1 w-full"
                   />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Brought forward balance for car-related capital allowances.
+                  </p>
                 </div>
               </div>
 
@@ -574,6 +687,11 @@ export default function FormsPage() {
                 </ul>
               )}
 
+              <p className="text-xs text-gray-500">
+                ProfitLens scans your data to detect which CT600 supplements are likely required, so you don’t miss
+                critical disclosures.
+              </p>
+
               <button
                 type="button"
                 onClick={handleGeneratePack}
@@ -585,9 +703,13 @@ export default function FormsPage() {
             </section>
           )}
 
-          {/* ⭐ ACCOUNTS SECTION */}
+          {/* ⭐ ACCOUNTS SECTION (Selector only – editor is full-width below) */}
           <div className="border rounded-md p-4 space-y-3">
             <h2 className="font-semibold text-sm">Statutory Accounts</h2>
+            <p className="text-xs text-gray-500">
+              Choose the accounts framework for your statutory accounts. You can then configure notes, policies, and
+              disclosures in the editor below.
+            </p>
             <select
               value={selectedAccountsForm}
               onChange={(e) => setSelectedAccountsForm(e.target.value)}
@@ -603,7 +725,7 @@ export default function FormsPage() {
             <button
               type="button"
               onClick={() => handleGenerate("ACCOUNTS")}
-              disabled={isLoading}
+              disabled={isLoading || !selectedAccountsForm}
               className="w-full bg-purple-600 text-white text-sm font-medium py-2 rounded disabled:opacity-50"
             >
               {isLoading ? "Generating…" : "Generate Accounts PDF"}
@@ -613,6 +735,9 @@ export default function FormsPage() {
           {/* SA */}
           <div className="border rounded-md p-4 space-y-3">
             <h2 className="font-semibold text-sm">Self Assessment (SA)</h2>
+            <p className="text-xs text-gray-500">
+              Generate Self Assessment returns for individuals, including self-employment and property pages.
+            </p>
             <select
               value={selectedSAForm}
               onChange={(e) => setSelectedSAForm(e.target.value)}
@@ -638,6 +763,9 @@ export default function FormsPage() {
           {/* CIS */}
           <div className="border rounded-md p-4 space-y-3">
             <h2 className="font-semibold text-sm">Construction Industry Scheme (CIS)</h2>
+            <p className="text-xs text-gray-500">
+              Generate CIS300 contractor returns and subcontractor statements from your CIS transaction data.
+            </p>
             <select
               value={selectedCISForm}
               onChange={(e) => setSelectedCISForm(e.target.value)}
@@ -660,6 +788,30 @@ export default function FormsPage() {
             </button>
           </div>
         </section>
+
+        {/* ⭐ FULL-WIDTH STATUTORY ACCOUNTS EDITOR */}
+        {selectedAccountsForm && (
+          <section className="border border-purple-200 bg-purple-50/40 rounded-md p-4 md:p-6 space-y-4">
+            <FullWidthAccountsEditor
+              framework={selectedAccountsForm}
+              periodStart={periodStart}
+              periodEnd={periodEnd}
+              policies={accountsPolicies}
+              setPolicies={setAccountsPolicies}
+              pAndL={accountsPandL}
+              setPandL={setAccountsPandL}
+              directorsReport={accountsDirectorsReport}
+              setDirectorsReport={setAccountsDirectorsReport}
+              notes={accountsNotes}
+              onAddNote={handleAddNote}
+              onUpdateNote={handleUpdateNote}
+              onDeleteNote={handleDeleteNote}
+              onMoveNote={handleMoveNote}
+              approval={accountsApproval}
+              setApproval={setAccountsApproval}
+            />
+          </section>
+        )}
 
         {/* Messages */}
         {resultMessage && (
@@ -686,5 +838,480 @@ export default function FormsPage() {
         </section>
       </div>
     </ResponsiveLayout>
+  );
+}
+
+/**
+ * Full-width Statutory Accounts Editor
+ * Vertical tabs, ProfitLens style, FRS105 + FRS102 1A aware.
+ */
+function FullWidthAccountsEditor({
+  framework,
+  periodStart,
+  periodEnd,
+  policies,
+  setPolicies,
+  pAndL,
+  setPandL,
+  directorsReport,
+  setDirectorsReport,
+  notes,
+  onAddNote,
+  onUpdateNote,
+  onDeleteNote,
+  onMoveNote,
+  approval,
+  setApproval,
+}) {
+  const [activeTab, setActiveTab] = useState("framework");
+
+  const isFRS102 = framework === "FRS102_1A";
+  const isFRS105 = framework === "FRS105";
+
+  const tabs = [
+    { id: "framework", label: "Framework" },
+    { id: "policies", label: "Accounting Policies" },
+    ...(isFRS102 ? [{ id: "pnl", label: "Profit & Loss" }] : []),
+    ...(isFRS102 ? [{ id: "directors", label: "Director’s Report" }] : []),
+    { id: "notes", label: "Additional Notes" },
+    { id: "approval", label: "Director Approval" },
+  ];
+
+  const frameworkLabel = isFRS105
+    ? "FRS 105 — Micro‑entity Accounts"
+    : "FRS 102 Section 1A — Small Company Accounts";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-purple-900">
+            Statutory Accounts Editor
+          </h2>
+          <p className="text-xs text-gray-600">
+            Configure the disclosures, policies, and notes that will appear in your statutory accounts PDF.
+          </p>
+        </div>
+        <div className="text-xs text-gray-700">
+          <div>
+            <span className="font-medium">Framework:</span> {frameworkLabel}
+          </div>
+          <div>
+            <span className="font-medium">Period:</span>{" "}
+            {periodStart && periodEnd ? `${periodStart} → ${periodEnd}` : "Not set"}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-4">
+        {/* Vertical Tabs */}
+        <div className="md:w-48 flex md:flex-col gap-2 md:gap-1">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex-1 md:flex-none text-xs text-left px-3 py-2 rounded border ${
+                activeTab === tab.id
+                  ? "bg-white border-purple-500 text-purple-700 font-medium"
+                  : "bg-purple-50 border-transparent text-gray-700 hover:bg-purple-100"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        <div className="flex-1 bg-white border border-purple-100 rounded-md p-4 space-y-3">
+          {activeTab === "framework" && (
+            <FrameworkTab isFRS105={isFRS105} isFRS102={isFRS102} />
+          )}
+
+          {activeTab === "policies" && (
+            <PoliciesTab policies={policies} setPolicies={setPolicies} />
+          )}
+
+          {activeTab === "pnl" && isFRS102 && (
+            <ProfitAndLossTab pAndL={pAndL} setPandL={setPandL} />
+          )}
+
+          {activeTab === "directors" && isFRS102 && (
+            <DirectorsReportTab
+              directorsReport={directorsReport}
+              setDirectorsReport={setDirectorsReport}
+            />
+          )}
+
+          {activeTab === "notes" && (
+            <NotesTab
+              notes={notes}
+              onAddNote={onAddNote}
+              onUpdateNote={onUpdateNote}
+              onDeleteNote={onDeleteNote}
+              onMoveNote={onMoveNote}
+            />
+          )}
+
+          {activeTab === "approval" && (
+            <ApprovalTab approval={approval} setApproval={setApproval} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrameworkTab({ isFRS105, isFRS102 }) {
+  return (
+    <div className="space-y-2 text-xs text-gray-700">
+      <h3 className="font-semibold text-sm">Framework overview</h3>
+      {isFRS105 && (
+        <>
+          <p>
+            <strong>FRS 105</strong> is the micro‑entity standard. It provides a highly simplified
+            set of accounts for very small companies that meet the micro‑entity thresholds.
+          </p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>Balance sheet only (no detailed P&amp;L in the filed accounts).</li>
+            <li>Very limited note disclosures.</li>
+            <li>Suitable for the smallest companies that qualify as micro‑entities.</li>
+          </ul>
+        </>
+      )}
+      {isFRS102 && (
+        <>
+          <p>
+            <strong>FRS 102 Section 1A</strong> is the small company regime. It requires more
+            disclosures than FRS 105, but still offers simplifications compared to full FRS 102.
+          </p>
+          <ul className="list-disc list-inside space-y-1">
+            <li>Balance sheet plus optional Profit and Loss Account.</li>
+            <li>Accounting policies and key notes are required.</li>
+            <li>Director’s report is optional but commonly included.</li>
+          </ul>
+        </>
+      )}
+      <p className="mt-2 text-gray-600">
+        ProfitLens uses your transaction data to populate the core figures, while you control the
+        narrative and disclosures here.
+      </p>
+    </div>
+  );
+}
+
+function PoliciesTab({ policies, setPolicies }) {
+  const handleChange = (field) => (e) => {
+    setPolicies((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  return (
+    <div className="space-y-3 text-xs text-gray-700">
+      <h3 className="font-semibold text-sm">Accounting policies</h3>
+      <p className="text-gray-600">
+        These policies explain how your company recognises income, expenses, assets, and liabilities.
+        They appear in the Notes to the Financial Statements.
+      </p>
+
+      <div className="space-y-2">
+        <label className="block">
+          <span className="block font-medium mb-1">Turnover</span>
+          <textarea
+            rows={3}
+            value={policies.turnover}
+            onChange={handleChange("turnover")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Describe how and when turnover is recognised (e.g. on delivery of goods or completion of services)."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Taxation</span>
+          <textarea
+            rows={3}
+            value={policies.taxation}
+            onChange={handleChange("taxation")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Explain how corporation tax is calculated and when deferred tax is recognised."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Debtors</span>
+          <textarea
+            rows={2}
+            value={policies.debtors}
+            onChange={handleChange("debtors")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Explain how trade debtors and other receivables are measured (e.g. at amortised cost)."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Creditors</span>
+          <textarea
+            rows={2}
+            value={policies.creditors}
+            onChange={handleChange("creditors")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Explain how trade creditors and other payables are recognised and measured."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Cash at bank and in hand</span>
+          <textarea
+            rows={2}
+            value={policies.cash}
+            onChange={handleChange("cash")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Describe what is included in cash and cash equivalents."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Tangible fixed assets</span>
+          <textarea
+            rows={3}
+            value={policies.tangibleFixedAssets}
+            onChange={handleChange("tangibleFixedAssets")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Explain how tangible fixed assets are recognised, measured, and derecognised."
+          />
+        </label>
+
+        <label className="block">
+          <span className="block font-medium mb-1">Depreciation</span>
+          <textarea
+            rows={3}
+            value={policies.depreciation}
+            onChange={handleChange("depreciation")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Describe depreciation methods and useful lives for key asset classes."
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function ProfitAndLossTab({ pAndL, setPandL }) {
+  const handleChange = (field) => (e) => {
+    setPandL((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  return (
+    <div className="space-y-3 text-xs text-gray-700">
+      <h3 className="font-semibold text-sm">Profit and Loss Account (optional)</h3>
+      <p className="text-gray-600">
+        If you enter figures here, a Profit and Loss Account will be included in the FRS 102 Section 1A accounts.
+        If left blank, the P&amp;L section is omitted from the PDF.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <NumberField
+          label="Turnover"
+          value={pAndL.turnover}
+          onChange={handleChange("turnover")}
+          hint="Total income from trading activities."
+        />
+        <NumberField
+          label="Cost of sales"
+          value={pAndL.costOfSales}
+          onChange={handleChange("costOfSales")}
+          hint="Direct costs associated with generating turnover."
+        />
+        <NumberField
+          label="Administrative expenses"
+          value={pAndL.adminExpenses}
+          onChange={handleChange("adminExpenses")}
+          hint="Overheads and operating expenses."
+        />
+        <NumberField
+          label="Interest"
+          value={pAndL.interest}
+          onChange={handleChange("interest")}
+          hint="Finance costs such as loan interest."
+        />
+        <NumberField
+          label="Tax on profit"
+          value={pAndL.tax}
+          onChange={handleChange("tax")}
+          hint="Corporation tax charge for the year."
+        />
+        <NumberField
+          label="Profit for the year"
+          value={pAndL.profitForYear}
+          onChange={handleChange("profitForYear")}
+          hint="Final profit after tax."
+        />
+      </div>
+    </div>
+  );
+}
+
+function DirectorsReportTab({ directorsReport, setDirectorsReport }) {
+  return (
+    <div className="space-y-3 text-xs text-gray-700">
+      <h3 className="font-semibold text-sm">Director’s Report (optional)</h3>
+      <p className="text-gray-600">
+        Under FRS 102 Section 1A, a director’s report is optional but commonly included. Use this
+        section to describe the company’s activities, performance, and future plans.
+      </p>
+      <textarea
+        rows={10}
+        value={directorsReport}
+        onChange={(e) => setDirectorsReport(e.target.value)}
+        className="w-full border rounded px-2 py-1 text-xs"
+        placeholder="Example: The principal activity of the company during the year was construction services..."
+      />
+    </div>
+  );
+}
+
+function NotesTab({ notes, onAddNote, onUpdateNote, onDeleteNote, onMoveNote }) {
+  return (
+    <div className="space-y-3 text-xs text-gray-700">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-sm">Additional Notes</h3>
+          <p className="text-gray-600">
+            These notes appear after the primary statements. Use them for disclosures such as
+            related party transactions, contingencies, or other narrative explanations.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onAddNote}
+          className="text-xs px-3 py-1 rounded bg-purple-600 text-white font-medium"
+        >
+          Add note
+        </button>
+      </div>
+
+      {notes.length === 0 && (
+        <p className="text-gray-500">
+          No additional notes yet. Click &quot;Add note&quot; to create your first disclosure.
+        </p>
+      )}
+
+      <div className="space-y-3">
+        {notes.map((note, index) => (
+          <div
+            key={note.id}
+            className="border border-gray-200 rounded-md p-3 bg-gray-50 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <input
+                type="text"
+                value={note.title}
+                onChange={(e) => onUpdateNote(note.id, "title", e.target.value)}
+                className="flex-1 border rounded px-2 py-1 text-xs"
+                placeholder="Note title (e.g. Related party transactions)"
+              />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onMoveNote(note.id, -1)}
+                  disabled={index === 0}
+                  className="px-2 py-1 text-[10px] border rounded disabled:opacity-40"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onMoveNote(note.id, 1)}
+                  disabled={index === notes.length - 1}
+                  className="px-2 py-1 text-[10px] border rounded disabled:opacity-40"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteNote(note.id)}
+                  className="px-2 py-1 text-[10px] border border-red-300 text-red-700 rounded"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+            <textarea
+              rows={4}
+              value={note.body}
+              onChange={(e) => onUpdateNote(note.id, "body", e.target.value)}
+              className="w-full border rounded px-2 py-1 text-xs"
+              placeholder="Enter the narrative for this note. It will appear as a numbered note in the accounts PDF."
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ApprovalTab({ approval, setApproval }) {
+  const handleChange = (field) => (e) => {
+    setApproval((prev) => ({ ...prev, [field]: e.target.value }));
+  };
+
+  return (
+    <div className="space-y-3 text-xs text-gray-700">
+      <h3 className="font-semibold text-sm">Director approval</h3>
+      <p className="text-gray-600">
+        These details appear at the end of the accounts and confirm the date the directors approved
+        the financial statements.
+      </p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium mb-1">
+            Director name
+          </label>
+          <input
+            type="text"
+            value={approval.directorName}
+            onChange={handleChange("directorName")}
+            className="w-full border rounded px-2 py-1 text-xs"
+            placeholder="Name of the approving director"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium mb-1">
+            Approval date
+          </label>
+          <input
+            type="date"
+            value={approval.approvalDate}
+            onChange={handleChange("approvalDate")}
+            className="w-full border rounded px-2 py-1 text-xs"
+          />
+        </div>
+      </div>
+
+      <p className="text-[11px] text-gray-500">
+        If you leave the date blank, ProfitLens will default to the date the PDF is generated.
+      </p>
+    </div>
+  );
+}
+
+function NumberField({ label, value, onChange, hint }) {
+  return (
+    <div>
+      <label className="block text-xs text-gray-600 mb-1">
+        {label}
+      </label>
+      <input
+        type="number"
+        value={value}
+        onChange={onChange}
+        className="border rounded px-2 py-1 w-full text-xs"
+      />
+      {hint && (
+        <p className="text-[10px] text-gray-400 mt-1">
+          {hint}
+        </p>
+      )}
+    </div>
   );
 }
