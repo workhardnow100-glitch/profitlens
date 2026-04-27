@@ -18,8 +18,8 @@ type FinancialHealthFlat = {
 type TrialBalanceRow = {
   account_code: string;
   account_name: string;
-  account_type: string | null;
-  hmrc_bucket: string | null;
+  account_type?: string | null;      // <-- aligned with BSLine
+  hmrc_bucket?: string | null;       // <-- aligned with BSLine
   debit: number;
   credit: number;
   balance: number;
@@ -28,8 +28,8 @@ type TrialBalanceRow = {
 type BalanceSheetRow = {
   account_code: string;
   account_name: string;
-  account_type: string | null;
-  hmrc_bucket: string | null;
+  account_type?: string | null;      // <-- aligned with BSLine
+  hmrc_bucket?: string | null;       // <-- aligned with BSLine
   debit: number;
   credit: number;
   balance: number;
