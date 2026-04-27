@@ -34,7 +34,8 @@ export default function BalanceSheetPage() {
   const [yearCompare, setYearCompare] = useState<number | undefined>(undefined);
   const [dataCurrent, setDataCurrent] = useState<BSData | null>(null);
   const [dataCompare, setDataCompare] = useState<BSData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+
   const [editingLine, setEditingLine] = useState<BSLine | null>(null);
   const [editingMeta, setEditingMeta] = useState<{
     section: "assets" | "liabilities" | "equity";
@@ -192,9 +193,10 @@ export default function BalanceSheetPage() {
     window.print();
   }
 
-  if (loading || !dataCurrent) {
-    return <div className="p-6">Loading balance sheet…</div>;
-  }
+  if (loading) {
+  return <div className="p-6">Loading balance sheet…</div>;
+}
+
 
   return (
     <div className="p-8 max-w-6xl mx-auto print:p-4 relative">
