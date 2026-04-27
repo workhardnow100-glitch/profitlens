@@ -3,10 +3,10 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
-// ⭐ BUILDER ENGINE (statutory, correct)
+// BUILDER ENGINE (statutory, all years)
 import { buildAccountsFormData } from "../../lib/accounting/builder-engine";
 
-// ⭐ JOURNAL ENGINE (YTD only)
+// JOURNAL ENGINE (YTD)
 import {
   getUnifiedBalanceSheet,
   getUnifiedTrialBalance,
@@ -59,7 +59,7 @@ export default async function handler(
     const ytdPeriod: PeriodFilter = { from: startOfYear, to: today };
 
     // ------------------------------------------------------------
-    // ⭐ FULL BUSINESS — BUILDER ENGINE (ALL YEARS)
+    // FULL BUSINESS — BUILDER ENGINE (ALL YEARS)
     // ------------------------------------------------------------
     const { overview: full } = await buildAccountsFormData(
       null,
@@ -69,16 +69,12 @@ export default async function handler(
       []
     );
 
+    const fullSafe: any = full || {};
+
     // ------------------------------------------------------------
-    // ⭐ YTD — JOURNAL ENGINE
+    // YTD — JOURNAL ENGINE
     // ------------------------------------------------------------
-    const [
-      ytdBS,
-      ytdTB,
-      ytdPL,
-      ytdDL,
-      ytdCF,
-    ] = await Promise.all([
+    const [ytdBS, ytdTB, ytdPL, ytdDL, ytdCF] = await Promise.all([
       getUnifiedBalanceSheet(clientId, currentYear),
       getUnifiedTrialBalance(clientId, ytdPeriod),
       getUnifiedProfitAndLoss(clientId, ytdPeriod),
@@ -174,48 +170,74 @@ export default async function handler(
     }
 
     // ------------------------------------------------------------
-    // ⭐ FULL BUSINESS — BUILDER MAPPING
+    // FULL BUSINESS — BUILDER MAPPING (DEFENSIVE)
     // ------------------------------------------------------------
     const bs = {
-      total_assets: Number(full.totals.total_assets || 0),
-      total_liabilities: Number(full.totals.total_liabilities || 0),
-      total_equity: Number(full.totals.total_equity || 0),
+      total_assets: Number(fullSafe.totals?.total_assets || 0),
+      total_liabilities: Number(fullSafe.totals?.total_liabilities || 0),
+      total_equity: Number(fullSafe.totals?.total_equity || 0),
     };
 
     const pl = {
-      revenue: Number(full.pnl.revenue || 0),
-      cost_of_sales: Number(full.pnl.cost_of_sales || 0),
-      gross_profit: Number(full.pnl.gross_profit || 0),
-      operating_expenses: Number(full.pnl.operating_expenses || 0),
-      net_profit: Number(full.pnl.net_profit || 0),
+      revenue: Number(fullSafe.pnl?.revenue || 0),
+      cost_of_sales: Number(fullSafe.pnl?.cost_of_sales || 0),
+      gross_profit: Number(fullSafe.pnl?.gross_profit || 0),
+      operating_expenses: Number(fullSafe.pnl?.operating_expenses || 0),
+      net_profit: Number(fullSafe.pnl?.net_profit || 0),
     };
 
     const tb = {
-      assets: Number(full.trial_balance.assets || 0),
-      liabilities: Number(full.trial_balance.liabilities || 0),
-      equity: Number(full.trial_balance.equity || 0),
-      income: Number(full.trial_balance.income || 0),
-      expenses: Number(full.trial_balance.expenses || 0),
+      assets: Number(fullSafe.trial_balance?.assets || 0),
+      liabilities: Number(fullSafe.trial_balance?.liabilities || 0),
+      equity: Number(fullSafe.trial_balance?.equity || 0),
+      income: Number(fullSafe.trial_balance?.income || 0),
+      expenses: Number(fullSafe.trial_balance?.expenses || 0),
     };
 
-    const trial_balance_full = full.trial_balance.lines.map(normalizeLine);
-    const balance_sheet_full = full.balance_sheet.lines.map(normalizeLine);
-    const profit_and_loss_full = full.pnl.lines.map(normalizeLine);
-    const director_loan_ledger = full.director_loan.lines.map(normalizeLine);
+    const trial_balance_full = Array.isArray(
+      fullSafe.trial_balance?.lines
+    )
+      ? fullSafe.trial_balance.lines.map(normalizeLine)
+      : [];
 
-    const fixed_assets = full.fixed_assets.lines.map(normalizeLine);
-    const fixed_assets_nbv = Number(full.fixed_assets.nbv || 0);
+    const balance_sheet_full = Array.isArray(
+      fullSafe.balance_sheet?.lines
+    )
+      ? fullSafe.balance_sheet.lines.map(normalizeLine)
+      : [];
 
-    const liabilities_lines = full.liabilities.lines.map(normalizeLine);
-    const liabilities_total = Number(full.liabilities.total || 0);
+    const profit_and_loss_full = Array.isArray(fullSafe.pnl?.lines)
+      ? fullSafe.pnl.lines.map(normalizeLine)
+      : [];
 
-    const cash_flow_lines_full = full.cashflow.lines.map((l: any) => ({
-      ...l,
-      debit: Number(l.debit || 0),
-      credit: Number(l.credit || 0),
-    }));
+    const director_loan_ledger = Array.isArray(
+      fullSafe.director_loan?.lines
+    )
+      ? fullSafe.director_loan.lines.map(normalizeLine)
+      : [];
 
-    // ⭐ REBUILD BANK ACCOUNTS FROM BUILDER BALANCE SHEET
+    const fixed_assets = Array.isArray(fullSafe.fixed_assets?.lines)
+      ? fullSafe.fixed_assets.lines.map(normalizeLine)
+      : [];
+
+    const fixed_assets_nbv = Number(fullSafe.fixed_assets?.nbv || 0);
+
+    const liabilities_lines = Array.isArray(fullSafe.liabilities?.lines)
+      ? fullSafe.liabilities.lines.map(normalizeLine)
+      : [];
+
+    const liabilities_total = Number(fullSafe.liabilities?.total || 0);
+
+    const cash_flow_lines_full =
+      fullSafe.cashflow && Array.isArray(fullSafe.cashflow.lines)
+        ? fullSafe.cashflow.lines.map((l: any) => ({
+            ...l,
+            debit: Number(l.debit || 0),
+            credit: Number(l.credit || 0),
+          }))
+        : [];
+
+    // BANK ACCOUNTS FROM BUILDER BALANCE SHEET
     const bank_accounts = balance_sheet_full
       .filter((line: any) => {
         const type = (line.account_type || "").toUpperCase();
@@ -229,7 +251,7 @@ export default async function handler(
         money_out: Number(line.credit || 0),
       }));
 
-    // ⭐ REBUILD SUSPENSE + UNCATEGORISED FROM BUILDER TB
+    // SUSPENSE + UNCATEGORISED FROM BUILDER TB
     const suspense_and_uncategorised = trial_balance_full
       .filter(
         (l: any) =>
@@ -238,7 +260,7 @@ export default async function handler(
       .map(normalizeLine);
 
     // ------------------------------------------------------------
-    // ⭐ YTD — JOURNAL MAPPING
+    // YTD — JOURNAL MAPPING
     // ------------------------------------------------------------
     const ytdPl = ytdPL.summary;
     const ytdTb = ytdTB.summary;
@@ -263,7 +285,7 @@ export default async function handler(
     }));
 
     // ------------------------------------------------------------
-    // ⭐ BUILD RESPONSE
+    // BUILD RESPONSE
     // ------------------------------------------------------------
     return res.status(200).json({
       // LEGACY FLAT SHAPE (builder-powered)
@@ -321,7 +343,7 @@ export default async function handler(
         { label: "Run VAT Return", link: "/vat" },
       ],
 
-      // ⭐ FULL BUSINESS — BUILDER ENGINE
+      // FULL BUSINESS — BUILDER ENGINE
       full_business: {
         financial_health: {
           total_assets: bs.total_assets,
@@ -358,7 +380,7 @@ export default async function handler(
         director_loan: director_loan_ledger,
       },
 
-      // ⭐ YTD — JOURNAL ENGINE
+      // YTD — JOURNAL ENGINE
       ytd: {
         financial_health: {
           revenue_mtd: ytdPl.revenue,
