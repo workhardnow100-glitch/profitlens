@@ -6,11 +6,14 @@
  *     - CT600 family (Corporation Tax)
  *     - SA100 / SA103 / SA105 / SA110 (Self Assessment)
  *     - CIS300 / CIS_STATEMENT (CIS)
+ *     - FRS105 / FRS102_1A (Statutory Accounts)
  * Architecture:
  *   - Journals = accounting truth
  *   - Toggles on transactions = which tax engines a transaction feeds
  *   - COA buckets + CT_MAP + sa_bucket = classification
  *   - CIS amounts = from transactions.cis_amount (hybrid)
+ *   - Statutory accounts numeric engine = buildAccountsFormData
+ *   - Statutory narrative = accounts_versions (versioned)
  * ============================================================
  */
 
@@ -18,8 +21,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "../auth/[...nextauth]";
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 import { v4 as uuidv4 } from "uuid";
-
-
 
 // PDF templates
 import { generateCt600Pdf } from "../../../lib/pdf/templates/ct600";
@@ -38,7 +39,6 @@ import { generateCis300Pdf } from "../../../lib/pdf/templates/cis300";
 import { generateCisStatementPdf } from "../../../lib/pdf/templates/cis_statement";
 import { generateFrs105AccountsPdf } from "../../../lib/pdf/templates/generateFrs105AccountsPdf";
 import { generateFrs1021aAccountsPdf } from "../../../lib/pdf/templates/generateFrs1021aAccountsPdf";
-
 
 // CT category map
 import { CT_MAP } from "../../../lib/constants/ctMap";
@@ -75,7 +75,12 @@ export default async function handler(req, res) {
       ? session.user.actingAsClientId
       : session.user.clientId || session.user.defaultClientId;
 
-    const { formCode, periodStart, periodEnd } = req.body || {};
+    const {
+      formCode,
+      periodStart,
+      periodEnd,
+      accountsVersionId, // ⭐ NEW: versioned accounts
+    } = req.body || {};
 
     if (!resolvedClientId || !formCode || !periodStart || !periodEnd) {
       return res.status(400).json({
@@ -86,11 +91,21 @@ export default async function handler(req, res) {
 
     // ✅ Whitelist check
     const validCodes = [
-      "CT600","CT600N","SA100","SA103","SA105","SA110",
-      "CIS300","CIS_STATEMENT","FRS105","FRS102_1A"
+      "CT600",
+      "CT600N",
+      "SA100",
+      "SA103",
+      "SA105",
+      "SA110",
+      "CIS300",
+      "CIS_STATEMENT",
+      "FRS105",
+      "FRS102_1A",
     ];
     if (!validCodes.includes(formCode)) {
-      return res.status(400).json({ success: false, message: "Unsupported form code." });
+      return res
+        .status(400)
+        .json({ success: false, message: "Unsupported form code." });
     }
 
     const periodStartDate = new Date(periodStart);
@@ -177,29 +192,52 @@ export default async function handler(req, res) {
         periodStart,
         periodEnd
       );
-   } else if (formCode.startsWith("FRS")) {
+    } else if (formCode.startsWith("FRS")) {
+      // ⭐ NEW: Versioned statutory accounts engine
 
-  // STEP 2: Fetch custom notes
-  const { data: customNotes, error: notesError } = await supabaseAdmin
-    .from("accounts_notes")
-    .select("*")
-    .eq("client_id", resolvedClientId)
-    .eq("period_end", periodEnd);
+      if (!accountsVersionId) {
+        return res.status(400).json({
+          success: false,
+          message: "Missing accountsVersionId for statutory accounts.",
+        });
+      }
 
-  if (notesError) {
-    console.error("Error loading custom notes:", notesError);
-  }
+      const { data: version, error: versionError } = await supabaseAdmin
+        .from("accounts_versions")
+        .select("*")
+        .eq("id", accountsVersionId)
+        .maybeSingle();
 
-  // STEP 2: Pass notes into builder
-  formData = await buildAccountsFormData(
-    client,
-    resolvedClientId,
-    periodStart,
-    periodEnd,
-    customNotes || []
-  );
-}
+      if (versionError || !version) {
+        console.error("Error loading accounts version:", versionError);
+        return res.status(500).json({
+          success: false,
+          message: "Failed to load accounts version.",
+        });
+      }
 
+      // Use version.notes as customNotes into numeric builder
+      const customNotes = version.notes || [];
+
+      const baseFormData = await buildAccountsFormData(
+        client,
+        resolvedClientId,
+        periodStart,
+        periodEnd,
+        customNotes
+      );
+
+      formData = {
+        ...baseFormData,
+        // Versioned narrative payload
+        policies: version.policies || {},
+        pandl: version.pandl || null,
+        directorsReport: version.directors_report || null,
+        approval: version.approval || baseFormData.directorApproval || {},
+        framework: version.framework || formCode,
+        versionId: version.id,
+      };
+    }
 
     const filename = `${submissionId}.pdf`;
 
@@ -236,7 +274,6 @@ export default async function handler(req, res) {
     });
   }
 }
-
 
 /* -------------------------------------------------------------------------- */
 /*                               CT600 CONFIG                                 */
@@ -307,18 +344,18 @@ const CAPITAL_ALLOWANCE_ACCOUNTS = [
 const CAPITAL_ALLOWANCE_POOLS = {
   // Main pool
   "Plant & Machinery": "main",
-  "Machinery": "main",
-  "Equipment": "main",
+  Machinery: "main",
+  Equipment: "main",
   "Tools & Equipment": "main",
   "Office Equipment": "main",
   "Fixtures & Fittings": "main",
-  "Furniture": "main",
+  Furniture: "main",
   "Computer Equipment": "main",
   "IT Equipment": "main",
-  "Servers": "main",
-  "Laptops": "main",
-  "Desktops": "main",
-  "Printers": "main",
+  Servers: "main",
+  Laptops: "main",
+  Desktops: "main",
+  Printers: "main",
   "CCTV Systems": "main",
   "Security Systems": "main",
   "Warehouse Equipment": "main",
@@ -335,11 +372,11 @@ const CAPITAL_ALLOWANCE_POOLS = {
   "Thermal Insulation": "special",
   "Solar Panels": "special",
   "Lift Systems": "special",
-  "Escalators": "special",
+  Escalators: "special",
   "Moving Walkways": "special",
 
   // Cars pool
-  "Cars": "cars",
+  Cars: "cars",
   "Motor Vehicles": "cars",
   "Company Car": "cars",
 };
@@ -391,7 +428,6 @@ function computeCorpTaxRate(profit, associatedCompanies) {
   // Ensure at least 1 company for threshold scaling
   const n = Math.max(1, associatedCompanies || 1);
 
-
   const lowerLimit = 50000 / n;
   const upperLimit = 250000 / n;
 
@@ -438,7 +474,7 @@ async function buildCTFormData(
   client,
   clientId,
   periodStart,
-  periodEnd,
+  periodEnd
 ) {
   const { data: corpSubmission } = await supabaseAdmin
     .from("corp_submissions")
@@ -516,8 +552,10 @@ async function buildCTFormData(
 
       // --- Supplements ---
       if (normalizedName.includes("dotas")) dotasFlag = true;
-      if (normalizedName.includes("charity") && amt > 0) charityIncome += amt;
-      if (normalizedName.includes("royalty") && amt > 0) royaltyIncome += amt;
+      if (normalizedName.includes("charity") && amt > 0)
+        charityIncome += amt;
+      if (normalizedName.includes("royalty") && amt > 0)
+        royaltyIncome += amt;
       if (normalizedName.includes("northern ireland")) niTradingFlag = true;
 
       // --- CT profit classification ---
@@ -560,16 +598,19 @@ async function buildCTFormData(
   const specialPoolBeforeWDA = specialPoolBF + specialPoolAdditions;
   const carsPoolBeforeWDA = carsPoolBF + carsPoolAdditions;
 
-  const mainWDA = mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
-  const specialWDA = specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
-  const carsWDA = carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
+  const mainWDA =
+    mainPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.main || 0);
+  const specialWDA =
+    specialPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.special || 0);
+  const carsWDA =
+    carsPoolBeforeWDA * (CAPITAL_ALLOWANCE_RATES.cars || 0);
 
-  const totalCapitalAllowances = aiaClaimed + mainWDA + specialWDA + carsWDA;
-  // Define carried forward balances for each pool
-const mainPoolCF = mainPoolBeforeWDA - mainWDA;
-const specialPoolCF = specialPoolBeforeWDA - specialWDA;
-const carsPoolCF = carsPoolBeforeWDA - carsWDA;
+  const totalCapitalAllowances =
+    aiaClaimed + mainWDA + specialWDA + carsWDA;
 
+  const mainPoolCF = mainPoolBeforeWDA - mainWDA;
+  const specialPoolCF = specialPoolBeforeWDA - specialWDA;
+  const carsPoolCF = carsPoolBeforeWDA - carsWDA;
 
   capitalAllowances = totalCapitalAllowances;
 
@@ -589,50 +630,71 @@ const carsPoolCF = carsPoolBeforeWDA - carsWDA;
   const lossCarryback = corpSubmission?.loss_carryback || 0;
   const groupRelief = corpSubmission?.group_relief || 0;
 
- /* -------------------------- R&D Engine -------------------------- */
-const autoRAndDMultiplier =
-  corpSubmission?.r_and_d_multiplier && corpSubmission.r_and_d_multiplier > 0
-    ? corpSubmission.r_and_d_multiplier
-    : DEFAULT_R_AND_D_SME_MULTIPLIER;
+  /* -------------------------- R&D Engine -------------------------- */
+  const autoRAndDMultiplier =
+    corpSubmission?.r_and_d_multiplier &&
+    corpSubmission.r_and_d_multiplier > 0
+      ? corpSubmission.r_and_d_multiplier
+      : DEFAULT_R_AND_D_SME_MULTIPLIER;
 
-const autoTotalRAndDSpend = rAndDSmeSpend;
-const autoRAndDGrants = rAndDGrants;
+  const autoTotalRAndDSpend = rAndDSmeSpend;
+  const autoRAndDGrants = rAndDGrants;
 
-if (autoRAndDGrants > autoTotalRAndDSpend) {
-  console.warn("R&D grants exceed total spend — clamped to 0 qualifying spend.");
-}
+  if (autoRAndDGrants > autoTotalRAndDSpend) {
+    console.warn(
+      "R&D grants exceed total spend — clamped to 0 qualifying spend."
+    );
+  }
 
-const autoSmeQualifyingSpend = Math.max(autoTotalRAndDSpend - autoRAndDGrants, 0);
-const autoSmeEnhancedDeduction = autoSmeQualifyingSpend * autoRAndDMultiplier;
+  const autoSmeQualifyingSpend = Math.max(
+    autoTotalRAndDSpend - autoRAndDGrants,
+    0
+  );
+  const autoSmeEnhancedDeduction =
+    autoSmeQualifyingSpend * autoRAndDMultiplier;
 
-const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
-const autoRdecCredit = autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
+  const autoRdecQualifyingSpend = Math.max(autoRAndDGrants, 0);
+  const autoRdecCredit =
+    autoRdecQualifyingSpend * DEFAULT_R_AND_D_RDEC_RATE;
 
-const autoSmePayableCredit = 0;
-const autoSurrenderedLoss = 0;
+  const autoSmePayableCredit = 0;
+  const autoSurrenderedLoss = 0;
 
-const overrideEnabled = corpSubmission?.r_and_d_override_enabled || false;
-const overrideSmeEnhancedDeduction = corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
-const overrideSmePayableCredit = corpSubmission?.r_and_d_override_sme_payable_credit || 0;
-const overrideRdecCredit = corpSubmission?.r_and_d_override_rdec_credit || 0;
-const overrideSurrenderedLoss = corpSubmission?.r_and_d_override_surrendered_loss || 0;
+  const overrideEnabled =
+    corpSubmission?.r_and_d_override_enabled || false;
+  const overrideSmeEnhancedDeduction =
+    corpSubmission?.r_and_d_override_sme_enhanced_deduction || 0;
+  const overrideSmePayableCredit =
+    corpSubmission?.r_and_d_override_sme_payable_credit || 0;
+  const overrideRdecCredit =
+    corpSubmission?.r_and_d_override_rdec_credit || 0;
+  const overrideSurrenderedLoss =
+    corpSubmission?.r_and_d_override_surrendered_loss || 0;
 
-const finalSmeEnhancedDeduction = overrideEnabled ? overrideSmeEnhancedDeduction : autoSmeEnhancedDeduction;
-const finalSmePayableCredit = overrideEnabled ? overrideSmePayableCredit : autoSmePayableCredit;
-const finalRdecCredit = overrideEnabled ? overrideRdecCredit : autoRdecCredit;
-const finalSurrenderedLoss = overrideEnabled ? overrideSurrenderedLoss : autoSurrenderedLoss;
+  const finalSmeEnhancedDeduction = overrideEnabled
+    ? overrideSmeEnhancedDeduction
+    : autoSmeEnhancedDeduction;
+  const finalSmePayableCredit = overrideEnabled
+    ? overrideSmePayableCredit
+    : autoSmePayableCredit;
+  const finalRdecCredit = overrideEnabled
+    ? overrideRdecCredit
+    : autoRdecCredit;
+  const finalSurrenderedLoss = overrideEnabled
+    ? overrideSurrenderedLoss
+    : autoSurrenderedLoss;
 
-const rAndDSpend = autoTotalRAndDSpend;
-const rAndDMultiplier = autoRAndDMultiplier;
-const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
+  const rAndDSpend = autoTotalRAndDSpend;
+  const rAndDMultiplier = autoRAndDMultiplier;
+  const rAndDEnhancedRelief = finalSmeEnhancedDeduction;
 
-const taxableProfit = Math.max(
-  baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
-  0
-);
+  const taxableProfit = Math.max(
+    baseProfit - lossCarryback - groupRelief - rAndDEnhancedRelief,
+    0
+  );
 
-
-  const associatedCompanies = corpSubmission?.associated_companies_count || 0;
+  const associatedCompanies =
+    corpSubmission?.associated_companies_count || 0;
   const taxRate =
     corpSubmission?.corp_tax_rate != null
       ? corpSubmission.corp_tax_rate
@@ -643,147 +705,146 @@ const taxableProfit = Math.max(
       ? corpSubmission.corp_tax_due
       : taxableProfit * taxRate;
 
-const paymentsMade = sumBy(ctPayments || [], "amount");
-const balanceDue = corpTaxDue - paymentsMade;
+  const paymentsMade = sumBy(ctPayments || [], "amount");
+  const balanceDue = corpTaxDue - paymentsMade;
 
-// Derived total loans to participators from journals if not explicitly stored
-const derivedTotalLoans = dlaLoansAdvanced - dlaLoansRepaid;
+  // Derived total loans to participators from journals if not explicitly stored
+  const derivedTotalLoans = dlaLoansAdvanced - dlaLoansRepaid;
 
-// Supplement detection (engine-wide, journal-driven)
-const ct600ARequired =
-  (corpSubmission && corpSubmission.loans_to_participators != null
-    ? corpSubmission.loans_to_participators
-    : derivedTotalLoans) !== 0;
+  // Supplement detection (engine-wide, journal-driven)
+  const ct600ARequired =
+    (corpSubmission && corpSubmission.loans_to_participators != null
+      ? corpSubmission.loans_to_participators
+      : derivedTotalLoans) !== 0;
 
-const ct600LRequired = rAndDSpend > 0;
-const ct600JRequired = dotasFlag;
-const ct600FRequired = charityIncome > 0;
-const ct600MRequired = royaltyIncome > 0;
-const ct600NRequired = niTradingFlag;
+  const ct600LRequired = rAndDSpend > 0;
+  const ct600JRequired = dotasFlag;
+  const ct600FRequired = charityIncome > 0;
+  const ct600MRequired = royaltyIncome > 0;
+  const ct600NRequired = niTradingFlag;
 
   return {
-  summary: {
-    formCode,
-    companyName: client?.business_name || client?.name || "",
-    tradingName: client?.trading_name || "",
-    periodStart,
-    periodEnd,
-    turnover,
-    nonTradingIncome,
-    expenses: allowableExpenses + disallowableExpenses,
-    capitalAllowances: totalCapitalAllowances,
-    profitBeforeTax: baseProfit,
-    corpTaxDue,
-    paymentsMade,
-    balanceDue,
-  },
-
-  computations: {
-    turnover,
-    nonTradingIncome,
-    allowableExpenses,
-    disallowableExpenses,
-    capitalAllowances: totalCapitalAllowances,
-    adjustedProfit: baseProfit,
-    taxableProfit,
-    lossCarryback,
-    groupRelief,
-    rAndDSpend,
-    rAndDMultiplier,
-    rAndDEnhancedRelief,
-    taxRate,
-    taxDue: corpTaxDue,
-  },
-
-  capitalAllowances: {
-    totalCapitalAllowances,
-    aiaClaimed,
-    mainPool: {
-      broughtForward: mainPoolBF,
-      additions: mainPoolAdditions,
-      wda: mainWDA,
-      carriedForward: mainPoolCF,
+    summary: {
+      formCode,
+      companyName: client?.business_name || client?.name || "",
+      tradingName: client?.trading_name || "",
+      periodStart,
+      periodEnd,
+      turnover,
+      nonTradingIncome,
+      expenses: allowableExpenses + disallowableExpenses,
+      capitalAllowances: totalCapitalAllowances,
+      profitBeforeTax: baseProfit,
+      corpTaxDue,
+      paymentsMade,
+      balanceDue,
     },
-    specialPool: {
-      broughtForward: specialPoolBF,
-      additions: specialPoolAdditions,
-      wda: specialWDA,
-      carriedForward: specialPoolCF,
+
+    computations: {
+      turnover,
+      nonTradingIncome,
+      allowableExpenses,
+      disallowableExpenses,
+      capitalAllowances: totalCapitalAllowances,
+      adjustedProfit: baseProfit,
+      taxableProfit,
+      lossCarryback,
+      groupRelief,
+      rAndDSpend,
+      rAndDMultiplier,
+      rAndDEnhancedRelief,
+      taxRate,
+      taxDue: corpTaxDue,
     },
-    carsPool: {
-      broughtForward: carsPoolBF,
-      additions: carsPoolAdditions,
-      wda: carsWDA,
-      carriedForward: carsPoolCF,
+
+    capitalAllowances: {
+      totalCapitalAllowances,
+      aiaClaimed,
+      mainPool: {
+        broughtForward: mainPoolBF,
+        additions: mainPoolAdditions,
+        wda: mainWDA,
+        carriedForward: mainPoolCF,
+      },
+      specialPool: {
+        broughtForward: specialPoolBF,
+        additions: specialPoolAdditions,
+        wda: specialWDA,
+        carriedForward: specialPoolCF,
+      },
+      carsPool: {
+        broughtForward: carsPoolBF,
+        additions: carsPoolAdditions,
+        wda: carsWDA,
+        carriedForward: carsPoolCF,
+      },
     },
-  },
 
-  losses: {
-    currentPeriodLoss,
-    broughtForward: corpSubmission?.loss_bf || 0,
-    carriedForward: corpSubmission?.loss_cf || currentPeriodLoss,
-    carryback: lossCarryback,
-    groupRelief,
-  },
-
-  adjustments: {
-    manualAdjustments: corpSubmission?.adjustments_total || 0,
-  },
-
-  rAndD: {
-    totalRAndD: rAndDSpend,
-    enhancedRelief: rAndDEnhancedRelief,
-    multiplier: rAndDMultiplier,
-    sme: {
-      qualifyingSpend: autoSmeQualifyingSpend,
-      enhancedDeduction: finalSmeEnhancedDeduction,
-      payableCredit: finalSmePayableCredit,
-      surrenderedLoss: finalSurrenderedLoss,
+    losses: {
+      currentPeriodLoss,
+      broughtForward: corpSubmission?.loss_bf || 0,
+      carriedForward: corpSubmission?.loss_cf || currentPeriodLoss,
+      carryback: lossCarryback,
+      groupRelief,
     },
-    rdec: {
-      qualifyingSpend: autoRdecQualifyingSpend,
-      credit: finalRdecCredit,
+
+    adjustments: {
+      manualAdjustments: corpSubmission?.adjustments_total || 0,
     },
-    override: {
-      enabled: overrideEnabled,
-      smeEnhancedDeduction: overrideSmeEnhancedDeduction,
-      smePayableCredit: overrideSmePayableCredit,
-      rdecCredit: overrideRdecCredit,
-      surrenderedLoss: overrideSurrenderedLoss,
+
+    rAndD: {
+      totalRAndD: rAndDSpend,
+      enhancedRelief: rAndDEnhancedRelief,
+      multiplier: rAndDMultiplier,
+      sme: {
+        qualifyingSpend: autoSmeQualifyingSpend,
+        enhancedDeduction: finalSmeEnhancedDeduction,
+        payableCredit: finalSmePayableCredit,
+        surrenderedLoss: finalSurrenderedLoss,
+      },
+      rdec: {
+        qualifyingSpend: autoRdecQualifyingSpend,
+        credit: finalRdecCredit,
+      },
+      override: {
+        enabled: overrideEnabled,
+        smeEnhancedDeduction: overrideSmeEnhancedDeduction,
+        smePayableCredit: overrideSmePayableCredit,
+        rdecCredit: overrideRdecCredit,
+        surrenderedLoss: overrideSurrenderedLoss,
+      },
+      grants: autoRAndDGrants,
     },
-    grants: autoRAndDGrants,
-  },
 
-  loansToParticipators: {
-    totalLoans:
-      corpSubmission?.loans_to_participators != null
-        ? corpSubmission.loans_to_participators
-        : derivedTotalLoans,
-    loansAdvanced: dlaLoansAdvanced,
-    loansRepaid: dlaLoansRepaid,
-    interestCharged: dlaInterestCharged,
-    interestPaid: dlaInterestPaid,
-  },
+    loansToParticipators: {
+      totalLoans:
+        corpSubmission?.loans_to_participators != null
+          ? corpSubmission.loans_to_participators
+          : derivedTotalLoans,
+      loansAdvanced: dlaLoansAdvanced,
+      loansRepaid: dlaLoansRepaid,
+      interestCharged: dlaInterestCharged,
+      interestPaid: dlaInterestPaid,
+    },
 
-  payments: {
-    paymentsMade,
-    balanceDue,
-  },
+    payments: {
+      paymentsMade,
+      balanceDue,
+    },
 
-  disclosures: {
-    notes: corpSubmission?.notes || null,
-  },
+    disclosures: {
+      notes: corpSubmission?.notes || null,
+    },
 
-  supplements: {
-    ct600ARequired,
-    ct600JRequired,
-    ct600LRequired,
-    ct600FRequired,
-    ct600MRequired,
-    ct600NRequired,
-  },
-};
-
+    supplements: {
+      ct600ARequired,
+      ct600JRequired,
+      ct600LRequired,
+      ct600FRequired,
+      ct600MRequired,
+      ct600NRequired,
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -955,7 +1016,6 @@ async function loadSAJournals(clientId, periodStart, periodEnd) {
   return data || [];
 }
 
-
 async function loadCISJournals(clientId, periodStart, periodEnd) {
   const { data, error } = await supabaseAdmin
     .from("journal_entries")
@@ -987,8 +1047,7 @@ async function loadCISJournals(clientId, periodStart, periodEnd) {
   return data || [];
 }
 
-
-//* -------------------------- SA103 (Self-Employment) ----------------------- */
+/* -------------------------- SA103 (Self-Employment) ----------------------- */
 
 function buildSA103FromJournals(saSubmission, client, journals) {
   let turnover = 0;
@@ -1001,8 +1060,7 @@ function buildSA103FromJournals(saSubmission, client, journals) {
     (j.journal_lines || []).forEach((line) => {
       const bucket =
         (line.chart_of_account_entries &&
-          line.chart_of_account_entries.sa_bucket) ||
-        null;
+          line.chart_of_account_entries.sa_bucket) || null;
       if (!bucket) return;
 
       const amt = amountFromLine(line);
@@ -1032,7 +1090,6 @@ function buildSA103FromJournals(saSubmission, client, journals) {
   const allowableExpenses = Math.max(allowable, 0);
   const disallowableExpenses = Math.max(disallowable, 0);
 
-  // ✅ Correct tax profit formula
   const rawProfit =
     turnover -
     allowableExpenses +
@@ -1041,19 +1098,15 @@ function buildSA103FromJournals(saSubmission, client, journals) {
     adjustments;
 
   const currentPeriodLoss = rawProfit < 0 ? Math.abs(rawProfit) : 0;
-const lossBF = saSubmission?.loss_bf || 0;
-
-// If loss_cf is explicitly provided, use it.
-// Otherwise, carry forward = brought forward + current period loss.
-const lossCF = saSubmission?.loss_cf ?? (lossBF + currentPeriodLoss);
-
+  const lossBF = saSubmission?.loss_bf || 0;
+  const lossCF = saSubmission?.loss_cf ?? lossBF + currentPeriodLoss;
 
   const usingSimplifiedExpenses =
     (saSubmission && saSubmission.using_simplified_expenses) || false;
 
-  // If simplified expenses are used, override allowableExpenses
   const effectiveAllowableExpenses = usingSimplifiedExpenses
-    ? (saSubmission && saSubmission.simplified_expense_amount) || allowableExpenses
+    ? (saSubmission && saSubmission.simplified_expense_amount) ||
+      allowableExpenses
     : allowableExpenses;
 
   const class2NIC =
@@ -1089,7 +1142,6 @@ const lossCF = saSubmission?.loss_cf ?? (lossBF + currentPeriodLoss);
   };
 }
 
-
 /* ----------------------------- SA105 (Property) --------------------------- */
 
 function buildSA105FromJournals(saSubmission, journals) {
@@ -1108,8 +1160,7 @@ function buildSA105FromJournals(saSubmission, journals) {
     (j.journal_lines || []).forEach((line) => {
       const bucket =
         (line.chart_of_account_entries &&
-          line.chart_of_account_entries.sa_bucket) ||
-        null;
+          line.chart_of_account_entries.sa_bucket) || null;
       if (!bucket) return;
 
       const amt = amountFromLine(line);
@@ -1149,18 +1200,17 @@ function buildSA105FromJournals(saSubmission, journals) {
     });
   });
 
-  // Core property profit
   const propertyExpenses = Math.max(propertyAllowable, 0);
   const propertyProfit =
-    rentalIncome - propertyExpenses - Math.max(propertyCapitalAllowances, 0) - Math.max(propertyLosses, 0);
+    rentalIncome -
+    propertyExpenses -
+    Math.max(propertyCapitalAllowances, 0) -
+    Math.max(propertyLosses, 0);
 
-  // Mortgage interest is a tax credit, not an expense
-  const mortgageCredit = Math.max(mortgageInterest, 0) * 0.20;
+  const mortgageCredit = Math.max(mortgageInterest, 0) * 0.2;
 
-  // FHL net profit
   const fhlProfit = fhlIncome - Math.max(fhlExpenses, 0);
 
-  // Rent-a-Room relief
   let netRentARoom = rentARoomIncome - Math.max(rentARoomExpenses, 0);
   if (netRentARoom > 7500) netRentARoom -= 7500;
 
@@ -1185,8 +1235,6 @@ function buildSA105FromJournals(saSubmission, journals) {
     mortgageCredit,
   };
 }
-
-
 
 /* --------------------------- Other Income / Gains ------------------------- */
 
@@ -1293,7 +1341,6 @@ async function buildCISFormData(
     .select("*")
     .eq("client_id", clientId);
 
-  // CIS: journals + toggle for inclusion, but amounts from transaction.cis_amount
   const cisJournals = await loadCISJournals(clientId, periodStart, periodEnd);
 
   let cisSufferedFromTx = 0;
@@ -1316,54 +1363,62 @@ async function buildCISFormData(
       ? cisSubmission.net_cis
       : netCisComputed;
 
-
   return {
-  summary: {
-    formCode,
-    contractorName: client?.business_name || client?.name || "",
-    utr: client?.utr_number || "",
-    periodStart,
-    periodEnd,
-    cisSuffered: cisSufferedFromTx,
-    paymentsMade,
-    adjustmentsTotal,
-    netCis,
-  },
+    summary: {
+      formCode,
+      contractorName: client?.business_name || client?.name || "",
+      utr: client?.utr_number || "",
+      periodStart,
+      periodEnd,
+      cisSuffered: cisSufferedFromTx,
+      paymentsMade,
+      adjustmentsTotal,
+      netCis,
+    },
 
-  payments: {
-    totalPaymentsToSubcontractors:
-      cisSubmission?.total_payments || paymentsMade,
-  },
+    payments: {
+      totalPaymentsToSubcontractors:
+        cisSubmission?.total_payments || paymentsMade,
+    },
 
-  deductions: {
-    totalCisDeducted:
-      cisSubmission?.total_cis_deducted || cisSufferedFromTx,
-  },
+    deductions: {
+      totalCisDeducted:
+        cisSubmission?.total_cis_deducted || cisSufferedFromTx,
+    },
 
-  cisSuffered: {
-    cisSufferedFromTransactions: cisSufferedFromTx,
-  },
+    cisSuffered: {
+      cisSufferedFromTransactions: cisSufferedFromTx,
+    },
 
-  adjustments: {
-    totalAdjustments: adjustmentsTotal,
-  },
+    adjustments: {
+      totalAdjustments: adjustmentsTotal,
+    },
 
-  netCis: {
-    netCis,
-  },
+    netCis: {
+      netCis,
+    },
 
-  disclosures: {
-    notes: cisSubmission?.notes || null,
-  },
-};
-
+    disclosures: {
+      notes: cisSubmission?.notes || null,
+    },
+  };
 }
-// ---------------- ACCOUNTS BUILDER ----------------
-async function buildAccountsFormData(client, clientId, periodStart, periodEnd, customNotes = []) {
 
+/* -------------------------------------------------------------------------- */
+/*                        ACCOUNTS BUILDER (NUMERIC)                          */
+/* -------------------------------------------------------------------------- */
+
+async function buildAccountsFormData(
+  client,
+  clientId,
+  periodStart,
+  periodEnd,
+  customNotes = []
+) {
   const { data: journals, error } = await supabaseAdmin
     .from("journal_entries")
-    .select(`
+    .select(
+      `
       id,
       date,
       journal_lines (
@@ -1376,7 +1431,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
           hmrc_bucket
         )
       )
-    `)
+    `
+    )
     .eq("client_id", clientId)
     .gte("date", periodStart)
     .lte("date", periodEnd);
@@ -1410,30 +1466,45 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
       directorLoansPayable: 0,
     };
 
-    (journals || []).forEach(j => {
-      (j.journal_lines || []).forEach(line => {
+    (journals || []).forEach((j) => {
+      (j.journal_lines || []).forEach((line) => {
         const debit = Number(line.debit || 0);
         const credit = Number(line.credit || 0);
-        const type = (line.chart_of_account_entries?.account_type || "").toUpperCase();
-        const bucket = (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
+        const type =
+          (line.chart_of_account_entries?.account_type || "").toUpperCase();
+        const bucket =
+          (line.chart_of_account_entries?.hmrc_bucket || "").toLowerCase();
         const code = line.chart_of_account_entries?.account_code;
-        const name = (line.chart_of_account_entries?.account_name || "").toLowerCase();
+        const name = (
+          line.chart_of_account_entries?.account_name || ""
+        ).toLowerCase();
 
-        if (code) accounts[code] = (accounts[code] || 0) + (debit - credit);
+        if (code)
+          accounts[code] = (accounts[code] || 0) + (debit - credit);
 
-        if (bucket === "fixed_asset") totals.totalFixedAssets += debit - credit;
+        if (bucket === "fixed_asset")
+          totals.totalFixedAssets += debit - credit;
 
         if (bucket === "fixed_asset_contra") {
           categories.accumulatedDepreciation += credit - debit;
         }
 
-        if (bucket === "assets" || type === "BANK" || type === "ACCOUNTS_RECEIVABLE") {
+        if (
+          bucket === "assets" ||
+          type === "BANK" ||
+          type === "ACCOUNTS_RECEIVABLE"
+        ) {
           totals.totalCurrentAssets += debit - credit;
           if (type === "BANK") categories.bank += debit - credit;
-          if (type === "ACCOUNTS_RECEIVABLE") categories.receivables += debit - credit;
+          if (type === "ACCOUNTS_RECEIVABLE")
+            categories.receivables += debit - credit;
         }
 
-        if (bucket === "liabilities" || type === "ACCOUNTS_PAYABLE" || type === "LIABILITY") {
+        if (
+          bucket === "liabilities" ||
+          type === "ACCOUNTS_PAYABLE" ||
+          type === "LIABILITY"
+        ) {
           totals.totalCurrentLiabilities += credit - debit;
           categories.payables += credit - debit;
         }
@@ -1443,20 +1514,21 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
           categories.equity += credit - debit;
         }
 
-        // ✅ Director Loan logic by NAME
+        // Director Loan logic by NAME
         if (
           name.includes("director loan") ||
           name.includes("director payments") ||
           name.includes("director personal expenses") ||
           name.includes("cash withdrawals")
         ) {
-          // Directors owe the company → asset
           categories.directorLoansReceivable += debit - credit;
           totals.totalCurrentAssets += debit - credit;
         }
 
-        if (name.includes("loan liability") || name.includes("director loan payable")) {
-          // Company owes directors → liability
+        if (
+          name.includes("loan liability") ||
+          name.includes("director loan payable")
+        ) {
           categories.directorLoansPayable += credit - debit;
           totals.totalNonCurrentLiabilities += credit - debit;
         }
@@ -1466,7 +1538,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
         }
 
         if (type === "ASSET") totals.totalAssets += debit - credit;
-        if (type === "LIABILITY") totals.totalLiabilities += credit - debit;
+        if (type === "LIABILITY")
+          totals.totalLiabilities += credit - debit;
       });
     });
 
@@ -1488,7 +1561,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
 
   const { data: priorJournals } = await supabaseAdmin
     .from("journal_entries")
-    .select(`
+    .select(
+      `
       id,
       date,
       journal_lines (
@@ -1501,7 +1575,8 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
           hmrc_bucket
         )
       )
-    `)
+    `
+    )
     .eq("client_id", clientId)
     .gte("date", priorYearStart.toISOString().split("T")[0])
     .lte("date", priorYearEnd.toISOString().split("T")[0]);
@@ -1516,20 +1591,32 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
     .maybeSingle();
 
   if (priorSubmission) {
-    prior.totals.totalAssets = priorSubmission.total_assets || prior.totals.totalAssets;
-    prior.totals.totalLiabilities = priorSubmission.total_liabilities || prior.totals.totalLiabilities;
-    prior.totals.totalEquity = priorSubmission.total_equity || prior.totals.totalEquity;
-    prior.totals.totalFixedAssets = priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
-    prior.totals.totalCurrentAssets = priorSubmission.current_assets || prior.totals.totalCurrentAssets;
-    prior.totals.totalCurrentLiabilities = priorSubmission.current_liabilities || prior.totals.totalCurrentLiabilities;
-    prior.totals.totalNonCurrentLiabilities = priorSubmission.non_current_liabilities || prior.totals.totalNonCurrentLiabilities;
+    prior.totals.totalAssets =
+      priorSubmission.total_assets || prior.totals.totalAssets;
+    prior.totals.totalLiabilities =
+      priorSubmission.total_liabilities ||
+      prior.totals.totalLiabilities;
+    prior.totals.totalEquity =
+      priorSubmission.total_equity || prior.totals.totalEquity;
+    prior.totals.totalFixedAssets =
+      priorSubmission.fixed_assets || prior.totals.totalFixedAssets;
+    prior.totals.totalCurrentAssets =
+      priorSubmission.current_assets ||
+      prior.totals.totalCurrentAssets;
+    prior.totals.totalCurrentLiabilities =
+      priorSubmission.current_liabilities ||
+      prior.totals.totalCurrentLiabilities;
+    prior.totals.totalNonCurrentLiabilities =
+      priorSubmission.non_current_liabilities ||
+      prior.totals.totalNonCurrentLiabilities;
     prior.accounts = priorSubmission.accounts || prior.accounts;
     prior.categories = priorSubmission.categories || prior.categories;
   } else {
-    prior.totals.totalEquity = (prior.totals.totalAssets || 0) - (prior.totals.totalLiabilities || 0);
+    prior.totals.totalEquity =
+      (prior.totals.totalAssets || 0) -
+      (prior.totals.totalLiabilities || 0);
   }
 
-  // Lock prior NBV once
   const priorCost = prior.totals.totalFixedAssets || 0;
   const priorDep = prior.categories.accumulatedDepreciation || 0;
   prior.categories.fixedAssets = priorCost - priorDep;
@@ -1541,23 +1628,36 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
     const accounts = {};
 
     for (const key of Object.keys(prior.categories)) {
-      if (["fixedAssets", "accumulatedDepreciation", "depreciationCharge"].includes(key)) {
+      if (
+        ["fixedAssets", "accumulatedDepreciation", "depreciationCharge"].includes(
+          key
+        )
+      ) {
         categories[key] = currentMovements.categories[key] || 0;
       } else {
-        categories[key] = (prior.categories[key] || 0) + (currentMovements.categories[key] || 0);
+        categories[key] =
+          (prior.categories[key] || 0) +
+          (currentMovements.categories[key] || 0);
       }
     }
 
     for (const key of Object.keys(prior.totals)) {
-      totals[key] = (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
+      totals[key] =
+        (prior.totals[key] || 0) + (currentMovements.totals[key] || 0);
     }
 
-    for (const code of new Set([...Object.keys(prior.accounts), ...Object.keys(currentMovements.accounts)])) {
-      accounts[code] = (prior.accounts[code] || 0) + (currentMovements.accounts[code] || 0);
+    for (const code of new Set([
+      ...Object.keys(prior.accounts),
+      ...Object.keys(currentMovements.accounts),
+    ])) {
+      accounts[code] =
+        (prior.accounts[code] || 0) +
+        (currentMovements.accounts[code] || 0);
     }
 
     const cost = priorCost + (currentMovements.totals.totalFixedAssets || 0);
-    const depreciation = priorDep + (currentMovements.categories.depreciationCharge || 0);
+    const depreciation =
+      priorDep + (currentMovements.categories.depreciationCharge || 0);
 
     categories.accumulatedDepreciation = depreciation;
     categories.fixedAssets = cost - depreciation;
@@ -1567,30 +1667,24 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
 
   let current = addCarryForward(prior, currentMovements);
 
-  // Round values
   current.totals = roundObjectValues(current.totals);
   current.categories = roundObjectValues(current.categories);
   prior.totals = roundObjectValues(prior.totals);
   prior.categories = roundObjectValues(prior.categories);
 
-  console.log("=== PRIOR YEAR DEBUG ===");
-  console.log("Prior cost:", priorCost);
-  console.log("Prior accumulated depreciation:", priorDep);
-  console.log("Prior NBV:", prior.categories.fixedAssets);
+  const netCurrentAssetsCurrent =
+    current.totals.totalCurrentAssets -
+    current.totals.totalCurrentLiabilities;
+  current.totals.totalAssets =
+    current.categories.fixedAssets + netCurrentAssetsCurrent;
+  current.totals.totalEquity = current.totals.totalAssets;
 
-  console.log("=== CURRENT YEAR DEBUG ===");
-  console.log("Current cost:", current.totals.totalFixedAssets);
-  console.log("Current accumulated depreciation:", current.categories.accumulatedDepreciation);
-  console.log("Current NBV:", current.categories.fixedAssets);
-
-  //  // ✅ Fix: recompute statutory totals cleanly from raw components
-  const netCurrentAssetsCurrent = current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities;
-  current.totals.totalAssets = current.categories.fixedAssets + netCurrentAssetsCurrent;
-  current.totals.totalEquity = current.totals.totalAssets; // Net assets = Capital & reserves
-
-  const netCurrentAssetsPrior = prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities;
-  prior.totals.totalAssets = prior.categories.fixedAssets + netCurrentAssetsPrior;
-  prior.totals.totalEquity = prior.totals.totalAssets; // Net assets = Capital & reserves
+  const netCurrentAssetsPrior =
+    prior.totals.totalCurrentAssets -
+    prior.totals.totalCurrentLiabilities;
+  prior.totals.totalAssets =
+    prior.categories.fixedAssets + netCurrentAssetsPrior;
+  prior.totals.totalEquity = prior.totals.totalAssets;
 
   const payload = {
     overview: {
@@ -1598,13 +1692,17 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
         non_current_assets: current.categories.fixedAssets,
         current_assets: current.totals.totalCurrentAssets,
         total_assets_less_current_liabilities:
-          current.categories.fixedAssets + (current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities),
+          current.categories.fixedAssets +
+          (current.totals.totalCurrentAssets -
+            current.totals.totalCurrentLiabilities),
         current_liabilities: current.totals.totalCurrentLiabilities,
         non_current_liabilities: current.totals.totalNonCurrentLiabilities,
         total_liabilities: current.totals.totalLiabilities,
         total_equity: current.totals.totalEquity,
         capital_and_reserves: current.totals.totalEquity,
-        net_current_assets: current.totals.totalCurrentAssets - current.totals.totalCurrentLiabilities,
+        net_current_assets:
+          current.totals.totalCurrentAssets -
+          current.totals.totalCurrentLiabilities,
       },
       accounts: current.accounts,
       categories: current.categories,
@@ -1615,22 +1713,28 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
         non_current_assets: prior.categories.fixedAssets,
         current_assets: prior.totals.totalCurrentAssets,
         total_assets_less_current_liabilities:
-          prior.categories.fixedAssets + (prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities),
+          prior.categories.fixedAssets +
+          (prior.totals.totalCurrentAssets -
+            prior.totals.totalCurrentLiabilities),
         current_liabilities: prior.totals.totalCurrentLiabilities,
         non_current_liabilities: prior.totals.totalNonCurrentLiabilities,
         total_liabilities: prior.totals.totalLiabilities,
         total_equity: prior.totals.totalEquity,
         capital_and_reserves: prior.totals.totalEquity,
-        net_current_assets: prior.totals.totalCurrentAssets - prior.totals.totalCurrentLiabilities,
+        net_current_assets:
+          prior.totals.totalCurrentAssets -
+          prior.totals.totalCurrentLiabilities,
       },
       accounts: prior.accounts,
       categories: prior.categories,
     },
 
     notes: {
-      accountingPolicies: "These accounts have been prepared in accordance with FRS 105.",
+      accountingPolicies:
+        "These accounts have been prepared in accordance with FRS 105.",
       employees: client?.employees_current_year || 0,
-      taxation: "Corporation tax is provided at amounts expected to be paid using enacted rates.",
+      taxation:
+        "Corporation tax is provided at amounts expected to be paid using enacted rates.",
       debtors: client?.debtors_total || 0,
       creditors: client?.creditors_total || 0,
     },
@@ -1640,20 +1744,16 @@ async function buildAccountsFormData(client, clientId, periodStart, periodEnd, c
       approvalDate: client?.accounts_approval_date
         ? client.accounts_approval_date.toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0],
-      statement: "The directors acknowledge their responsibilities under the Companies Act 2006.",
+      statement:
+        "The directors acknowledge their responsibilities under the Companies Act 2006.",
     },
   };
 
- console.log("Accounts generate payload:", JSON.stringify(payload, null, 2));
-
-return {
-  ...payload,
-  customNotes: customNotes || []
-};
+  return {
+    ...payload,
+    customNotes: customNotes || [],
+  };
 }
-
-
-
 
 /* -------------------------------------------------------------------------- */
 /*                        PDF TEMPLATE DISPATCHER                             */
@@ -1690,7 +1790,8 @@ async function generatePdfForForm(params) {
     trading_name: client?.trading_name || "",
     company_number: client?.company_number || "",
     utr_number: client?.utr_number || "",
-    registered_address: client?.registered_address || client?.address || "",
+    registered_address:
+      client?.registered_address || client?.address || "",
     postcode: client?.postcode || "",
     phone: client?.phone || "",
     email: client?.email || "",
@@ -1701,269 +1802,275 @@ async function generatePdfForForm(params) {
   };
 
   // ---------------- CT600 FAMILY ----------------
-if (formCode === "CT600") {
-  return await generateCt600Pdf({
-    clientId,
-    year,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    companyDetails,
+  if (formCode === "CT600") {
+    return await generateCt600Pdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
 
-    ctSummary: formData.summary || {},
-    computations: formData.computations || {},
-    capitalAllowances: formData.capitalAllowances || {},
-    losses: formData.losses || {},
-    adjustments: formData.adjustments || {},
-    rAndD: formData.rAndD || {},
-    loansToParticipators: formData.loansToParticipators || {},
-    payments: formData.payments || {},
-    disclosures: formData.disclosures || {},
+      ctSummary: formData.summary || {},
+      computations: formData.computations || {},
+      capitalAllowances: formData.capitalAllowances || {},
+      losses: formData.losses || {},
+      adjustments: formData.adjustments || {},
+      rAndD: formData.rAndD || {},
+      loansToParticipators: formData.loansToParticipators || {},
+      payments: formData.payments || {},
+      disclosures: formData.disclosures || {},
 
-    supplements: formData.supplements || {},
-  });
-}
+      supplements: formData.supplements || {},
+    });
+  }
 
+  if (formCode === "CT600N") {
+    return await generateCt600nPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails,
+      niRate: formData.niRate || {},
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-if (formCode === "CT600N") {
-  return await generateCt600nPdf({
-    clientId,
-    year,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    companyDetails,
-    niRate: formData.niRate || {},
-    disclosures: formData.disclosures || {},
-  });
-}
+  // ---------------- SA FAMILY ----------------
 
-// ---------------- SA FAMILY ----------------
+  if (formCode === "SA100") {
+    return await generateSa100Pdf({
+      clientId,
+      taxYear,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      clientDetails,
+      saSummary: formData.summary || {},
+      income: formData.income || {},
+      employment: {},
+      pensions: {},
+      selfEmployment:
+        (formData.sa103 && formData.sa103.summary) || {},
+      property: (formData.sa105 && formData.sa105.property) || {},
+      dividends: {
+        dividends:
+          (formData.income && formData.income.dividends) || 0,
+      },
+      interest: {
+        interest:
+          (formData.income && formData.income.interest) || 0,
+      },
+      capitalGains: formData.capitalGains || {},
+      adjustments:
+        (formData.sa103 && formData.sa103.adjustments) || {},
+      taxCalculation: formData.taxCalculation || {},
+      payments: formData.payments || {},
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-if (formCode === "SA100") {
-  return await generateSa100Pdf({
-    clientId,
-    taxYear,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    clientDetails,
-    saSummary: formData.summary || {},
-    income: formData.income || {},
-    employment: {},
-    pensions: {},
-    selfEmployment: (formData.sa103 && formData.sa103.summary) || {},
-    property: (formData.sa105 && formData.sa105.property) || {},
-    dividends: {
-      dividends:
-        (formData.income && formData.income.dividends) || 0,
-    },
-    interest: {
-      interest:
-        (formData.income && formData.income.interest) || 0,
-    },
-    capitalGains: formData.capitalGains || {},
-    adjustments:
-      (formData.sa103 && formData.sa103.adjustments) || {},
-    taxCalculation: formData.taxCalculation || {},
-    payments: formData.payments || {},
-    disclosures: formData.disclosures || {},
-  });
-}
+  if (formCode === "SA103") {
+    return await generateSa103Pdf({
+      clientId,
+      taxYear,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      clientDetails,
+      sa103Summary: formData.sa103 && formData.sa103.summary,
+      turnover: formData.sa103 && formData.sa103.turnover,
+      allowableExpenses:
+        formData.sa103 && formData.sa103.allowableExpenses,
+      disallowableExpenses:
+        formData.sa103 && formData.sa103.disallowableExpenses,
+      capitalAllowances:
+        formData.sa103 && formData.sa103.capitalAllowances,
+      simplifiedExpenses:
+        formData.sa103 && formData.sa103.simplifiedExpenses,
+      adjustments: formData.sa103 && formData.sa103.adjustments,
+      losses: formData.sa103 && formData.sa103.losses,
+      class2NIC: formData.sa103 && formData.sa103.class2NIC,
+      class4NIC: formData.sa103 && formData.sa103.class4NIC,
+      payments: formData.payments || {},
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-if (formCode === "SA103") {
-  return await generateSa103Pdf({
-    clientId,
-    taxYear,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    clientDetails,
-    sa103Summary: formData.sa103 && formData.sa103.summary,
-    turnover: formData.sa103 && formData.sa103.turnover,
-    allowableExpenses:
-      formData.sa103 && formData.sa103.allowableExpenses,
-    disallowableExpenses:
-      formData.sa103 && formData.sa103.disallowableExpenses,
-    capitalAllowances:
-      formData.sa103 && formData.sa103.capitalAllowances,
-    simplifiedExpenses:
-      formData.sa103 && formData.sa103.simplifiedExpenses,
-    adjustments: formData.sa103 && formData.sa103.adjustments,
-    losses: formData.sa103 && formData.sa103.losses,
-    class2NIC: formData.sa103 && formData.sa103.class2NIC,
-    class4NIC: formData.sa103 && formData.sa103.class4NIC,
-    payments: formData.payments || {},
-    disclosures: formData.disclosures || {},
-  });
-}
+  if (formCode === "SA105") {
+    const property =
+      (formData.sa105 && formData.sa105.property) || {};
+    const propertyProfit =
+      property.propertyProfit != null ? property.propertyProfit : 0;
 
-if (formCode === "SA105") {
-  const property = (formData.sa105 && formData.sa105.property) || {};
-  const propertyProfit =
-    property.propertyProfit != null ? property.propertyProfit : 0;
+    return await generateSa105Pdf({
+      clientId,
+      taxYear,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      clientDetails,
+      sa105Summary: {
+        ...(formData.summary || {}),
+        propertyProfit,
+      },
+      rentalIncome: {
+        totalRentalIncome: property.rentalIncome || 0,
+      },
+      furnishedHolidayLettings: {},
+      rentARoom: {},
+      allowableExpenses: {
+        totalAllowableExpenses: property.propertyExpenses || 0,
+      },
+      disallowableExpenses: {},
+      mortgageInterest: {},
+      capitalAllowances: {},
+      propertyLosses: {
+        totalPropertyLosses:
+          propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
+      },
+      jointOwnership: {},
+      adjustments:
+        (formData.sa103 && formData.sa103.adjustments) || {},
+      payments: formData.payments || {},
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-  return await generateSa105Pdf({
-    clientId,
-    taxYear,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    clientDetails,
-    sa105Summary: {
-      ...(formData.summary || {}),
-      propertyProfit,
-    },
-    rentalIncome: {
-      totalRentalIncome: property.rentalIncome || 0,
-    },
-    furnishedHolidayLettings: {},
-    rentARoom: {},
-    allowableExpenses: {
-      totalAllowableExpenses: property.propertyExpenses || 0,
-    },
-    disallowableExpenses: {},
-    mortgageInterest: {},
-    capitalAllowances: {},
-    propertyLosses: {
-      totalPropertyLosses:
-        propertyProfit < 0 ? Math.abs(propertyProfit) : 0,
-    },
-    jointOwnership: {},
-    adjustments:
-      (formData.sa103 && formData.sa103.adjustments) || {},
-    payments: formData.payments || {},
-    disclosures: formData.disclosures || {},
-  });
-}
+  if (formCode === "SA110") {
+    const tc = formData.taxCalculation || {};
+    const pay = formData.payments || {};
 
-if (formCode === "SA110") {
-  const tc = formData.taxCalculation || {};
-  const pay = formData.payments || {};
+    return await generateSa110Pdf({
+      clientId,
+      taxYear,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      clientDetails,
+      sa110Summary: formData.summary || {},
+      totalIncome: { totalIncome: tc.totalIncome || 0 },
+      adjustments:
+        (formData.sa103 && formData.sa103.adjustments) || {},
+      allowances: { allowances: tc.allowances || 0 },
+      taxableIncome: { taxableIncome: tc.taxableIncome || 0 },
+      taxBands: formData.taxBands || {},
+      taxDue: { taxDue: tc.estimatedTax || 0 },
+      nicClass2: { class2NIC: tc.class2NIC || 0 },
+      nicClass4: { class4NIC: tc.class4NIC || 0 },
+      paymentsOnAccount: {
+        paymentsOnAccount: pay.paymentsOnAccount || 0,
+      },
+      balancingPayments: {
+        balancingPayments: pay.balanceDue || 0,
+      },
+      refunds: {},
+      finalLiability: {
+        totalLiability: tc.totalLiability || 0,
+      },
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-  return await generateSa110Pdf({
-    clientId,
-    taxYear,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    clientDetails,
-    sa110Summary: formData.summary || {},
-    totalIncome: { totalIncome: tc.totalIncome || 0 },
-    adjustments:
-      (formData.sa103 && formData.sa103.adjustments) || {},
-    allowances: { allowances: tc.allowances || 0 },
-    taxableIncome: { taxableIncome: tc.taxableIncome || 0 },
-    taxBands: formData.taxBands || {},
-    taxDue: { taxDue: tc.estimatedTax || 0 },
-    nicClass2: { class2NIC: tc.class2NIC || 0 },
-    nicClass4: { class4NIC: tc.class4NIC || 0 },
-    paymentsOnAccount: {
-      paymentsOnAccount: pay.paymentsOnAccount || 0,
-    },
-    balancingPayments: {
-      balancingPayments: pay.balanceDue || 0,
-    },
-    refunds: {},
-    finalLiability: {
-      totalLiability: tc.totalLiability || 0,
-    },
-    disclosures: formData.disclosures || {},
-  });
-}
+  // ---------------- CIS FAMILY ----------------
 
-// ---------------- CIS FAMILY ----------------
+  if (formCode === "CIS300") {
+    return await generateCis300Pdf({
+      clientId,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      clientDetails: companyDetails,
+      cisSummary: formData.summary || {},
+      subcontractors: [],
+      payments: formData.payments || {},
+      deductions: formData.deductions || {},
+      cisSuffered: formData.cisSuffered || {},
+      adjustments: formData.adjustments || {},
+      netCis: formData.netCis || {},
+      disclosures: formData.disclosures || {},
+    });
+  }
 
-if (formCode === "CIS300") {
-  return await generateCis300Pdf({
-    clientId,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    clientDetails: companyDetails,
-    cisSummary: formData.summary || {},
-    subcontractors: [],
-    payments: formData.payments || {},
-    deductions: formData.deductions || {},
-    cisSuffered: formData.cisSuffered || {},
-    adjustments: formData.adjustments || {},
-    netCis: formData.netCis || {},
-    disclosures: formData.disclosures || {},
-  });
-}
+  if (formCode === "CIS_STATEMENT") {
+    return await generateCisStatementPdf({
+      clientId,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      contractorDetails: companyDetails,
+      subcontractorDetails: {},
+      paymentDetails: {},
+      materials: {},
+      cisDeducted: {},
+      verification: {},
+      adjustments: {},
+      netPayment: {},
+      disclosures: {},
+    });
+  }
 
-if (formCode === "CIS_STATEMENT") {
-  return await generateCisStatementPdf({
-    clientId,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    contractorDetails: companyDetails,
-    subcontractorDetails: {},
-    paymentDetails: {},
-    materials: {},
-    cisDeducted: {},
-    verification: {},
-    adjustments: {},
-    netPayment: {},
-    disclosures: {},
-  });
-}
+  // ---------------- FRS ACCOUNTS FAMILY ----------------
 
+  if (formCode === "FRS105") {
+    return await generateFrs105AccountsPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails: client,
+      overview: formData.overview,
+      overviewPrior: formData.overviewPrior,
+      notes: formData.notes || {},
+      customNotes: formData.customNotes || [],
+      directorApproval:
+        formData.approval || formData.directorApproval || {},
+      framework: formData.framework || "FRS105",
+      // Versioned narrative extras
+      policies: formData.policies || {},
+      pandl: formData.pandl || null,
+      directorsReport: formData.directorsReport || null,
+      versionId: formData.versionId || null,
+    });
+  }
 
+  if (formCode === "FRS102_1A") {
+    return await generateFrs1021aAccountsPdf({
+      clientId,
+      year,
+      periodStart,
+      periodEnd,
+      filename,
+      createdBy,
+      companyDetails: client,
+      overview: formData.overview,
+      overviewPrior: formData.overviewPrior,
+      notes: formData.notes || {},
+      customNotes: formData.customNotes || [],
+      directorApproval:
+        formData.approval || formData.directorApproval || {},
+      framework: formData.framework || "FRS102_1A",
+      // Versioned narrative extras
+      policies: formData.policies || {},
+      pandl: formData.pandl || null,
+      directorsReport: formData.directorsReport || null,
+      versionId: formData.versionId || null,
+    });
+  }
 
-
-
-// ---------------- PDF GENERATION ----------------
-if (formCode === "FRS105") {
-  return await generateFrs105AccountsPdf({
-    clientId,
-    year,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    companyDetails: client,
-    overview: formData.overview,
-    overviewPrior: formData.overviewPrior,
-    notes: formData.notes || {},
-    customNotes: formData.customNotes || [],   // ⭐ NEW
-    directorApproval: formData.directorApproval || {},
-    framework: "FRS105",
-  });
-}
-
-if (formCode === "FRS102_1A") {
-  return await generateFrs1021aAccountsPdf({
-    clientId,
-    year,
-    periodStart,
-    periodEnd,
-    filename,
-    createdBy,
-    companyDetails: client,
-    overview: formData.overview,
-    overviewPrior: formData.overviewPrior,
-    notes: formData.notes || {},
-    customNotes: formData.customNotes || [],   // ⭐ NEW
-    directorApproval: formData.directorApproval || {},
-    framework: "FRS102_1A",
-  });
-}
-
-
-
-throw new Error("No PDF template configured for formCode: " + formCode);
-
-
+  throw new Error("No PDF template configured for formCode: " + formCode);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1991,7 +2098,8 @@ function deriveTaxYear(date) {
     );
   }
   return (
-    year - 1 +
+    year -
+    1 +
     "/" +
     String(year % 100)
       .toString()

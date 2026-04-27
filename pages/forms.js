@@ -139,6 +139,45 @@ export default function FormsPage() {
     approvalDate: "",
   });
 
+  // ⭐ NEW — Versioning state for statutory accounts
+  const [accountsVersionId, setAccountsVersionId] = useState(null);
+  const [accountsVersionNumber, setAccountsVersionNumber] = useState(null);
+  const [accountsVersionCreatedAt, setAccountsVersionCreatedAt] = useState(null);
+  const [accountsVersionIsFinal, setAccountsVersionIsFinal] = useState(false);
+  const [accountsVersionLoading, setAccountsVersionLoading] = useState(false);
+
+  // ⭐ Helper: reset accounts editor + version state
+  const resetAccountsEditorState = () => {
+    setAccountsPolicies({
+      turnover: "",
+      taxation: "",
+      debtors: "",
+      creditors: "",
+      cash: "",
+      tangibleFixedAssets: "",
+      depreciation: "",
+    });
+    setAccountsPandL({
+      turnover: "",
+      costOfSales: "",
+      adminExpenses: "",
+      interest: "",
+      tax: "",
+      profitForYear: "",
+    });
+    setAccountsDirectorsReport("");
+    setAccountsNotes([]);
+    setNextNoteId(1);
+    setAccountsApproval({
+      directorName: "",
+      approvalDate: "",
+    });
+    setAccountsVersionId(null);
+    setAccountsVersionNumber(null);
+    setAccountsVersionCreatedAt(null);
+    setAccountsVersionIsFinal(false);
+  };
+
   // ⭐ Helper: non‑negative numeric input
   const handleNonNegativeChange = (setter) => (e) => {
     const raw = e.target.value;
@@ -287,6 +326,279 @@ export default function FormsPage() {
     }
   };
 
+  // ⭐ AUTO‑LOAD / CREATE VERSIONED STATUTORY ACCOUNTS
+  useEffect(() => {
+    if (!clientId || !periodStart || !periodEnd || !selectedAccountsForm) {
+      resetAccountsEditorState();
+      return;
+    }
+
+    const loadOrCreateVersion = async () => {
+      try {
+        setAccountsVersionLoading(true);
+
+        // 1) Try load latest version
+        const res = await fetch("/api/accounts/load", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId,
+            periodStart,
+            periodEnd,
+            framework: selectedAccountsForm,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success && data.version) {
+          const v = data.version;
+
+          setAccountsVersionId(v.versionId);
+          setAccountsVersionNumber(v.versionNumber);
+          setAccountsVersionCreatedAt(v.createdAt);
+          setAccountsVersionIsFinal(v.isFinal ?? false);
+
+          setAccountsPolicies({
+            turnover: v.policies?.turnover ?? "",
+            taxation: v.policies?.taxation ?? "",
+            debtors: v.policies?.debtors ?? "",
+            creditors: v.policies?.creditors ?? "",
+            cash: v.policies?.cash ?? "",
+            tangibleFixedAssets: v.policies?.tangibleFixedAssets ?? "",
+            depreciation: v.policies?.depreciation ?? "",
+          });
+
+          if (selectedAccountsForm === "FRS102_1A" && v.pandl) {
+            setAccountsPandL({
+              turnover: v.pandl.turnover ?? "",
+              costOfSales: v.pandl.costOfSales ?? "",
+              adminExpenses: v.pandl.adminExpenses ?? "",
+              interest: v.pandl.interest ?? "",
+              tax: v.pandl.tax ?? "",
+              profitForYear: v.pandl.profitForYear ?? "",
+            });
+          } else {
+            setAccountsPandL({
+              turnover: "",
+              costOfSales: "",
+              adminExpenses: "",
+              interest: "",
+              tax: "",
+              profitForYear: "",
+            });
+          }
+
+          setAccountsDirectorsReport(v.directorsReport?.reportText ?? "");
+
+          const mappedNotes =
+            v.notes?.map((n, idx) => ({
+              id: idx + 1,
+              title: n.title,
+              body: n.body ?? "",
+            })) ?? [];
+
+          setAccountsNotes(mappedNotes);
+          setNextNoteId(mappedNotes.length + 1);
+
+          setAccountsApproval({
+            directorName: v.approval?.directorName ?? "",
+            approvalDate: v.approval?.approvalDate ?? "",
+          });
+
+          return;
+        }
+
+        // 2) If no version exists, create a new one
+        const createRes = await fetch("/api/accounts/create-version", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            clientId,
+            periodStart,
+            periodEnd,
+            framework: selectedAccountsForm,
+          }),
+        });
+
+        const createData = await createRes.json();
+
+        if (!createRes.ok || !createData.success) {
+          throw new Error(createData.message || "Failed to create accounts version.");
+        }
+
+        setAccountsVersionId(createData.versionId);
+        setAccountsVersionNumber(createData.versionNumber);
+        setAccountsVersionCreatedAt(createData.createdAt);
+        setAccountsVersionIsFinal(createData.isFinal ?? false);
+
+        resetAccountsEditorState();
+        setAccountsVersionId(createData.versionId);
+        setAccountsVersionNumber(createData.versionNumber);
+        setAccountsVersionCreatedAt(createData.createdAt);
+        setAccountsVersionIsFinal(createData.isFinal ?? false);
+      } catch (err) {
+        console.error("Failed to load/create accounts version", err);
+      } finally {
+        setAccountsVersionLoading(false);
+      }
+    };
+
+    loadOrCreateVersion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, periodStart, periodEnd, selectedAccountsForm]);
+
+  // ⭐ REAL‑TIME AUTO‑SAVE (debounced 1s) FOR STATUTORY ACCOUNTS
+  useEffect(() => {
+    if (
+      !accountsVersionId ||
+      !clientId ||
+      !periodStart ||
+      !periodEnd ||
+      !selectedAccountsForm
+    ) {
+      return;
+    }
+
+    const timeout = setTimeout(async () => {
+      try {
+        const pandlPayload =
+          selectedAccountsForm === "FRS102_1A"
+            ? {
+                turnover:
+                  accountsPandL.turnover !== ""
+                    ? Number(accountsPandL.turnover)
+                    : null,
+                costOfSales:
+                  accountsPandL.costOfSales !== ""
+                    ? Number(accountsPandL.costOfSales)
+                    : null,
+                adminExpenses:
+                  accountsPandL.adminExpenses !== ""
+                    ? Number(accountsPandL.adminExpenses)
+                    : null,
+                interest:
+                  accountsPandL.interest !== ""
+                    ? Number(accountsPandL.interest)
+                    : null,
+                tax:
+                  accountsPandL.tax !== ""
+                    ? Number(accountsPandL.tax)
+                    : null,
+                profitForYear:
+                  accountsPandL.profitForYear !== ""
+                    ? Number(accountsPandL.profitForYear)
+                    : null,
+              }
+            : null;
+
+        const notesPayload = accountsNotes.map((n, idx) => ({
+          noteNumber: idx + 1,
+          title: n.title,
+          body: n.body ?? "",
+        }));
+
+        await fetch("/api/accounts/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            versionId: accountsVersionId,
+            policies: accountsPolicies,
+            pandl: pandlPayload,
+            directorsReport:
+              selectedAccountsForm === "FRS102_1A"
+                ? { reportText: accountsDirectorsReport }
+                : null,
+            notes: notesPayload,
+            approval: {
+              directorName: accountsApproval.directorName || null,
+              approvalDate: accountsApproval.approvalDate || null,
+            },
+          }),
+        });
+      } catch (err) {
+        console.error("Auto-save accounts error", err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timeout);
+  }, [
+    accountsVersionId,
+    clientId,
+    periodStart,
+    periodEnd,
+    selectedAccountsForm,
+    accountsPolicies,
+    accountsPandL,
+    accountsDirectorsReport,
+    accountsNotes,
+    accountsApproval,
+  ]);
+
+  // ⭐ Create new accounts version (manual)
+  const handleCreateNewAccountsVersion = async () => {
+    if (!clientId || !periodStart || !periodEnd || !selectedAccountsForm) return;
+
+    try {
+      setAccountsVersionLoading(true);
+      const res = await fetch("/api/accounts/create-version", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId,
+          periodStart,
+          periodEnd,
+          framework: selectedAccountsForm,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to create new accounts version.");
+      }
+
+      resetAccountsEditorState();
+      setAccountsVersionId(data.versionId);
+      setAccountsVersionNumber(data.versionNumber);
+      setAccountsVersionCreatedAt(data.createdAt);
+      setAccountsVersionIsFinal(data.isFinal ?? false);
+    } catch (err) {
+      console.error("Create new accounts version error", err);
+      setErrorMessage(err.message || "Failed to create new accounts version.");
+    } finally {
+      setAccountsVersionLoading(false);
+    }
+  };
+
+  // ⭐ Finalise accounts version
+  const handleFinaliseAccountsVersion = async () => {
+    if (!accountsVersionId) return;
+
+    try {
+      setAccountsVersionLoading(true);
+      const res = await fetch("/api/accounts/finalise", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId: accountsVersionId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Failed to finalise accounts version.");
+      }
+
+      setAccountsVersionIsFinal(true);
+      setResultMessage("Accounts version finalised.");
+    } catch (err) {
+      console.error("Finalise accounts version error", err);
+      setErrorMessage(err.message || "Failed to finalise accounts version.");
+    } finally {
+      setAccountsVersionLoading(false);
+    }
+  };
+
   // ⭐ Generate single form (CT, SA, CIS, ACCOUNTS)
   const handleGenerate = async (category) => {
     setResultMessage(null);
@@ -328,6 +640,7 @@ export default function FormsPage() {
 
       // ⭐ Attach Statutory Accounts payload when generating FRS105 / FRS102_1A
       if (category === "ACCOUNTS") {
+        payload.accountsVersionId = accountsVersionId || null;
         payload.notes = {
           policies: accountsPolicies,
           directorsReport: accountsDirectorsReport,
@@ -809,6 +1122,13 @@ export default function FormsPage() {
               onMoveNote={handleMoveNote}
               approval={accountsApproval}
               setApproval={setAccountsApproval}
+              versionId={accountsVersionId}
+              versionNumber={accountsVersionNumber}
+              versionCreatedAt={accountsVersionCreatedAt}
+              versionIsFinal={accountsVersionIsFinal}
+              versionLoading={accountsVersionLoading}
+              onNewVersion={handleCreateNewAccountsVersion}
+              onFinaliseVersion={handleFinaliseAccountsVersion}
             />
           </section>
         )}
@@ -862,6 +1182,13 @@ function FullWidthAccountsEditor({
   onMoveNote,
   approval,
   setApproval,
+  versionId,
+  versionNumber,
+  versionCreatedAt,
+  versionIsFinal,
+  versionLoading,
+  onNewVersion,
+  onFinaliseVersion,
 }) {
   const [activeTab, setActiveTab] = useState("framework");
 
@@ -881,6 +1208,15 @@ function FullWidthAccountsEditor({
     ? "FRS 105 — Micro‑entity Accounts"
     : "FRS 102 Section 1A — Small Company Accounts";
 
+  const versionLabel = (() => {
+    if (!versionNumber) return "No version yet";
+    const status = versionIsFinal ? "Final" : "Draft";
+    const ts = versionCreatedAt
+      ? new Date(versionCreatedAt).toLocaleString()
+      : "";
+    return `v${versionNumber} — ${status}${ts ? ` — ${ts}` : ""}`;
+  })();
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
@@ -892,13 +1228,35 @@ function FullWidthAccountsEditor({
             Configure the disclosures, policies, and notes that will appear in your statutory accounts PDF.
           </p>
         </div>
-        <div className="text-xs text-gray-700">
+        <div className="text-xs text-gray-700 space-y-1 text-right md:text-left">
           <div>
             <span className="font-medium">Framework:</span> {frameworkLabel}
           </div>
           <div>
             <span className="font-medium">Period:</span>{" "}
             {periodStart && periodEnd ? `${periodStart} → ${periodEnd}` : "Not set"}
+          </div>
+          <div>
+            <span className="font-medium">Version:</span>{" "}
+            {versionLoading ? "Loading…" : versionLabel}
+          </div>
+          <div className="flex flex-wrap gap-2 justify-end md:justify-start mt-1">
+            <button
+              type="button"
+              onClick={onNewVersion}
+              disabled={versionLoading}
+              className="px-2 py-1 rounded border border-purple-400 text-purple-700 text-[11px] disabled:opacity-50"
+            >
+              New Version
+            </button>
+            <button
+              type="button"
+              onClick={onFinaliseVersion}
+              disabled={versionLoading || !versionId || versionIsFinal}
+              className="px-2 py-1 rounded bg-purple-600 text-white text-[11px] disabled:opacity-50"
+            >
+              Finalise Version
+            </button>
           </div>
         </div>
       </div>
