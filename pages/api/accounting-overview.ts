@@ -1,596 +1,538 @@
 // pages/api/accounting-overview.ts
 import type { NextApiRequest, NextApiResponse } from "next";
+import { getServerSession } from "next-auth";
+import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
+
 import {
+  getUnifiedBalanceSheet,
   getUnifiedTrialBalance,
   getUnifiedProfitAndLoss,
   getUnifiedDirectorLoan,
   getUnifiedCashFlow,
-  type PeriodFilter,
 } from "../../lib/accounting/balance-sheet-engine";
 
-/* -----------------------------
-   SHARED TYPES (aligned with UI)
------------------------------- */
-
-type FinancialHealthFlat = {
-  revenue_mtd: number;
-  revenue_ytd: number;
-  expenses_mtd: number;
-  expenses_ytd: number;
-  net_profit_mtd: number;
-  net_profit_ytd: number;
-};
-
-type TrialBalanceRow = {
-  account_code: string;
-  account_name: string;
-  // allow undefined to match BSLine from engine
-  account_type: string | null | undefined;
-  hmrc_bucket: string | null;
-  debit: number;
-  credit: number;
-  balance: number;
-};
-
-type BalanceSheetRow = {
-  account_code: string;
-  account_name: string;
-  // allow undefined to match BSLine from engine
-  account_type: string | null | undefined;
-  hmrc_bucket: string | null;
-  debit: number;
-  credit: number;
-  balance: number;
-};
-
-type ProfitAndLossSummary = {
-  revenue: number;
-  cost_of_sales: number;
-  gross_profit: number;
-  operating_expenses: number;
-  net_profit: number;
-};
-
-type ProfitAndLossRow = {
-  account_code: string;
-  account_name: string;
-  balance: number;
-};
-
-type DirectorLoanRow = {
-  account_code: string;
-  account_name: string;
-  debit: number;
-  credit: number;
-  balance: number;
-};
-
-type BankAccountRow = {
-  account_code: string;
-  account_name: string;
-  opening_balance?: number;
-  money_in: number;
-  money_out: number;
-  closing_balance: number;
-};
-
-type SimpleControlRow = {
-  account_code: string;
-  account_name: string;
-  balance: number;
-};
-
-type CashFlowRow = {
-  debit: number;
-  credit: number;
-  account_code: string;
-  account_name: string;
-  account_type: string;
-  hmrc_bucket: string | null;
-};
-
-type BalanceSheetSummary = {
-  total_assets: number;
-  total_liabilities: number;
-  net_assets: number;
-  equity: number;
-};
-
-type TrialBalanceSummary = {
-  assets: number;
-  liabilities: number;
-  equity: number;
-  income: number;
-  expenses: number;
-};
-
-type CoaSummary = {
-  total_accounts: number;
-  active_accounts: number;
-  system_accounts: number;
-  uncategorised_accounts: number;
-  suspense_accounts: number;
-};
-
-type Alert = {
-  type: string;
-  count: number;
-  severity: "low" | "medium" | "high";
-  link?: string;
-};
-
-type QuickAction = {
-  label: string;
-  link: string;
-};
-
-type FullBusinessData = {
-  financial_health: {
-    total_assets: number;
-    total_liabilities: number;
-    net_assets: number;
-    equity: number;
-  };
-  balance_sheet: {
-    summary: BalanceSheetSummary;
-    lines: BalanceSheetRow[];
-  };
-  trial_balance: {
-    summary: TrialBalanceSummary;
-    lines: TrialBalanceRow[];
-  };
-  profit_and_loss: {
-    summary: ProfitAndLossSummary;
-    lines: ProfitAndLossRow[];
-  };
-  fixed_assets: {
-    lines: SimpleControlRow[];
-    nbv: number;
-  };
-  liabilities: {
-    lines: BalanceSheetRow[];
-    total: number;
-  };
-  cash_flow: CashFlowRow[];
-  director_loan: DirectorLoanRow[];
-};
-
-type YTDData = {
-  financial_health: FinancialHealthFlat;
-  balance_sheet: {
-    summary: BalanceSheetSummary;
-    lines: BalanceSheetRow[];
-  };
-  trial_balance: {
-    summary: TrialBalanceSummary;
-    lines: TrialBalanceRow[];
-  };
-  profit_and_loss: {
-    summary: ProfitAndLossSummary;
-    lines: ProfitAndLossRow[];
-  };
-  cash_flow: CashFlowRow[];
-  director_loan: DirectorLoanRow[];
-};
-
-type AccountingOverviewData = {
-  full_business: FullBusinessData;
-  ytd: YTDData;
-
-  coa_summary: CoaSummary;
-  alerts: Alert[];
-  quick_actions: QuickAction[];
-
-  // legacy flat fields (HYBRID MODE)
-  financial_health?: FinancialHealthFlat;
-  trial_balance_summary?: TrialBalanceSummary;
-  balance_sheet_summary?: BalanceSheetSummary;
-  trial_balance_full?: TrialBalanceRow[];
-  balance_sheet_full?: BalanceSheetRow[];
-  profit_and_loss_summary?: ProfitAndLossSummary;
-  profit_and_loss_full?: ProfitAndLossRow[];
-  director_loan_ledger?: DirectorLoanRow[];
-  bank_accounts?: BankAccountRow[];
-  vat_control?: SimpleControlRow[];
-  paye_control?: SimpleControlRow[];
-  corporation_tax?: SimpleControlRow[];
-  fixed_assets?: SimpleControlRow[];
-  suspense_and_uncategorised?: SimpleControlRow[];
-  cash_flow?: CashFlowRow[];
-};
-
-/* -----------------------------
-   SAFE HELPERS
------------------------------- */
-
-const safeNum = (v: any) => Number(v || 0);
-
-function deriveBankFromBalanceSheet(lines: BalanceSheetRow[]): BankAccountRow[] {
-  return lines
-    .filter((line) => (line.account_type || "").toUpperCase() === "BANK")
-    .map((line) => ({
-      account_code: line.account_code,
-      account_name: line.account_name,
-      closing_balance: safeNum(line.balance),
-      money_in: safeNum(line.debit),
-      money_out: safeNum(line.credit),
-    }));
-}
-
-function toBalanceSheetSummaryFromTB(tb: TrialBalanceSummary): BalanceSheetSummary {
-  const total_assets = safeNum(tb.assets);
-  const total_liabilities = safeNum(tb.liabilities);
-  const equity = safeNum(tb.equity);
+// Normalise every BSLine row so UI never receives undefined values
+function normalizeLine(line: any) {
   return {
-    total_assets,
-    total_liabilities,
-    net_assets: total_assets - total_liabilities,
-    equity,
+    account_code: String(line.account_code || ""),
+    account_name: String(line.account_name || ""),
+    account_type: line.account_type || null,
+    hmrc_bucket: line.hmrc_bucket || null,
+    debit: Number(line.debit || 0),
+    credit: Number(line.credit || 0),
+    balance: Number(line.balance || 0),
   };
 }
-
-function mapTBToBalanceSheetRows(lines: TrialBalanceRow[]): BalanceSheetRow[] {
-  return lines.filter(
-    (l) =>
-      ["ASSET", "LIABILITY", "EQUITY"].includes(
-        (l.account_type || "").toUpperCase()
-      ) || (l.hmrc_bucket || "") === "balance_sheet"
-  );
-}
-
-function mapPnLToRows(lines: TrialBalanceRow[]): ProfitAndLossRow[] {
-  return lines
-    .filter((l) =>
-      ["INCOME", "EXPENSE"].includes((l.account_type || "").toUpperCase())
-    )
-    .map((l) => ({
-      account_code: l.account_code,
-      account_name: l.account_name,
-      balance: safeNum(l.balance),
-    }));
-}
-
-function mapDirectorLoanLines(lines: TrialBalanceRow[]): DirectorLoanRow[] {
-  return lines.map((l) => ({
-    account_code: l.account_code,
-    account_name: l.account_name,
-    debit: safeNum(l.debit),
-    credit: safeNum(l.credit),
-    balance: safeNum(l.balance),
-  }));
-}
-
-function mapCashFlowLines(lines: any[]): CashFlowRow[] {
-  return lines.map((l) => ({
-    debit: safeNum(l.debit),
-    credit: safeNum(l.credit),
-    account_code: String(l.account_code || ""),
-    account_name: String(l.account_name || ""),
-    account_type: String(l.account_type || ""),
-    hmrc_bucket: l.hmrc_bucket ?? null,
-  }));
-}
-
-function deriveFixedAssetsFromTB(lines: TrialBalanceRow[]): SimpleControlRow[] {
-  return lines
-    .filter((l) => (l.hmrc_bucket || "") === "fixed_assets")
-    .map((l) => ({
-      account_code: l.account_code,
-      account_name: l.account_name,
-      balance: safeNum(l.balance),
-    }));
-}
-
-function deriveLiabilitiesFromBS(
-  lines: BalanceSheetRow[]
-): { lines: BalanceSheetRow[]; total: number } {
-  const liabLines = lines.filter(
-    (l) => (l.account_type || "").toUpperCase() === "LIABILITY"
-  );
-  const total = liabLines.reduce((sum, l) => sum + safeNum(l.balance), 0);
-  return { lines: liabLines, total };
-}
-
-function deriveSuspenseAndUncategorised(
-  lines: TrialBalanceRow[]
-): SimpleControlRow[] {
-  return lines
-    .filter((l) => {
-      const bucket = (l.hmrc_bucket || "").toLowerCase();
-      return bucket === "suspense" || bucket === "uncategorised" || bucket === "";
-    })
-    .map((l) => ({
-      account_code: l.account_code,
-      account_name: l.account_name,
-      balance: safeNum(l.balance),
-    }));
-}
-
-function deriveCoaSummaryFromTB(lines: TrialBalanceRow[]): CoaSummary {
-  const total_accounts = lines.length;
-  const system_accounts = lines.filter((l) =>
-    (l.account_code || "").startsWith("9")
-  ).length;
-  const suspense_accounts = lines.filter((l) => {
-    const bucket = (l.hmrc_bucket || "").toLowerCase();
-    return bucket === "suspense";
-  }).length;
-  const uncategorised_accounts = lines.filter((l) => {
-    const bucket = (l.hmrc_bucket || "").toLowerCase();
-    return !bucket || bucket === "uncategorised";
-  }).length;
-
-  const active_accounts = total_accounts;
-
-  return {
-    total_accounts,
-    active_accounts,
-    system_accounts,
-    uncategorised_accounts,
-    suspense_accounts,
-  };
-}
-
-function deriveAlertsFromTB(lines: TrialBalanceRow[]): Alert[] {
-  const uncategorisedCount = lines.filter((l) => {
-    const bucket = (l.hmrc_bucket || "").toLowerCase();
-    return !bucket || bucket === "uncategorised";
-  }).length;
-
-  const negativeBalanceCount = lines.filter(
-    (l) =>
-      safeNum(l.balance) < 0 &&
-      ["ASSET", "EQUITY"].includes((l.account_type || "").toUpperCase())
-  ).length;
-
-  const taxLiabilitiesCount = lines.filter((l) =>
-    (l.account_name || "").toLowerCase().includes("tax")
-  ).length;
-
-  const alerts: Alert[] = [];
-
-  if (uncategorisedCount > 0) {
-    alerts.push({
-      type: "uncategorised_transactions",
-      count: uncategorisedCount,
-      severity: uncategorisedCount > 10 ? "medium" : "low",
-      link: "/reports/suspense",
-    });
-  }
-
-  if (negativeBalanceCount > 0) {
-    alerts.push({
-      type: "negative_balance",
-      count: negativeBalanceCount,
-      severity: "medium",
-      link: "/reports/trial-balance",
-    });
-  }
-
-  if (taxLiabilitiesCount > 0) {
-    alerts.push({
-      type: "tax_liabilities",
-      count: taxLiabilitiesCount,
-      severity: "high",
-      link: "/reports/corporation-tax",
-    });
-  }
-
-  return alerts;
-}
-
-const QUICK_ACTIONS: QuickAction[] = [
-  { label: "Post a new journal", link: "/journals/new" },
-  { label: "Review bank feed", link: "/bank" },
-  { label: "Check VAT control", link: "/reports/vat" },
-  { label: "Review suspense items", link: "/reports/suspense" },
-  { label: "View full P&L", link: "/reports/pnl" },
-];
-
-/* -----------------------------
-   PERIOD HELPERS
------------------------------- */
-
-function buildPeriod(from: Date, to: Date): PeriodFilter {
-  return { from, to };
-}
-
-function getYTDPeriod(): PeriodFilter {
-  const now = new Date();
-  return buildPeriod(new Date(now.getFullYear(), 0, 1), now);
-}
-
-function getMTDPeriod(): PeriodFilter {
-  const now = new Date();
-  return buildPeriod(new Date(now.getFullYear(), now.getMonth(), 1), now);
-}
-
-/* -----------------------------
-   HANDLER
------------------------------- */
 
 export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse<AccountingOverviewData | { error: string }>
+  res: NextApiResponse
 ) {
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
-    const clientId =
-      (req.query.clientId as string) ||
-      (req.headers["x-client-id"] as string);
+    const session = await getServerSession(req, res, authOptions);
+    const clientId = session?.user?.clientId;
 
     if (!clientId) {
-      return res.status(400).json({ error: "Missing clientId" });
+      return res.status(200).json(emptyOverview());
     }
 
-    const ytdPeriod = getYTDPeriod();
-    const mtdPeriod = getMTDPeriod();
+    // ------------------------------------------------------------
+    // 1) UNIFIED JOURNAL ENGINE
+    // ------------------------------------------------------------
+    const [unifiedBS, unifiedTB, unifiedPL, unifiedDL, unifiedCF] =
+      await Promise.all([
+        getUnifiedBalanceSheet(clientId),
+        getUnifiedTrialBalance(clientId),
+        getUnifiedProfitAndLoss(clientId),
+        getUnifiedDirectorLoan(clientId),
+        getUnifiedCashFlow(clientId),
+      ]);
 
-    // FULL (all years)
-    const [fullTb, fullPnL, fullDl, fullCf] = await Promise.all([
-      getUnifiedTrialBalance(clientId),
-      getUnifiedProfitAndLoss(clientId),
-      getUnifiedDirectorLoan(clientId),
-      getUnifiedCashFlow(clientId),
-    ]);
+    // ------------------------------------------------------------
+    // 2) COA SUMMARY
+    // ------------------------------------------------------------
+    const { data: coa, error: coaError } = await supabaseAdmin
+      .from("chart_of_accounts")
+      .select("id")
+      .eq("client_id", clientId)
+      .single();
 
-    // YTD
-    const [ytdTb, ytdPnL, ytdDl, ytdCf] = await Promise.all([
-      getUnifiedTrialBalance(clientId, ytdPeriod),
-      getUnifiedProfitAndLoss(clientId, ytdPeriod),
-      getUnifiedDirectorLoan(clientId, ytdPeriod),
-      getUnifiedCashFlow(clientId, ytdPeriod),
-    ]);
+    let totalAccounts = 0;
+    let activeAccounts = 0;
+    let systemAccounts = 0;
+    let uncategorisedAccounts = 0;
+    let suspenseAccounts = 0;
 
-    // MTD
-    const mtdPnL = await getUnifiedProfitAndLoss(clientId, mtdPeriod);
+    if (!coaError && coa) {
+      const { data: coaEntries } = await supabaseAdmin
+        .from("chart_of_account_entries")
+        .select("account_code, account_type, is_system, has_activity")
+        .eq("coa_id", coa.id);
 
-    /* -----------------------------
-       FULL BUSINESS (nested)
-    ------------------------------ */
+      if (coaEntries) {
+        totalAccounts = coaEntries.length;
+        activeAccounts = coaEntries.filter((a) => a.has_activity).length;
+        systemAccounts = coaEntries.filter((a) => a.is_system).length;
+        uncategorisedAccounts = coaEntries.filter(
+          (a) => a.account_code === "9020"
+        ).length;
+        suspenseAccounts = coaEntries.filter(
+          (a) => a.account_code === "9999"
+        ).length;
+      }
+    }
 
-    const fullBsSummary = toBalanceSheetSummaryFromTB(fullTb.summary);
-    const fullBsLines = mapTBToBalanceSheetRows(
-      fullTb.lines as TrialBalanceRow[]
-    );
-    const fullPnLRows = mapPnLToRows(fullTb.lines as TrialBalanceRow[]);
-    const fullDirectorLoanRows = mapDirectorLoanLines(
-      fullDl.lines as TrialBalanceRow[]
-    );
-    const fullCashFlowRows = mapCashFlowLines(fullCf.lines);
+    // ------------------------------------------------------------
+    // 3) VAT + CT FROM TRANSACTION TOGGLES
+    // ------------------------------------------------------------
+    const { data: tx } = await supabaseAdmin
+      .from("transactions")
+      .select("amount, debit, credit, vat_toggle, ct_toggle")
+      .eq("client_id", clientId);
 
-    const fixedAssetRows = deriveFixedAssetsFromTB(
-      fullTb.lines as TrialBalanceRow[]
-    );
-    const fixedAssetsNbv = fixedAssetRows.reduce(
-      (sum, r) => sum + safeNum(r.balance),
+    // ----------------------------
+    // TYPES
+    // ----------------------------
+    type ControlLine = {
+      account_code: string;
+      account_name: string;
+      debit: number;
+      credit: number;
+      balance: number;
+    };
+
+    // ----------------------------
+    // VAT + CT FROM TRANSACTION TOGGLES
+    // ----------------------------
+    const vat_control: ControlLine[] = [];
+    const corporation_tax: ControlLine[] = [];
+
+    if (tx && tx.length > 0) {
+      const vatDebit = tx
+        .filter((t) => t.vat_toggle === true)
+        .reduce((sum, t) => sum + Number(t.debit || 0), 0);
+
+      const vatCredit = tx
+        .filter((t) => t.vat_toggle === true)
+        .reduce((sum, t) => sum + Number(t.credit || 0), 0);
+
+      vat_control.push({
+        account_code: "VAT",
+        account_name: "VAT Control",
+        debit: vatDebit,
+        credit: vatCredit,
+        balance: vatDebit - vatCredit,
+      });
+
+      const ctDebit = tx
+        .filter((t) => t.ct_toggle === true)
+        .reduce((sum, t) => sum + Number(t.debit || 0), 0);
+
+      const ctCredit = tx
+        .filter((t) => t.ct_toggle === true)
+        .reduce((sum, t) => sum + Number(t.credit || 0), 0);
+
+      corporation_tax.push({
+        account_code: "CT",
+        account_name: "Corporation Tax",
+        debit: ctDebit,
+        credit: ctCredit,
+        balance: ctDebit - ctCredit,
+      });
+    }
+
+    // ----------------------------
+    // BANK ACCOUNTS FROM UNIFIED BS
+    // ----------------------------
+    const bank_accounts = unifiedBS.assets.current
+      .filter((line: any) => {
+        const type = (line.account_type || "").toUpperCase();
+        return type === "BANK"; // removed is_bank_account
+      })
+      .map((line: any) => ({
+        account_code: line.account_code,
+        account_name: line.account_name,
+        closing_balance: Number(line.balance || 0),
+        money_in: Number(line.debit || 0),
+        money_out: Number(line.credit || 0),
+      }));
+
+    // ------------------------------------------------------------
+    // 5) FIXED ASSETS
+    // ------------------------------------------------------------
+    const fixed_assets = unifiedBS.assets.non_current.map(normalizeLine);
+
+    // ------------------------------------------------------------
+    // 6) SUSPENSE + UNCATEGORISED
+    // ------------------------------------------------------------
+    const suspense_and_uncategorised = unifiedTB.lines
+      .filter(
+        (l: any) => l.account_code === "9020" || l.account_code === "9999"
+      )
+      .map(normalizeLine);
+
+    // ------------------------------------------------------------
+    // 7) BUILD BASE SUMMARIES
+    // ------------------------------------------------------------
+    const pl = unifiedPL.summary;
+    const tb = unifiedTB.summary;
+    const bs = unifiedBS.totals;
+
+    const trial_balance_full = unifiedTB.lines.map(normalizeLine);
+    const balance_sheet_full = [
+      ...unifiedBS.assets.current,
+      ...unifiedBS.assets.non_current,
+      ...unifiedBS.liabilities.current,
+      ...unifiedBS.liabilities.non_current,
+      ...unifiedBS.equity,
+    ].map(normalizeLine);
+    const profit_and_loss_full = unifiedPL.lines.map(normalizeLine);
+    const director_loan_ledger = unifiedDL.lines.map(normalizeLine);
+
+    const fixed_assets_nbv = fixed_assets.reduce(
+      (sum: number, line: any) => sum + Number(line.balance || 0),
       0
     );
 
-    const liabilitiesBlock = deriveLiabilitiesFromBS(fullBsLines);
+    const liabilities_lines = [
+      ...unifiedBS.liabilities.current,
+      ...unifiedBS.liabilities.non_current,
+    ].map(normalizeLine);
 
-    const fullFinancialHealth = {
-      total_assets: fullBsSummary.total_assets,
-      total_liabilities: fullBsSummary.total_liabilities,
-      net_assets: fullBsSummary.net_assets,
-      equity: fullBsSummary.equity,
-    };
+    const liabilities_total = liabilities_lines.reduce(
+      (sum: number, line: any) => sum + Number(line.balance || 0),
+      0
+    );
 
-    const full_business: FullBusinessData = {
-      financial_health: fullFinancialHealth,
+    const cash_flow_lines = unifiedCF.lines.map((l: any) => ({
+      ...l,
+      debit: Number(l.debit || 0),
+      credit: Number(l.credit || 0),
+    }));
+
+    // ------------------------------------------------------------
+    // 8) BUILD RESPONSE (BACKWARDS-COMPATIBLE + NEW STRUCTURE)
+    // ------------------------------------------------------------
+    return res.status(200).json({
+      // -----------------------------
+      // LEGACY / CURRENT FLAT SHAPE (UI STILL USING THIS)
+      // -----------------------------
+      financial_health: {
+        assets: Number(bs.total_assets || 0),
+        liabilities: Number(bs.total_liabilities || 0),
+        equity: Number(bs.total_equity || 0),
+
+        revenue_mtd: Number(pl.revenue || 0),
+        revenue_ytd: Number(pl.revenue || 0),
+
+        expenses_mtd: Number(pl.operating_expenses || 0),
+        expenses_ytd: Number(pl.operating_expenses || 0),
+
+        net_profit_mtd: Number(pl.net_profit || 0),
+        net_profit_ytd: Number(pl.net_profit || 0),
+      },
+
+      trial_balance_summary: {
+        assets: Number(tb.assets || 0),
+        liabilities: Number(tb.liabilities || 0),
+        equity: Number(tb.equity || 0),
+        income: Number(tb.income || 0),
+        expenses: Number(tb.expenses || 0),
+      },
+
+      profit_and_loss_summary: {
+        revenue: Number(pl.revenue || 0),
+        cost_of_sales: Number(pl.cost_of_sales || 0),
+        gross_profit: Number(pl.gross_profit || 0),
+        operating_expenses: Number(pl.operating_expenses || 0),
+        net_profit: Number(pl.net_profit || 0),
+      },
+
+      balance_sheet_summary: {
+        total_assets: Number(bs.total_assets || 0),
+        total_liabilities: Number(bs.total_liabilities || 0),
+        net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
+        equity: Number(bs.total_equity || 0),
+      },
+
+      trial_balance_full,
+      balance_sheet_full,
+      profit_and_loss_full,
+      director_loan_ledger,
+
+      bank_accounts,
+      vat_control,
+      paye_control: [], // not implemented yet
+      corporation_tax,
+      fixed_assets,
+      suspense_and_uncategorised,
+
+      cash_flow: cash_flow_lines,
+
+      coa_summary: {
+        total_accounts: totalAccounts,
+        active_accounts: activeAccounts,
+        system_accounts: systemAccounts,
+        uncategorised_accounts: uncategorisedAccounts,
+        suspense_accounts: suspenseAccounts,
+      },
+
+      alerts: [],
+      quick_actions: [
+        { label: "Add Account", link: "/setting/chart-of-accounts" },
+        { label: "Post Journal", link: "/journal/new" },
+        { label: "View Transactions", link: "/transactions" },
+        { label: "Reconcile Bank", link: "/bank-reconciliation" },
+        { label: "Create Invoice", link: "/invoices/new" },
+        { label: "Upload Statement", link: "/upload" },
+        { label: "Run VAT Return", link: "/vat" },
+      ],
+
+      // -----------------------------
+      // NEW COCKPIT STRUCTURE
+      // -----------------------------
+      full_business: {
+        financial_health: {
+          total_assets: Number(bs.total_assets || 0),
+          total_liabilities: Number(bs.total_liabilities || 0),
+          net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
+          equity: Number(bs.total_equity || 0),
+        },
+        balance_sheet: {
+          summary: {
+            total_assets: Number(bs.total_assets || 0),
+            total_liabilities: Number(bs.total_liabilities || 0),
+            net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
+            equity: Number(bs.total_equity || 0),
+          },
+          lines: balance_sheet_full,
+        },
+        trial_balance: {
+          summary: {
+            assets: Number(tb.assets || 0),
+            liabilities: Number(tb.liabilities || 0),
+            equity: Number(tb.equity || 0),
+            income: Number(tb.income || 0),
+            expenses: Number(tb.expenses || 0),
+          },
+          lines: trial_balance_full,
+        },
+        profit_and_loss: {
+          summary: {
+            revenue: Number(pl.revenue || 0),
+            cost_of_sales: Number(pl.cost_of_sales || 0),
+            gross_profit: Number(pl.gross_profit || 0),
+            operating_expenses: Number(pl.operating_expenses || 0),
+            net_profit: Number(pl.net_profit || 0),
+          },
+          lines: profit_and_loss_full,
+        },
+        fixed_assets: {
+          lines: fixed_assets,
+          nbv: fixed_assets_nbv,
+        },
+        liabilities: {
+          lines: liabilities_lines,
+          total: liabilities_total,
+        },
+        cash_flow: cash_flow_lines,
+        director_loan: director_loan_ledger,
+      },
+
+      ytd: {
+        // For now, YTD uses the same unified summaries (no period filter yet)
+        financial_health: {
+          revenue_mtd: Number(pl.revenue || 0),
+          revenue_ytd: Number(pl.revenue || 0),
+          expenses_mtd: Number(pl.operating_expenses || 0),
+          expenses_ytd: Number(pl.operating_expenses || 0),
+          net_profit_mtd: Number(pl.net_profit || 0),
+          net_profit_ytd: Number(pl.net_profit || 0),
+        },
+        balance_sheet: {
+          summary: {
+            total_assets: Number(bs.total_assets || 0),
+            total_liabilities: Number(bs.total_liabilities || 0),
+            net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
+            equity: Number(bs.total_equity || 0),
+          },
+          lines: balance_sheet_full,
+        },
+        trial_balance: {
+          summary: {
+            assets: Number(tb.assets || 0),
+            liabilities: Number(tb.liabilities || 0),
+            equity: Number(tb.equity || 0),
+            income: Number(tb.income || 0),
+            expenses: Number(tb.expenses || 0),
+          },
+          lines: trial_balance_full,
+        },
+        profit_and_loss: {
+          summary: {
+            revenue: Number(pl.revenue || 0),
+            cost_of_sales: Number(pl.cost_of_sales || 0),
+            gross_profit: Number(pl.gross_profit || 0),
+            operating_expenses: Number(pl.operating_expenses || 0),
+            net_profit: Number(pl.net_profit || 0),
+          },
+          lines: profit_and_loss_full,
+        },
+        cash_flow: cash_flow_lines,
+        director_loan: director_loan_ledger,
+      },
+    });
+  } catch (err) {
+    console.error("Accounting overview handler error:", err);
+    return res.status(200).json(emptyOverview());
+  }
+}
+
+function emptyOverview() {
+  return {
+    financial_health: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      revenue_mtd: 0,
+      revenue_ytd: 0,
+      expenses_mtd: 0,
+      expenses_ytd: 0,
+      net_profit_mtd: 0,
+      net_profit_ytd: 0,
+    },
+    trial_balance_summary: {
+      assets: 0,
+      liabilities: 0,
+      equity: 0,
+      income: 0,
+      expenses: 0,
+    },
+    profit_and_loss_summary: {
+      revenue: 0,
+      cost_of_sales: 0,
+      gross_profit: 0,
+      operating_expenses: 0,
+      net_profit: 0,
+    },
+    balance_sheet_summary: {
+      total_assets: 0,
+      total_liabilities: 0,
+      net_assets: 0,
+      equity: 0,
+    },
+    trial_balance_full: [],
+    balance_sheet_full: [],
+    profit_and_loss_full: [],
+    director_loan_ledger: [],
+    bank_accounts: [],
+    vat_control: [],
+    paye_control: [],
+    corporation_tax: [],
+    fixed_assets: [],
+    suspense_and_uncategorised: [],
+    cash_flow: [],
+    coa_summary: {
+      total_accounts: 0,
+      active_accounts: 0,
+      system_accounts: 0,
+      uncategorised_accounts: 0,
+      suspense_accounts: 0,
+    },
+    alerts: [],
+    quick_actions: [],
+    full_business: {
+      financial_health: {
+        total_assets: 0,
+        total_liabilities: 0,
+        net_assets: 0,
+        equity: 0,
+      },
       balance_sheet: {
-        summary: fullBsSummary,
-        lines: fullBsLines,
+        summary: {
+          total_assets: 0,
+          total_liabilities: 0,
+          net_assets: 0,
+          equity: 0,
+        },
+        lines: [],
       },
       trial_balance: {
-        summary: fullTb.summary,
-        lines: fullTb.lines as TrialBalanceRow[],
+        summary: {
+          assets: 0,
+          liabilities: 0,
+          equity: 0,
+          income: 0,
+          expenses: 0,
+        },
+        lines: [],
       },
       profit_and_loss: {
-        summary: fullPnL.summary,
-        lines: fullPnLRows,
+        summary: {
+          revenue: 0,
+          cost_of_sales: 0,
+          gross_profit: 0,
+          operating_expenses: 0,
+          net_profit: 0,
+        },
+        lines: [],
       },
       fixed_assets: {
-        lines: fixedAssetRows,
-        nbv: fixedAssetsNbv,
+        lines: [],
+        nbv: 0,
       },
       liabilities: {
-        lines: liabilitiesBlock.lines,
-        total: liabilitiesBlock.total,
+        lines: [],
+        total: 0,
       },
-      cash_flow: fullCashFlowRows,
-      director_loan: fullDirectorLoanRows,
-    };
-
-    /* -----------------------------
-       YTD (nested)
-    ------------------------------ */
-
-    const ytdBsSummary = toBalanceSheetSummaryFromTB(ytdTb.summary);
-    const ytdBsLines = mapTBToBalanceSheetRows(
-      ytdTb.lines as TrialBalanceRow[]
-    );
-    const ytdPnLRows = mapPnLToRows(ytdTb.lines as TrialBalanceRow[]);
-    const ytdDirectorLoanRows = mapDirectorLoanLines(
-      ytdDl.lines as TrialBalanceRow[]
-    );
-    const ytdCashFlowRows = mapCashFlowLines(ytdCf.lines);
-
-    const ytdFinancialHealth: FinancialHealthFlat = {
-      revenue_mtd: safeNum(mtdPnL.summary.revenue),
-      expenses_mtd: safeNum(mtdPnL.summary.operating_expenses),
-      net_profit_mtd: safeNum(mtdPnL.summary.net_profit),
-      revenue_ytd: safeNum(ytdPnL.summary.revenue),
-      expenses_ytd: safeNum(ytdPnL.summary.operating_expenses),
-      net_profit_ytd: safeNum(ytdPnL.summary.net_profit),
-    };
-
-    const ytd: YTDData = {
-      financial_health: ytdFinancialHealth,
+      cash_flow: [],
+      director_loan: [],
+    },
+    ytd: {
+      financial_health: {
+        revenue_mtd: 0,
+        revenue_ytd: 0,
+        expenses_mtd: 0,
+        expenses_ytd: 0,
+        net_profit_mtd: 0,
+        net_profit_ytd: 0,
+      },
       balance_sheet: {
-        summary: ytdBsSummary,
-        lines: ytdBsLines,
+        summary: {
+          total_assets: 0,
+          total_liabilities: 0,
+          net_assets: 0,
+          equity: 0,
+        },
+        lines: [],
       },
       trial_balance: {
-        summary: ytdTb.summary,
-        lines: ytdTb.lines as TrialBalanceRow[],
+        summary: {
+          assets: 0,
+          liabilities: 0,
+          equity: 0,
+          income: 0,
+          expenses: 0,
+        },
+        lines: [],
       },
       profit_and_loss: {
-        summary: ytdPnL.summary,
-        lines: ytdPnLRows,
+        summary: {
+          revenue: 0,
+          cost_of_sales: 0,
+          gross_profit: 0,
+          operating_expenses: 0,
+          net_profit: 0,
+        },
+        lines: [],
       },
-      cash_flow: ytdCashFlowRows,
-      director_loan: ytdDirectorLoanRows,
-    };
-
-    /* -----------------------------
-       COA SUMMARY + ALERTS + QUICK ACTIONS
-    ------------------------------ */
-
-    const coa_summary = deriveCoaSummaryFromTB(
-      fullTb.lines as TrialBalanceRow[]
-    );
-    const alerts = deriveAlertsFromTB(fullTb.lines as TrialBalanceRow[]);
-    const quick_actions = QUICK_ACTIONS;
-
-    /* -----------------------------
-       LEGACY FLAT FIELDS (HYBRID)
-    ------------------------------ */
-
-    const bank_accounts = deriveBankFromBalanceSheet(fullBsLines);
-    const suspense_and_uncategorised = deriveSuspenseAndUncategorised(
-      fullTb.lines as TrialBalanceRow[]
-    );
-
-    const legacyFinancialHealth: FinancialHealthFlat = ytdFinancialHealth;
-
-    const data: AccountingOverviewData = {
-      full_business,
-      ytd,
-      coa_summary,
-      alerts,
-      quick_actions,
-
-      financial_health: legacyFinancialHealth,
-      trial_balance_summary: fullTb.summary,
-      balance_sheet_summary: fullBsSummary,
-      trial_balance_full: fullTb.lines as TrialBalanceRow[],
-      balance_sheet_full: fullBsLines,
-      profit_and_loss_summary: fullPnL.summary,
-      profit_and_loss_full: fullPnLRows,
-      director_loan_ledger: fullDirectorLoanRows,
-      bank_accounts,
-      vat_control: [],
-      paye_control: [],
-      corporation_tax: [],
-      fixed_assets: fixedAssetRows,
-      suspense_and_uncategorised,
-      cash_flow: fullCashFlowRows,
-    };
-
-    return res.status(200).json(data);
-  } catch (err) {
-    console.error("❌ /api/accounting-overview error:", err);
-    return res.status(500).json({ error: "Internal server error" });
-  }
+      cash_flow: [],
+      director_loan: [],
+    },
+  };
 }

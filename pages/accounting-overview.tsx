@@ -6,7 +6,7 @@ import Link from "next/link";
    TYPE DEFINITIONS
 ------------------------------ */
 
-type FinancialHealthFlat = {
+type FinancialHealth = {
   revenue_mtd: number;
   revenue_ytd: number;
   expenses_mtd: number;
@@ -18,8 +18,8 @@ type FinancialHealthFlat = {
 type TrialBalanceRow = {
   account_code: string;
   account_name: string;
-  account_type?: string | null;      // <-- aligned with BSLine
-  hmrc_bucket?: string | null;       // <-- aligned with BSLine
+  account_type: string;
+  hmrc_bucket: string | null;
   debit: number;
   credit: number;
   balance: number;
@@ -28,8 +28,8 @@ type TrialBalanceRow = {
 type BalanceSheetRow = {
   account_code: string;
   account_name: string;
-  account_type?: string | null;      // <-- aligned with BSLine
-  hmrc_bucket?: string | null;       // <-- aligned with BSLine
+  account_type: string | null;
+  hmrc_bucket: string | null;
   debit: number;
   credit: number;
   balance: number;
@@ -60,7 +60,7 @@ type DirectorLoanRow = {
 type BankAccountRow = {
   account_code: string;
   account_name: string;
-  opening_balance?: number;
+  opening_balance: number;
   money_in: number;
   money_out: number;
   closing_balance: number;
@@ -116,85 +116,29 @@ type QuickAction = {
   link: string;
 };
 
-/* -----------------------------
-   NEW NESTED API TYPES
------------------------------- */
-
-type FullBusinessData = {
-  financial_health: {
-    total_assets: number;
-    total_liabilities: number;
-    net_assets: number;
-    equity: number;
-  };
-  balance_sheet: {
-    summary: BalanceSheetSummary;
-    lines: BalanceSheetRow[];
-  };
-  trial_balance: {
-    summary: TrialBalanceSummary;
-    lines: TrialBalanceRow[];
-  };
-  profit_and_loss: {
-    summary: ProfitAndLossSummary;
-    lines: ProfitAndLossRow[];
-  };
-  fixed_assets: {
-    lines: SimpleControlRow[];
-    nbv: number;
-  };
-  liabilities: {
-    lines: BalanceSheetRow[];
-    total: number;
-  };
-  cash_flow: CashFlowRow[];
-  director_loan: DirectorLoanRow[];
-};
-
-type YTDData = {
-  financial_health: FinancialHealthFlat;
-  balance_sheet: {
-    summary: BalanceSheetSummary;
-    lines: BalanceSheetRow[];
-  };
-  trial_balance: {
-    summary: TrialBalanceSummary;
-    lines: TrialBalanceRow[];
-  };
-  profit_and_loss: {
-    summary: ProfitAndLossSummary;
-    lines: ProfitAndLossRow[];
-  };
-  cash_flow: CashFlowRow[];
-  director_loan: DirectorLoanRow[];
-};
-
 type AccountingOverviewData = {
-  // new nested structure
-  full_business: FullBusinessData;
-  ytd: YTDData;
+  financial_health: FinancialHealth;
 
-  // top-level meta
+  trial_balance_summary: TrialBalanceSummary;
+  balance_sheet_summary: BalanceSheetSummary;
+
+  trial_balance_full: TrialBalanceRow[];
+  balance_sheet_full: BalanceSheetRow[];
+  profit_and_loss_summary: ProfitAndLossSummary;
+  profit_and_loss_full: ProfitAndLossRow[];
+  director_loan_ledger: DirectorLoanRow[];
+
+  bank_accounts: BankAccountRow[];
+  vat_control: SimpleControlRow[];
+  paye_control: SimpleControlRow[];
+  corporation_tax: SimpleControlRow[];
+  fixed_assets: SimpleControlRow[];
+  suspense_and_uncategorised: SimpleControlRow[];
+  cash_flow: CashFlowRow[];
+
   coa_summary: CoaSummary;
   alerts: Alert[];
   quick_actions: QuickAction[];
-
-  // legacy flat fields (still returned by API, but not required here)
-  financial_health?: FinancialHealthFlat;
-  trial_balance_summary?: TrialBalanceSummary;
-  balance_sheet_summary?: BalanceSheetSummary;
-  trial_balance_full?: TrialBalanceRow[];
-  balance_sheet_full?: BalanceSheetRow[];
-  profit_and_loss_summary?: ProfitAndLossSummary;
-  profit_and_loss_full?: ProfitAndLossRow[];
-  director_loan_ledger?: DirectorLoanRow[];
-  bank_accounts?: BankAccountRow[];
-  vat_control?: SimpleControlRow[];
-  paye_control?: SimpleControlRow[];
-  corporation_tax?: SimpleControlRow[];
-  fixed_assets?: SimpleControlRow[];
-  suspense_and_uncategorised?: SimpleControlRow[];
-  cash_flow?: CashFlowRow[];
 };
 
 /* -----------------------------
@@ -255,44 +199,39 @@ export default function AccountingOverviewPage() {
     );
   }
 
-  const { full_business, ytd, coa_summary, alerts, quick_actions } = data;
+  const {
+    financial_health,
+    trial_balance_summary,
+    balance_sheet_summary,
+    trial_balance_full,
+    balance_sheet_full,
+    profit_and_loss_summary,
+    profit_and_loss_full,
+    director_loan_ledger,
+    bank_accounts,
+    vat_control,
+    paye_control,
+    corporation_tax,
+    fixed_assets,
+    suspense_and_uncategorised,
+    cash_flow,
+    coa_summary,
+    alerts,
+    quick_actions,
+  } = data;
 
-  // FULL BUSINESS DERIVED
-  const fullBsSummary = full_business.balance_sheet.summary;
-  const fullTbSummary = full_business.trial_balance.summary;
-  const fullFinancialHealth = full_business.financial_health;
-
-  const fullBsDerived = {
-    assets: safeNumber(fullBsSummary.total_assets),
-    liabilities: safeNumber(fullBsSummary.total_liabilities),
-    equity: safeNumber(fullBsSummary.equity),
+  const bsDerived = {
+    assets: safeNumber(balance_sheet_summary.total_assets),
+    liabilities: safeNumber(balance_sheet_summary.total_liabilities),
+    equity: safeNumber(balance_sheet_summary.equity),
   };
 
-  const fullTbDerived = {
-    assets: safeNumber(fullTbSummary.assets),
-    liabilities: safeNumber(fullTbSummary.liabilities),
-    equity: safeNumber(fullTbSummary.equity),
-    income: safeNumber(fullTbSummary.income),
-    expenses: safeNumber(fullTbSummary.expenses),
-  };
-
-  // YTD DERIVED
-  const ytdBsSummary = ytd.balance_sheet.summary;
-  const ytdTbSummary = ytd.trial_balance.summary;
-  const ytdFinancialHealth = ytd.financial_health;
-
-  const ytdBsDerived = {
-    assets: safeNumber(ytdBsSummary.total_assets),
-    liabilities: safeNumber(ytdBsSummary.total_liabilities),
-    equity: safeNumber(ytdBsSummary.equity),
-  };
-
-  const ytdTbDerived = {
-    assets: safeNumber(ytdTbSummary.assets),
-    liabilities: safeNumber(ytdTbSummary.liabilities),
-    equity: safeNumber(ytdTbSummary.equity),
-    income: safeNumber(ytdTbSummary.income),
-    expenses: safeNumber(ytdTbSummary.expenses),
+  const tbDerived = {
+    assets: safeNumber(trial_balance_summary.assets),
+    liabilities: safeNumber(trial_balance_summary.liabilities),
+    equity: safeNumber(trial_balance_summary.equity),
+    income: safeNumber(trial_balance_summary.income),
+    expenses: safeNumber(trial_balance_summary.expenses),
   };
 
   return (
@@ -321,6 +260,7 @@ export default function AccountingOverviewPage() {
           )}
         </div>
 
+        {/* MODE TOGGLE */}
         <div className="inline-flex rounded-md border border-gray-200 bg-white shadow-sm text-sm">
           <button
             type="button"
@@ -349,42 +289,42 @@ export default function AccountingOverviewPage() {
 
       {mode === "full" ? (
         <FullBusinessView
-          financial_health={fullFinancialHealth}
-          bsDerived={fullBsDerived}
-          tbDerived={fullTbDerived}
-          profit_and_loss_summary={full_business.profit_and_loss.summary}
-          profit_and_loss_full={full_business.profit_and_loss.lines}
-          balance_sheet_full={full_business.balance_sheet.lines}
-          trial_balance_full={full_business.trial_balance.lines}
-          director_loan_ledger={full_business.director_loan}
-          bank_accounts={deriveBankFromBalanceSheet(full_business.balance_sheet.lines)}
-          vat_control={[]} // still from tx toggles in API if you wire later
-          paye_control={[]}
-          corporation_tax={[]}
-          fixed_assets={full_business.fixed_assets.lines}
-          suspense_and_uncategorised={[]} // still from TB if you want to pass separately
-          cash_flow={full_business.cash_flow}
+          financial_health={financial_health}
+          bsDerived={bsDerived}
+          tbDerived={tbDerived}
+          profit_and_loss_summary={profit_and_loss_summary}
+          profit_and_loss_full={profit_and_loss_full}
+          balance_sheet_full={balance_sheet_full}
+          trial_balance_full={trial_balance_full}
+          director_loan_ledger={director_loan_ledger}
+          bank_accounts={bank_accounts}
+          vat_control={vat_control}
+          paye_control={paye_control}
+          corporation_tax={corporation_tax}
+          fixed_assets={fixed_assets}
+          suspense_and_uncategorised={suspense_and_uncategorised}
+          cash_flow={cash_flow}
           coa_summary={coa_summary}
           alerts={alerts}
           quick_actions={quick_actions}
         />
       ) : (
         <YTDView
-          financial_health={ytdFinancialHealth}
-          bsDerived={ytdBsDerived}
-          tbDerived={ytdTbDerived}
-          profit_and_loss_summary={ytd.profit_and_loss.summary}
-          profit_and_loss_full={ytd.profit_and_loss.lines}
-          balance_sheet_full={ytd.balance_sheet.lines}
-          trial_balance_full={ytd.trial_balance.lines}
-          director_loan_ledger={ytd.director_loan}
-          bank_accounts={deriveBankFromBalanceSheet(ytd.balance_sheet.lines)}
-          vat_control={[]} // same note as above
-          paye_control={[]}
-          corporation_tax={[]}
-          fixed_assets={full_business.fixed_assets.lines} // or ytd-specific if you add later
-          suspense_and_uncategorised={[]}
-          cash_flow={ytd.cash_flow}
+          financial_health={financial_health}
+          bsDerived={bsDerived}
+          tbDerived={tbDerived}
+          profit_and_loss_summary={profit_and_loss_summary}
+          profit_and_loss_full={profit_and_loss_full}
+          balance_sheet_full={balance_sheet_full}
+          trial_balance_full={trial_balance_full}
+          director_loan_ledger={director_loan_ledger}
+          bank_accounts={bank_accounts}
+          vat_control={vat_control}
+          paye_control={paye_control}
+          corporation_tax={corporation_tax}
+          fixed_assets={fixed_assets}
+          suspense_and_uncategorised={suspense_and_uncategorised}
+          cash_flow={cash_flow}
           coa_summary={coa_summary}
           alerts={alerts}
           quick_actions={quick_actions}
@@ -395,13 +335,11 @@ export default function AccountingOverviewPage() {
 }
 
 /* -----------------------------
-   SHARED VIEW PROPS
+   FULL BUSINESS VIEW
 ------------------------------ */
 
 type ViewProps = {
-  financial_health:
-    | FullBusinessData["financial_health"]
-    | YTDData["financial_health"];
+  financial_health: FinancialHealth;
   bsDerived: { assets: number; liabilities: number; equity: number };
   tbDerived: {
     assets: number;
@@ -427,10 +365,6 @@ type ViewProps = {
   quick_actions: QuickAction[];
 };
 
-/* -----------------------------
-   FULL BUSINESS VIEW
------------------------------- */
-
 function FullBusinessView(props: ViewProps) {
   const {
     financial_health,
@@ -455,7 +389,7 @@ function FullBusinessView(props: ViewProps) {
 
   return (
     <>
-      {/* FINANCIAL HEALTH */}
+      {/* FINANCIAL HEALTH – FULL BUSINESS */}
       <section className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Financial Health (Full Business)</h2>
@@ -471,14 +405,12 @@ function FullBusinessView(props: ViewProps) {
           <StatCard label="Equity (All Years)" value={bsDerived.equity} />
         </div>
 
-        {"revenue_ytd" in financial_health && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Revenue (YTD)" value={(financial_health as FinancialHealthFlat).revenue_ytd} />
-            <StatCard label="Expenses (YTD)" value={(financial_health as FinancialHealthFlat).expenses_ytd} />
-            <StatCard label="Net Profit (YTD)" value={(financial_health as FinancialHealthFlat).net_profit_ytd} />
-            <StatCard label="Revenue (MTD)" value={(financial_health as FinancialHealthFlat).revenue_mtd} />
-          </div>
-        )}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Revenue (YTD)" value={financial_health.revenue_ytd} />
+          <StatCard label="Expenses (YTD)" value={financial_health.expenses_ytd} />
+          <StatCard label="Net Profit (YTD)" value={financial_health.net_profit_ytd} />
+          <StatCard label="Revenue (MTD)" value={financial_health.revenue_mtd} />
+        </div>
       </section>
 
       {/* CASH FLOW + BANK + TAX */}
@@ -820,11 +752,9 @@ function YTDView(props: ViewProps) {
     quick_actions,
   } = props;
 
-  const fh = financial_health as FinancialHealthFlat;
-
   return (
     <>
-      {/* FINANCIAL HEALTH */}
+      {/* FINANCIAL HEALTH – YTD */}
       <section className="space-y-4">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Financial Health (This Year)</h2>
@@ -837,14 +767,14 @@ function YTDView(props: ViewProps) {
           <StatCard label="Assets (Snapshot)" value={bsDerived.assets} />
           <StatCard label="Liabilities (Snapshot)" value={bsDerived.liabilities} />
           <StatCard label="Equity (Snapshot)" value={bsDerived.equity} />
-          <StatCard label="Net Profit (YTD)" value={fh.net_profit_ytd} />
+          <StatCard label="Net Profit (YTD)" value={financial_health.net_profit_ytd} />
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard label="Revenue (MTD)" value={fh.revenue_mtd} />
-          <StatCard label="Expenses (MTD)" value={fh.expenses_mtd} />
-          <StatCard label="Revenue (YTD)" value={fh.revenue_ytd} />
-          <StatCard label="Expenses (YTD)" value={fh.expenses_ytd} />
+          <StatCard label="Revenue (MTD)" value={financial_health.revenue_mtd} />
+          <StatCard label="Expenses (MTD)" value={financial_health.expenses_mtd} />
+          <StatCard label="Revenue (YTD)" value={financial_health.revenue_ytd} />
+          <StatCard label="Expenses (YTD)" value={financial_health.expenses_ytd} />
         </div>
       </section>
 
@@ -918,7 +848,7 @@ function YTDView(props: ViewProps) {
         </div>
       </section>
 
-      {/* FULL P&L + BS + TB */}
+      {/* P&L + BS + TB – YTD CONTEXT */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* P&L */}
         <div>
@@ -1163,18 +1093,6 @@ function YTDView(props: ViewProps) {
 /* -----------------------------
    UI HELPERS
 ------------------------------ */
-
-function deriveBankFromBalanceSheet(lines: BalanceSheetRow[]): BankAccountRow[] {
-  return lines
-    .filter((line) => (line.account_type || "").toUpperCase() === "BANK")
-    .map((line) => ({
-      account_code: line.account_code,
-      account_name: line.account_name,
-      closing_balance: Number(line.balance || 0),
-      money_in: Number(line.debit || 0),
-      money_out: Number(line.credit || 0),
-    }));
-}
 
 function StatCard({
   label,
