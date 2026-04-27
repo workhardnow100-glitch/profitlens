@@ -193,9 +193,14 @@ export default function BalanceSheetPage() {
     window.print();
   }
 
-  if (loading) {
-  return <div className="p-6">Loading balance sheet…</div>;
+ if (!dataCurrent) {
+  return (
+    <div className="p-6">
+      <p>Please enter a year to load the balance sheet.</p>
+    </div>
+  );
 }
+
 
 
   return (
