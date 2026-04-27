@@ -1,4 +1,3 @@
-// pages/reports/balance-sheet.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -55,21 +54,17 @@ export default function BalanceSheetPage() {
     year: undefined as number | undefined,
   });
 
- useEffect(() => {
-  if (yearCurrent) {
-    load();
-  }
-}, [yearCurrent]);
-
-
-  // ⭐ FIXED LOAD FUNCTION — only ONE API call, TS-safe
-  async function load() {
-    // If no current year selected, do nothing
-    if (!yearCurrent) {
+  useEffect(() => {
+    if (yearCurrent) {
+      load();
+    } else {
       setDataCurrent(null);
       setDataCompare(null);
-      return;
     }
+  }, [yearCurrent]);
+
+  async function load() {
+    if (!yearCurrent) return;
 
     setLoading(true);
 
@@ -84,8 +79,6 @@ export default function BalanceSheetPage() {
 
     setLoading(false);
   }
-
-
 
   function startEdit(
     line: BSLine,
@@ -195,16 +188,6 @@ export default function BalanceSheetPage() {
     window.print();
   }
 
- if (!dataCurrent) {
-  return (
-    <div className="p-6">
-      <p>Please enter a year to load the balance sheet.</p>
-    </div>
-  );
-}
-
-
-
   return (
     <div className="p-8 max-w-6xl mx-auto print:p-4 relative">
       <div className="flex justify-between items-center mb-6">
@@ -261,24 +244,24 @@ export default function BalanceSheetPage() {
         {/* LEFT: existing balance sheet columns */}
         <div className="lg:col-span-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <BalanceSheetColumn
-              title={yearCurrent ? `Year ${yearCurrent}` : "Current"}
-              data={dataCurrent}
-              isCompare={false}
-              onEdit={startEdit}
-              onDelete={deleteLine}
-              onMove={moveLine}
-              editingLine={editingLine}
-              editingMeta={editingMeta}
-              setEditingLine={setEditingLine}
-              saveEdit={saveEdit}
-            />
-
-            {dataCompare && (
+            {dataCurrent && (
               <BalanceSheetColumn
-        title={`Year ${(yearCurrent ?? 0) - 1}`}
+                title={yearCurrent ? `Year ${yearCurrent}` : "Current"}
+                data={dataCurrent}
+                isCompare={false}
+                onEdit={startEdit}
+                onDelete={deleteLine}
+                onMove={moveLine}
+                editingLine={editingLine}
+                editingMeta={editingMeta}
+                setEditingLine={setEditingLine}
+                saveEdit={saveEdit}
+              />
+            )}
 
-
+            {dataCurrent && dataCompare && (
+              <BalanceSheetColumn
+                title={`Year ${(yearCurrent ?? 0) - 1}`}
                 data={dataCompare}
                 isCompare={true}
                 onEdit={startEdit}
@@ -298,6 +281,7 @@ export default function BalanceSheetPage() {
           <GuidancePanel />
         </aside>
       </div>
+    
 
       {/* Mobile slide-out guidance panel */}
       {showHelp && (
