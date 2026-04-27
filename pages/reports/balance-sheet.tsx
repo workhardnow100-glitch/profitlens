@@ -264,7 +264,12 @@ export default function BalanceSheetPage() {
 
             {dataCompare && (
               <BalanceSheetColumn
-                title={yearCompare ? `Year ${yearCompare}` : "Comparative"}
+                title={
+  yearCurrent
+    ? `Year ${yearCurrent - 1}`
+    : "Comparative"
+}
+
                 data={dataCompare}
                 isCompare={true}
                 onEdit={startEdit}
