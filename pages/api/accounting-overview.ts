@@ -228,14 +228,8 @@ export default async function handler(
 
     const liabilities_total = Number(fullSafe.liabilities?.total || 0);
 
-    const cash_flow_lines_full =
-      fullSafe.cashflow && Array.isArray(fullSafe.cashflow.lines)
-        ? fullSafe.cashflow.lines.map((l: any) => ({
-            ...l,
-            debit: Number(l.debit || 0),
-            credit: Number(l.credit || 0),
-          }))
-        : [];
+    // For now, do NOT touch builder cash flow shape → safe empty array
+    const cash_flow_lines_full: any[] = [];
 
     // BANK ACCOUNTS FROM BUILDER BALANCE SHEET
     const bank_accounts = balance_sheet_full
