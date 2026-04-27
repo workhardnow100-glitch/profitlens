@@ -639,19 +639,10 @@ export default function FormsPage() {
       };
 
       // ⭐ Attach Statutory Accounts payload when generating FRS105 / FRS102_1A
-      if (category === "ACCOUNTS") {
-        payload.accountsVersionId = accountsVersionId || null;
-        payload.notes = {
-          policies: accountsPolicies,
-          directorsReport: accountsDirectorsReport,
-          details: accountsNotes,
-        };
-        payload.pAndlCurrent = accountsPandL;
-        payload.directorApproval = {
-          name: accountsApproval.directorName || "",
-          date: accountsApproval.approvalDate || "",
-        };
-      }
+    if (category === "ACCOUNTS") {
+  payload.accountsVersionId = accountsVersionId;
+}
+
 
       const res = await fetch("/api/forms/generate", {
         method: "POST",
