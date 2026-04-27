@@ -1,4 +1,6 @@
 // pages/reports/balance-sheet.tsx
+"use client";
+
 import { useEffect, useState } from "react";
 
 type BSLine = {
