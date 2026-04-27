@@ -68,10 +68,15 @@ export type CashFlowResult = {
   };
 };
 
+export type PeriodFilter = {
+  from: Date;
+  to: Date;
+};
+
 const safeNum = (v: any) => Number(v || 0);
 
 // ------------------------------------------------------------
-// BALANCE SHEET — now driven by the builder (FRS105/102 engine)
+// BALANCE SHEET — builder-driven (FRS105/102 engine, year-based)
 // ------------------------------------------------------------
 export async function getUnifiedBalanceSheet(
   clientId: string,
@@ -170,11 +175,14 @@ function emptyStructure(): BSStructure {
 }
 
 // ------------------------------------------------------------
-// BELOW: keep journal-driven logic for TB / P&L / DLA / CF
+// BELOW: journal-driven logic for TB / P&L / DLA / CF (period-aware)
 // ------------------------------------------------------------
 
-// CORE: pull all journal lines for a client, optionally by year
-async function getJournalLines(clientId: string, year?: number) {
+// CORE: pull all journal lines for a client, optionally by period
+async function getJournalLines(
+  clientId: string,
+  period?: PeriodFilter
+) {
   let query = supabaseAdmin
     .from("journal_lines")
     .select(
@@ -196,10 +204,13 @@ async function getJournalLines(clientId: string, year?: number) {
     )
     .eq("journal_entries.client_id", clientId);
 
-  if (year) {
+  if (period) {
+    const fromStr = period.from.toISOString().slice(0, 10);
+    const toStr = period.to.toISOString().slice(0, 10);
+
     query = query
-      .gte("journal_entries.date", `${year}-01-01`)
-      .lte("journal_entries.date", `${year}-12-31`);
+      .gte("journal_entries.date", fromStr)
+      .lte("journal_entries.date", toStr);
   }
 
   const { data, error } = await query;
@@ -248,34 +259,49 @@ function groupByAccount(lines: any[]): BSLine[] {
   }));
 }
 
-// TRIAL BALANCE (journal-driven, year-aware)
+// TRIAL BALANCE (journal-driven, period-aware)
 export async function getUnifiedTrialBalance(
   clientId: string,
-  year?: number
+  period?: PeriodFilter
 ): Promise<TrialBalanceResult> {
-  const lines = await getJournalLines(clientId, year);
+  const lines = await getJournalLines(clientId, period);
   const accounts = groupByAccount(lines);
 
-  const summary = { assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 };
+  const summary = {
+    assets: 0,
+    liabilities: 0,
+    equity: 0,
+    income: 0,
+    expenses: 0,
+  };
 
   for (const acc of accounts) {
-    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet")
+    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet") {
       summary.assets += acc.balance;
-    if (acc.account_type === "LIABILITY") summary.liabilities += acc.balance;
-    if (acc.account_type === "EQUITY") summary.equity += acc.balance;
-    if (acc.account_type === "INCOME") summary.income += acc.credit ?? 0;
-    if (acc.account_type === "EXPENSE") summary.expenses += acc.debit ?? 0;
+    }
+    if (acc.account_type === "LIABILITY") {
+      summary.liabilities += acc.balance;
+    }
+    if (acc.account_type === "EQUITY") {
+      summary.equity += acc.balance;
+    }
+    if (acc.account_type === "INCOME") {
+      summary.income += acc.credit ?? 0;
+    }
+    if (acc.account_type === "EXPENSE") {
+      summary.expenses += acc.debit ?? 0;
+    }
   }
 
   return { lines: accounts, summary };
 }
 
-// PROFIT & LOSS (journal-driven, year-aware)
+// PROFIT & LOSS (journal-driven, period-aware)
 export async function getUnifiedProfitAndLoss(
   clientId: string,
-  year?: number
+  period?: PeriodFilter
 ): Promise<ProfitAndLossResult> {
-  const lines = await getJournalLines(clientId, year);
+  const lines = await getJournalLines(clientId, period);
   const accounts = groupByAccount(lines);
 
   const revenue = accounts
@@ -300,12 +326,12 @@ export async function getUnifiedProfitAndLoss(
   };
 }
 
-// DIRECTOR LOAN (journal-driven)
+// DIRECTOR LOAN (journal-driven, period-aware)
 export async function getUnifiedDirectorLoan(
   clientId: string,
-  year?: number
+  period?: PeriodFilter
 ): Promise<DirectorLoanResult> {
-  const lines = await getJournalLines(clientId, year);
+  const lines = await getJournalLines(clientId, period);
   const accounts = groupByAccount(lines);
 
   const dl = accounts.find((a) => a.account_code === "5041");
@@ -316,12 +342,12 @@ export async function getUnifiedDirectorLoan(
   };
 }
 
-// CASH FLOW (journal-driven, simple version)
+// CASH FLOW (journal-driven, simple, period-aware)
 export async function getUnifiedCashFlow(
   clientId: string,
-  year?: number
+  period?: PeriodFilter
 ): Promise<CashFlowResult> {
-  const lines = await getJournalLines(clientId, year);
+  const lines = await getJournalLines(clientId, period);
 
   const operating = lines
     .filter((l) => l.account_type === "EXPENSE" || l.account_type === "INCOME")
