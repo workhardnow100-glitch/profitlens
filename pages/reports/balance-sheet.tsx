@@ -52,8 +52,10 @@ export default function BalanceSheetPage() {
     year: undefined as number | undefined,
   });
 
-  useEffect(() => {
-  load();
+ useEffect(() => {
+  if (yearCurrent) {
+    load();
+  }
 }, [yearCurrent]);
 
 
