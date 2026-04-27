@@ -52,9 +52,10 @@ export default function BalanceSheetPage() {
     year: undefined as number | undefined,
   });
 
-   useEffect(() => {
-    load();
-  }, [yearCurrent, yearCompare]);
+  useEffect(() => {
+  load();
+}, [yearCurrent]);
+
 
   // ⭐ FIXED LOAD FUNCTION — only ONE API call, TS-safe
   async function load() {
