@@ -1,6 +1,11 @@
+// lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
 
-console.log("🔥 USING UNIFIED JOURNAL-DRIVEN ACCOUNTING ENGINE");
+// ✔ Correct import — use the shared builder
+import { buildAccountsFormData } from "./builder-engine";
+
+console.log("🔥 USING BUILDER-ALIGNED ACCOUNTING ENGINE");
+
 
 export type BSLine = {
   account_code: string;
@@ -66,13 +71,120 @@ export type CashFlowResult = {
   };
 };
 
+const safeNum = (v: any) => Number(v || 0);
+
 // ------------------------------------------------------------
+// BALANCE SHEET — now driven by the builder (FRS105/102 engine)
+// ------------------------------------------------------------
+export async function getUnifiedBalanceSheet(
+  clientId: string,
+  year?: number
+): Promise<BSStructure> {
+  // Default to current calendar year if none passed
+  const y = year ?? new Date().getFullYear();
+  const periodStart = `${y}-01-01`;
+  const periodEnd = `${y}-12-31`;
+
+  // builder: returns { overview, overviewPrior, customNotes }
+  const { overview } = await buildAccountsFormData(
+    null,
+    clientId,
+    periodStart,
+    periodEnd,
+    []
+  );
+
+  if (!overview || !overview.totals) {
+    return emptyStructure();
+  }
+
+  const t = overview.totals;
+
+  const nonCurrentAssets = safeNum(t.non_current_assets);
+  const currentAssets = safeNum(t.current_assets);
+  const currentLiabilities = safeNum(t.current_liabilities);
+  const nonCurrentLiabilities = safeNum(t.non_current_liabilities);
+  const totalLiabilities = safeNum(t.total_liabilities);
+  const totalEquity = safeNum(t.total_equity);
+
+  const totalAssets = nonCurrentAssets + currentAssets;
+
+  const structure: BSStructure = {
+    assets: {
+      non_current: [
+        {
+          account_code: "FA",
+          account_name: "Fixed assets",
+          balance: nonCurrentAssets,
+        },
+      ],
+      current: [
+        {
+          account_code: "CA",
+          account_name: "Current assets",
+          balance: currentAssets,
+        },
+      ],
+    },
+    liabilities: {
+      non_current: [
+        {
+          account_code: "NCL",
+          account_name: "Non-current liabilities",
+          balance: nonCurrentLiabilities,
+        },
+      ],
+      current: [
+        {
+          account_code: "CL",
+          account_name: "Current liabilities",
+          balance: currentLiabilities,
+        },
+      ],
+    },
+    equity: [
+      {
+        account_code: "EQ",
+        account_name: "Capital and reserves",
+        balance: totalEquity,
+      },
+    ],
+    totals: {
+      total_assets: totalAssets,
+      total_liabilities: totalLiabilities,
+      total_equity: totalEquity,
+      total_liabilities_and_equity: totalLiabilities + totalEquity,
+    },
+  };
+
+  return structure;
+}
+
+function emptyStructure(): BSStructure {
+  return {
+    assets: { non_current: [], current: [] },
+    liabilities: { non_current: [], current: [] },
+    equity: [],
+    totals: {
+      total_assets: 0,
+      total_liabilities: 0,
+      total_equity: 0,
+      total_liabilities_and_equity: 0,
+    },
+  };
+}
+
+// ------------------------------------------------------------
+// BELOW: keep journal-driven logic for TB / P&L / DLA / CF
+// (these already match your transaction P&L / CT600 behaviour)
+// ------------------------------------------------------------
+
 // CORE: pull all journal lines for a client, optionally by year
-// ------------------------------------------------------------
 async function getJournalLines(clientId: string, year?: number) {
   let query = supabaseAdmin
     .from("journal_lines")
-    .select(`
+    .select(
+      `
       debit,
       credit,
       account_id,
@@ -86,7 +198,8 @@ async function getJournalLines(clientId: string, year?: number) {
         account_type,
         hmrc_bucket
       )
-    `)
+    `
+    )
     .eq("journal_entries.client_id", clientId);
 
   if (year) {
@@ -111,9 +224,7 @@ async function getJournalLines(clientId: string, year?: number) {
   }));
 }
 
-// ------------------------------------------------------------
 // CORE: group journal lines into account-level balances
-// ------------------------------------------------------------
 function groupByAccount(lines: any[]): BSLine[] {
   const grouped: Record<string, BSLine> = {};
 
@@ -143,116 +254,7 @@ function groupByAccount(lines: any[]): BSLine[] {
   }));
 }
 
-// ------------------------------------------------------------
-// BALANCE SHEET (journal-driven, year-aware)
-// ------------------------------------------------------------
-export async function getUnifiedBalanceSheet(
-  clientId: string,
-  year?: number
-): Promise<BSStructure> {
-  const lines = await getJournalLines(clientId, year);
-  if (!lines.length) return emptyStructure();
-
-  const accounts = groupByAccount(lines);
-  const structure = mapToStructure(accounts);
-  const totals = computeTotals(structure);
-
-  return { ...structure, totals };
-}
-
-function emptyStructure(): BSStructure {
-  return {
-    assets: { non_current: [], current: [] },
-    liabilities: { non_current: [], current: [] },
-    equity: [],
-    totals: {
-      total_assets: 0,
-      total_liabilities: 0,
-      total_equity: 0,
-      total_liabilities_and_equity: 0,
-    },
-  };
-}
-
-// ------------------------------------------------------------
-// CLASSIFICATION MAP
-// ------------------------------------------------------------
-function mapToStructure(rows: BSLine[]) {
-  const structure: Omit<BSStructure, "totals"> = {
-    assets: { non_current: [], current: [] },
-    liabilities: { non_current: [], current: [] },
-    equity: [],
-  };
-
-  let totalDebits = 0;
-  let totalCredits = 0;
-
-  for (const row of rows) {
-    const type = row.account_type ?? "";
-    const bucket = row.hmrc_bucket ?? "";
-
-    if (bucket === "ignore" || bucket === "control" || type === "SYSTEM" || type === "CONTROL") {
-      continue;
-    }
-
-    if (bucket === "fixed_asset" || bucket === "fixed_asset_contra") {
-      structure.assets.non_current.push(row);
-      continue;
-    }
-    if (bucket === "assets" || bucket === "balance_sheet" || bucket === "current_asset" || type === "ASSET" || type === "BANK") {
-      structure.assets.current.push(row);
-      continue;
-    }
-
-    if (bucket === "liabilities" || bucket === "vat" || type === "LIABILITY" || type === "ACCOUNTS_PAYABLE" || type === "VAT_CONTROL") {
-      structure.liabilities.current.push(row);
-      continue;
-    }
-
-    if (bucket === "equity" || type === "EQUITY") {
-      structure.equity.push(row);
-      continue;
-    }
-
-    if (bucket === "income" || bucket === "non_trading_income" || type === "INCOME") {
-      totalCredits += row.credit ?? 0;
-      continue;
-    }
-    if (bucket === "allowable" || bucket === "disallowable" || type === "EXPENSE") {
-      totalDebits += row.debit ?? 0;
-      continue;
-    }
-  }
-
-  const profit = totalCredits - totalDebits;
-  structure.equity.push({
-    account_code: "PROFIT",
-    account_name: "Current Year Profit",
-    balance: profit,
-  });
-
-  return structure; // ✅ always return full structure
-}
-
-
-function computeTotals(structure: Omit<BSStructure, "totals">) {
-  const sum = (rows: BSLine[]) => rows.reduce((a, r) => a + Number(r.balance || 0), 0);
-
-  const totalAssets = sum(structure.assets.current) + sum(structure.assets.non_current);
-  const totalLiabilities = sum(structure.liabilities.current) + sum(structure.liabilities.non_current);
-  const totalEquity = sum(structure.equity);
-
-  return {
-    total_assets: totalAssets,
-    total_liabilities: totalLiabilities,
-    total_equity: totalEquity,
-    total_liabilities_and_equity: totalLiabilities + totalEquity,
-  };
-}
-
-// ------------------------------------------------------------
 // TRIAL BALANCE (journal-driven, year-aware)
-// ------------------------------------------------------------
 export async function getUnifiedTrialBalance(
   clientId: string,
   year?: number
@@ -263,7 +265,8 @@ export async function getUnifiedTrialBalance(
   const summary = { assets: 0, liabilities: 0, equity: 0, income: 0, expenses: 0 };
 
   for (const acc of accounts) {
-    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet") summary.assets += acc.balance;
+    if (acc.account_type === "ASSET" || acc.hmrc_bucket === "balance_sheet")
+      summary.assets += acc.balance;
     if (acc.account_type === "LIABILITY") summary.liabilities += acc.balance;
     if (acc.account_type === "EQUITY") summary.equity += acc.balance;
     if (acc.account_type === "INCOME") summary.income += acc.credit ?? 0;
@@ -273,9 +276,7 @@ export async function getUnifiedTrialBalance(
   return { lines: accounts, summary };
 }
 
-// ------------------------------------------------------------
 // PROFIT & LOSS (journal-driven, year-aware)
-// ------------------------------------------------------------
 export async function getUnifiedProfitAndLoss(
   clientId: string,
   year?: number
@@ -305,9 +306,7 @@ export async function getUnifiedProfitAndLoss(
   };
 }
 
-// ------------------------------------------------------------
 // DIRECTOR LOAN (journal-driven)
-// ------------------------------------------------------------
 export async function getUnifiedDirectorLoan(
   clientId: string,
   year?: number
@@ -315,7 +314,6 @@ export async function getUnifiedDirectorLoan(
   const lines = await getJournalLines(clientId, year);
   const accounts = groupByAccount(lines);
 
-  // Adjust this code to your actual Director Loan account code
   const dl = accounts.find((a) => a.account_code === "5041");
 
   return {
@@ -324,9 +322,7 @@ export async function getUnifiedDirectorLoan(
   };
 }
 
-// ------------------------------------------------------------
 // CASH FLOW (journal-driven, simple version)
-// ------------------------------------------------------------
 export async function getUnifiedCashFlow(
   clientId: string,
   year?: number
