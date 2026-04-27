@@ -52,34 +52,34 @@ export default function BalanceSheetPage() {
     year: undefined as number | undefined,
   });
 
-  useEffect(() => {
+   useEffect(() => {
     load();
   }, [yearCurrent, yearCompare]);
 
+  // ⭐ FIXED LOAD FUNCTION — only ONE API call, TS-safe
   async function load() {
+    // If no current year selected, do nothing
+    if (!yearCurrent) {
+      setDataCurrent(null);
+      setDataCompare(null);
+      return;
+    }
+
     setLoading(true);
 
-    const [curRes, compRes] = await Promise.all([
-      fetch(`/api/reports/balance-sheet${yearCurrent ? `?year=${yearCurrent}` : ""}`),
-      yearCompare
-        ? fetch(`/api/reports/balance-sheet?year=${yearCompare}`)
-        : Promise.resolve(null),
-    ]);
+    const res = await fetch(`/api/reports/balance-sheet?year=${yearCurrent}`);
+    const json = await res.json();
 
-    const curJson = await curRes.json();
-    // ✅ unwrap the "current" object
-    setDataCurrent(curJson.current);
+    // current = overview(yearCurrent)
+    setDataCurrent(json.current);
 
-    if (compRes) {
-      const compJson = await compRes.json();
-      // ✅ unwrap the "prior" object
-      setDataCompare(compJson.prior);
-    } else {
-      setDataCompare(null);
-    }
+    // prior = overviewPrior(yearCurrent)
+    setDataCompare(json.prior);
 
     setLoading(false);
   }
+
+
 
   function startEdit(
     line: BSLine,
@@ -264,11 +264,8 @@ export default function BalanceSheetPage() {
 
             {dataCompare && (
               <BalanceSheetColumn
-                title={
-  yearCurrent
-    ? `Year ${yearCurrent - 1}`
-    : "Comparative"
-}
+        title={`Year ${(yearCurrent ?? 0) - 1}`}
+
 
                 data={dataCompare}
                 isCompare={true}
