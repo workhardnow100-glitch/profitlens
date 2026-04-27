@@ -1,9 +1,12 @@
-// pages/api/accounting-overview.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth/[...nextauth]";
 import { supabaseAdmin } from "../../lib/supabase-admin";
 
+// ⭐ BUILDER ENGINE (statutory, correct)
+import { buildAccountsFormData } from "../../lib/accounting/builder-engine";
+
+// ⭐ JOURNAL ENGINE (YTD only)
 import {
   getUnifiedBalanceSheet,
   getUnifiedTrialBalance,
@@ -47,40 +50,36 @@ export default async function handler(
     }
 
     // ------------------------------------------------------------
-    // 0) PERIODS (FULL BUSINESS vs YTD)
+    // PERIODS
     // ------------------------------------------------------------
     const today = new Date();
     const startOfYear = new Date(today.getFullYear(), 0, 1);
     const currentYear = today.getFullYear();
 
-
-    const fullPeriod: PeriodFilter | undefined = undefined; // all years (engine should treat undefined as "no date filter")
     const ytdPeriod: PeriodFilter = { from: startOfYear, to: today };
 
     // ------------------------------------------------------------
-    // 1) UNIFIED JOURNAL ENGINE (FULL BUSINESS + YTD)
+    // ⭐ FULL BUSINESS — BUILDER ENGINE (ALL YEARS)
+    // ------------------------------------------------------------
+    const { overview: full } = await buildAccountsFormData(
+      null,
+      clientId,
+      "1900-01-01",
+      "2126-12-31",
+      []
+    );
+
+    // ------------------------------------------------------------
+    // ⭐ YTD — JOURNAL ENGINE
     // ------------------------------------------------------------
     const [
-      fullBS,
-      fullTB,
-      fullPL,
-      fullDL,
-      fullCF,
       ytdBS,
       ytdTB,
       ytdPL,
       ytdDL,
       ytdCF,
     ] = await Promise.all([
-      // FULL BUSINESS (all years)
       getUnifiedBalanceSheet(clientId, currentYear),
-      getUnifiedTrialBalance(clientId, fullPeriod),
-      getUnifiedProfitAndLoss(clientId, fullPeriod),
-      getUnifiedDirectorLoan(clientId, fullPeriod),
-      getUnifiedCashFlow(clientId, fullPeriod),
-
-      // YTD (current year only)
-     getUnifiedBalanceSheet(clientId, currentYear),
       getUnifiedTrialBalance(clientId, ytdPeriod),
       getUnifiedProfitAndLoss(clientId, ytdPeriod),
       getUnifiedDirectorLoan(clientId, ytdPeriod),
@@ -88,7 +87,7 @@ export default async function handler(
     ]);
 
     // ------------------------------------------------------------
-    // 2) COA SUMMARY
+    // COA SUMMARY
     // ------------------------------------------------------------
     const { data: coa, error: coaError } = await supabaseAdmin
       .from("chart_of_accounts")
@@ -122,16 +121,13 @@ export default async function handler(
     }
 
     // ------------------------------------------------------------
-    // 3) VAT + CT FROM TRANSACTION TOGGLES (STILL FULL LEDGER)
+    // VAT + CT FROM TRANSACTION TOGGLES
     // ------------------------------------------------------------
     const { data: tx } = await supabaseAdmin
       .from("transactions")
       .select("amount, debit, credit, vat_toggle, ct_toggle")
       .eq("client_id", clientId);
 
-    // ----------------------------
-    // TYPES
-    // ----------------------------
     type ControlLine = {
       account_code: string;
       account_name: string;
@@ -140,9 +136,6 @@ export default async function handler(
       balance: number;
     };
 
-    // ----------------------------
-    // VAT + CT FROM TRANSACTION TOGGLES
-    // ----------------------------
     const vat_control: ControlLine[] = [];
     const corporation_tax: ControlLine[] = [];
 
@@ -180,13 +173,53 @@ export default async function handler(
       });
     }
 
-    // ----------------------------
-    // BANK ACCOUNTS FROM FULL BS
-    // ----------------------------
-    const bank_accounts = fullBS.assets.current
+    // ------------------------------------------------------------
+    // ⭐ FULL BUSINESS — BUILDER MAPPING
+    // ------------------------------------------------------------
+    const bs = {
+      total_assets: Number(full.totals.total_assets || 0),
+      total_liabilities: Number(full.totals.total_liabilities || 0),
+      total_equity: Number(full.totals.total_equity || 0),
+    };
+
+    const pl = {
+      revenue: Number(full.pnl.revenue || 0),
+      cost_of_sales: Number(full.pnl.cost_of_sales || 0),
+      gross_profit: Number(full.pnl.gross_profit || 0),
+      operating_expenses: Number(full.pnl.operating_expenses || 0),
+      net_profit: Number(full.pnl.net_profit || 0),
+    };
+
+    const tb = {
+      assets: Number(full.trial_balance.assets || 0),
+      liabilities: Number(full.trial_balance.liabilities || 0),
+      equity: Number(full.trial_balance.equity || 0),
+      income: Number(full.trial_balance.income || 0),
+      expenses: Number(full.trial_balance.expenses || 0),
+    };
+
+    const trial_balance_full = full.trial_balance.lines.map(normalizeLine);
+    const balance_sheet_full = full.balance_sheet.lines.map(normalizeLine);
+    const profit_and_loss_full = full.pnl.lines.map(normalizeLine);
+    const director_loan_ledger = full.director_loan.lines.map(normalizeLine);
+
+    const fixed_assets = full.fixed_assets.lines.map(normalizeLine);
+    const fixed_assets_nbv = Number(full.fixed_assets.nbv || 0);
+
+    const liabilities_lines = full.liabilities.lines.map(normalizeLine);
+    const liabilities_total = Number(full.liabilities.total || 0);
+
+    const cash_flow_lines_full = full.cashflow.lines.map((l: any) => ({
+      ...l,
+      debit: Number(l.debit || 0),
+      credit: Number(l.credit || 0),
+    }));
+
+    // ⭐ REBUILD BANK ACCOUNTS FROM BUILDER BALANCE SHEET
+    const bank_accounts = balance_sheet_full
       .filter((line: any) => {
         const type = (line.account_type || "").toUpperCase();
-        return type === "BANK"; // removed is_bank_account
+        return type === "BANK";
       })
       .map((line: any) => ({
         account_code: line.account_code,
@@ -196,61 +229,16 @@ export default async function handler(
         money_out: Number(line.credit || 0),
       }));
 
-    // ------------------------------------------------------------
-    // 5) FIXED ASSETS (FULL BUSINESS)
-    // ------------------------------------------------------------
-    const fixed_assets = fullBS.assets.non_current.map(normalizeLine);
-
-    // ------------------------------------------------------------
-    // 6) SUSPENSE + UNCATEGORISED (FULL TB)
-    // ------------------------------------------------------------
-    const suspense_and_uncategorised = fullTB.lines
+    // ⭐ REBUILD SUSPENSE + UNCATEGORISED FROM BUILDER TB
+    const suspense_and_uncategorised = trial_balance_full
       .filter(
-        (l: any) => l.account_code === "9020" || l.account_code === "9999"
+        (l: any) =>
+          l.account_code === "9020" || l.account_code === "9999"
       )
       .map(normalizeLine);
 
     // ------------------------------------------------------------
-    // 7) BUILD BASE SUMMARIES (FULL BUSINESS)
-    // ------------------------------------------------------------
-    const pl = fullPL.summary;
-    const tb = fullTB.summary;
-    const bs = fullBS.totals;
-
-    const trial_balance_full = fullTB.lines.map(normalizeLine);
-    const balance_sheet_full = [
-      ...fullBS.assets.current,
-      ...fullBS.assets.non_current,
-      ...fullBS.liabilities.current,
-      ...fullBS.liabilities.non_current,
-      ...fullBS.equity,
-    ].map(normalizeLine);
-    const profit_and_loss_full = fullPL.lines.map(normalizeLine);
-    const director_loan_ledger = fullDL.lines.map(normalizeLine);
-
-    const fixed_assets_nbv = fixed_assets.reduce(
-      (sum: number, line: any) => sum + Number(line.balance || 0),
-      0
-    );
-
-    const liabilities_lines = [
-      ...fullBS.liabilities.current,
-      ...fullBS.liabilities.non_current,
-    ].map(normalizeLine);
-
-    const liabilities_total = liabilities_lines.reduce(
-      (sum: number, line: any) => sum + Number(line.balance || 0),
-      0
-    );
-
-    const cash_flow_lines_full = fullCF.lines.map((l: any) => ({
-      ...l,
-      debit: Number(l.debit || 0),
-      credit: Number(l.credit || 0),
-    }));
-
-    // ------------------------------------------------------------
-    // 7b) YTD SUMMARIES (USING YTD ENGINE CALLS)
+    // ⭐ YTD — JOURNAL MAPPING
     // ------------------------------------------------------------
     const ytdPl = ytdPL.summary;
     const ytdTb = ytdTB.summary;
@@ -275,48 +263,30 @@ export default async function handler(
     }));
 
     // ------------------------------------------------------------
-    // 8) BUILD RESPONSE (BACKWARDS-COMPATIBLE + NEW STRUCTURE)
+    // ⭐ BUILD RESPONSE
     // ------------------------------------------------------------
     return res.status(200).json({
-      // -----------------------------
-      // LEGACY / CURRENT FLAT SHAPE (USES FULL BUSINESS)
-      // -----------------------------
+      // LEGACY FLAT SHAPE (builder-powered)
       financial_health: {
-        assets: Number(bs.total_assets || 0),
-        liabilities: Number(bs.total_liabilities || 0),
-        equity: Number(bs.total_equity || 0),
-
-        revenue_mtd: Number(pl.revenue || 0),
-        revenue_ytd: Number(pl.revenue || 0),
-
-        expenses_mtd: Number(pl.operating_expenses || 0),
-        expenses_ytd: Number(pl.operating_expenses || 0),
-
-        net_profit_mtd: Number(pl.net_profit || 0),
-        net_profit_ytd: Number(pl.net_profit || 0),
+        assets: bs.total_assets,
+        liabilities: bs.total_liabilities,
+        equity: bs.total_equity,
+        revenue_mtd: pl.revenue,
+        revenue_ytd: pl.revenue,
+        expenses_mtd: pl.operating_expenses,
+        expenses_ytd: pl.operating_expenses,
+        net_profit_mtd: pl.net_profit,
+        net_profit_ytd: pl.net_profit,
       },
 
-      trial_balance_summary: {
-        assets: Number(tb.assets || 0),
-        liabilities: Number(tb.liabilities || 0),
-        equity: Number(tb.equity || 0),
-        income: Number(tb.income || 0),
-        expenses: Number(tb.expenses || 0),
-      },
-
-      profit_and_loss_summary: {
-        revenue: Number(pl.revenue || 0),
-        cost_of_sales: Number(pl.cost_of_sales || 0),
-        gross_profit: Number(pl.gross_profit || 0),
-        operating_expenses: Number(pl.operating_expenses || 0),
-        net_profit: Number(pl.net_profit || 0),
-      },
+      trial_balance_summary: tb,
+      profit_and_loss_summary: pl,
 
       balance_sheet_summary: {
-        total_assets: Number(bs.total_assets || 0),
-        total_liabilities: Number(bs.total_liabilities || 0),
-        net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
-        equity: Number(bs.total_equity || 0),
+        total_assets: bs.total_assets,
+        total_liabilities: bs.total_liabilities,
+        net_assets: bs.total_assets - bs.total_liabilities,
+        equity: bs.total_equity,
       },
 
       trial_balance_full,
@@ -326,11 +296,10 @@ export default async function handler(
 
       bank_accounts,
       vat_control,
-      paye_control: [], // not implemented yet
+      paye_control: [],
       corporation_tax,
       fixed_assets,
       suspense_and_uncategorised,
-
       cash_flow: cash_flow_lines_full,
 
       coa_summary: {
@@ -352,43 +321,29 @@ export default async function handler(
         { label: "Run VAT Return", link: "/vat" },
       ],
 
-      // -----------------------------
-      // NEW COCKPIT STRUCTURE
-      // -----------------------------
+      // ⭐ FULL BUSINESS — BUILDER ENGINE
       full_business: {
         financial_health: {
-          total_assets: Number(bs.total_assets || 0),
-          total_liabilities: Number(bs.total_liabilities || 0),
-          net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
-          equity: Number(bs.total_equity || 0),
+          total_assets: bs.total_assets,
+          total_liabilities: bs.total_liabilities,
+          net_assets: bs.total_assets - bs.total_liabilities,
+          equity: bs.total_equity,
         },
         balance_sheet: {
           summary: {
-            total_assets: Number(bs.total_assets || 0),
-            total_liabilities: Number(bs.total_liabilities || 0),
-            net_assets: Number((bs.total_assets || 0) - (bs.total_liabilities || 0)),
-            equity: Number(bs.total_equity || 0),
+            total_assets: bs.total_assets,
+            total_liabilities: bs.total_liabilities,
+            net_assets: bs.total_assets - bs.total_liabilities,
+            equity: bs.total_equity,
           },
           lines: balance_sheet_full,
         },
         trial_balance: {
-          summary: {
-            assets: Number(tb.assets || 0),
-            liabilities: Number(tb.liabilities || 0),
-            equity: Number(tb.equity || 0),
-            income: Number(tb.income || 0),
-            expenses: Number(tb.expenses || 0),
-          },
+          summary: tb,
           lines: trial_balance_full,
         },
         profit_and_loss: {
-          summary: {
-            revenue: Number(pl.revenue || 0),
-            cost_of_sales: Number(pl.cost_of_sales || 0),
-            gross_profit: Number(pl.gross_profit || 0),
-            operating_expenses: Number(pl.operating_expenses || 0),
-            net_profit: Number(pl.net_profit || 0),
-          },
+          summary: pl,
           lines: profit_and_loss_full,
         },
         fixed_assets: {
@@ -403,45 +358,31 @@ export default async function handler(
         director_loan: director_loan_ledger,
       },
 
+      // ⭐ YTD — JOURNAL ENGINE
       ytd: {
-        // YTD now uses the YTD engine calls
         financial_health: {
-          revenue_mtd: Number(ytdPl.revenue || 0),
-          revenue_ytd: Number(ytdPl.revenue || 0),
-          expenses_mtd: Number(ytdPl.operating_expenses || 0),
-          expenses_ytd: Number(ytdPl.operating_expenses || 0),
-          net_profit_mtd: Number(ytdPl.net_profit || 0),
-          net_profit_ytd: Number(ytdPl.net_profit || 0),
+          revenue_mtd: ytdPl.revenue,
+          revenue_ytd: ytdPl.revenue,
+          expenses_mtd: ytdPl.operating_expenses,
+          expenses_ytd: ytdPl.operating_expenses,
+          net_profit_mtd: ytdPl.net_profit,
+          net_profit_ytd: ytdPl.net_profit,
         },
         balance_sheet: {
           summary: {
-            total_assets: Number(ytdBs.total_assets || 0),
-            total_liabilities: Number(ytdBs.total_liabilities || 0),
-            net_assets: Number(
-              (ytdBs.total_assets || 0) - (ytdBs.total_liabilities || 0)
-            ),
-            equity: Number(ytdBs.total_equity || 0),
+            total_assets: ytdBs.total_assets,
+            total_liabilities: ytdBs.total_liabilities,
+            net_assets: ytdBs.total_assets - ytdBs.total_liabilities,
+            equity: ytdBs.total_equity,
           },
           lines: ytd_balance_sheet_full,
         },
         trial_balance: {
-          summary: {
-            assets: Number(ytdTb.assets || 0),
-            liabilities: Number(ytdTb.liabilities || 0),
-            equity: Number(ytdTb.equity || 0),
-            income: Number(ytdTb.income || 0),
-            expenses: Number(ytdTb.expenses || 0),
-          },
+          summary: ytdTb,
           lines: ytd_trial_balance_full,
         },
         profit_and_loss: {
-          summary: {
-            revenue: Number(ytdPl.revenue || 0),
-            cost_of_sales: Number(ytdPl.cost_of_sales || 0),
-            gross_profit: Number(ytdPl.gross_profit || 0),
-            operating_expenses: Number(ytdPl.operating_expenses || 0),
-            net_profit: Number(ytdPl.net_profit || 0),
-          },
+          summary: ytdPl,
           lines: ytd_profit_and_loss_full,
         },
         cash_flow: cash_flow_lines_ytd,
