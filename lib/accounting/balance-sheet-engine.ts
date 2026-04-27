@@ -1,11 +1,8 @@
 // lib/accounting/balance-sheet-engine.ts
 import { supabaseAdmin } from "../supabase-admin";
-
-// ✔ Correct import — use the shared builder
 import { buildAccountsFormData } from "./builder-engine";
 
 console.log("🔥 USING BUILDER-ALIGNED ACCOUNTING ENGINE");
-
 
 export type BSLine = {
   account_code: string;
@@ -80,12 +77,11 @@ export async function getUnifiedBalanceSheet(
   clientId: string,
   year?: number
 ): Promise<BSStructure> {
-  // Default to current calendar year if none passed
   const y = year ?? new Date().getFullYear();
   const periodStart = `${y}-01-01`;
   const periodEnd = `${y}-12-31`;
 
-  // builder: returns { overview, overviewPrior, customNotes }
+  // Use the builder
   const { overview } = await buildAccountsFormData(
     null,
     clientId,
@@ -100,6 +96,7 @@ export async function getUnifiedBalanceSheet(
 
   const t = overview.totals;
 
+  // Builder totals (statutory)
   const nonCurrentAssets = safeNum(t.non_current_assets);
   const currentAssets = safeNum(t.current_assets);
   const currentLiabilities = safeNum(t.current_liabilities);
@@ -109,7 +106,7 @@ export async function getUnifiedBalanceSheet(
 
   const totalAssets = nonCurrentAssets + currentAssets;
 
-  const structure: BSStructure = {
+  return {
     assets: {
       non_current: [
         {
@@ -156,8 +153,6 @@ export async function getUnifiedBalanceSheet(
       total_liabilities_and_equity: totalLiabilities + totalEquity,
     },
   };
-
-  return structure;
 }
 
 function emptyStructure(): BSStructure {
@@ -176,7 +171,6 @@ function emptyStructure(): BSStructure {
 
 // ------------------------------------------------------------
 // BELOW: keep journal-driven logic for TB / P&L / DLA / CF
-// (these already match your transaction P&L / CT600 behaviour)
 // ------------------------------------------------------------
 
 // CORE: pull all journal lines for a client, optionally by year
