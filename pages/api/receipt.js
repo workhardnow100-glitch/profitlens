@@ -1,5 +1,5 @@
 /**
- * ============================================================
+ * =========================================================
  * File: pages/api/receipt.js
  * Purpose:
  *   Generate a PDF receipt for an HMRC MTD submission.
