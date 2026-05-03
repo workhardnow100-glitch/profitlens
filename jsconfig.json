@@ -1,10 +1,49 @@
 {
   "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "incremental": true,
+
+    // ✅ Modern Node settings (TS 5.5+ and TS 7 safe)
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    // ✅ Interop and JSON imports
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+
+    // ✅ Next.js JSX runtime
+    "jsx": "react-jsx",
+
+    // ✅ Path aliases
     "baseUrl": ".",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["./*"]
     },
-    "ignoreDeprecations": "5.0"
+
+    // ✅ Safer null handling
+    "strictNullChecks": true,
+    "exactOptionalPropertyTypes": true,
+
+    // ✅ Silence only TS 5 warnings until upgrade
+    "ignoreDeprecations": "5.0",
+    "ignoreDeprecations": "6.0",
+
+
+    // ✅ Explicit type packages
+    "types": ["node", "react", "next"]
   },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "types/**/*.d.ts",
+    "pages/**/*.js",
+    "components/**/*.jsx",
+    ".next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }
