@@ -1,4 +1,4 @@
-// pages/api/accountant/accept.js
+//// pages/api/accountant/accept.js
 import { supabaseAdmin } from "../../../lib/supabase-admin";
 
 export default async function handler(req, res) {
